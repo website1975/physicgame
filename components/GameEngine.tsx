@@ -53,7 +53,12 @@ const GameEngine: React.FC<GameEngineProps> = ({
         })
         .on('broadcast', { event: 'result' }, ({ payload }) => {
           if (payload.player !== playerName) {
+            // Cập nhật điểm của đối thủ (người vừa trả lời)
             setOpponentScore(s => s + (payload.points || 0));
+            // Nếu đối thủ trả lời sai/không hoàn thiện, mình được nhận điểm trọn vẹn
+            if (payload.opponentPoints) {
+              setScore(s => s + payload.opponentPoints);
+            }
             setFeedback({ ...payload.feedback, winner: 'OPPONENT' });
             setGameState('FEEDBACK');
             setFeedbackTimer(FEEDBACK_TIME);
@@ -143,15 +148,53 @@ const GameEngine: React.FC<GameEngineProps> = ({
   };
 
   const submitAnswer = () => {
-    const isCorrect = userAnswer.trim().toUpperCase() === (currentProblem?.correctAnswer || "").trim().toUpperCase();
-    const pts = isCorrect ? 100 : 0;
+    const type = currentProblem?.type;
+    const correct = (currentProblem?.correctAnswer || "").trim().toUpperCase();
+    const user = userAnswer.replace(/\s/g, '').toUpperCase(); // Loại bỏ khoảng trắng để so sánh chuẩn
+    
+    let maxPoints = 100;
+    let earnedPoints = 0;
+
+    if (type === QuestionType.TRUE_FALSE) {
+      maxPoints = 400;
+      // Đáp án chuẩn có 4 ký tự, VD: ĐSĐĐ
+      const correctArr = correct.split('');
+      const userArr = user.padEnd(4, ' ').split(''); // Đảm bảo đủ 4 ký tự
+      
+      let matches = 0;
+      for (let i = 0; i < 4; i++) {
+        if (userArr[i] === correctArr[i]) {
+          matches++;
+        }
+      }
+      earnedPoints = matches * 100;
+    } else {
+      maxPoints = 100;
+      earnedPoints = (user === correct) ? 100 : 0;
+    }
+
+    const isPerfect = earnedPoints === maxPoints;
+    const ptsForMe = earnedPoints;
+    // Nếu không hoàn thiện (sai ít nhất 1 ý) và là thi đối kháng, đối thủ nhận trọn vẹn điểm tối đa
+    const ptsForOpponent = (!isPerfect && !isArenaA) ? maxPoints : 0;
+
     const fb = { 
-      isCorrect, 
-      text: isCorrect ? "CHÍNH XÁC! Bạn ghi 100đ." : "CHƯA ĐÚNG! Đừng bỏ cuộc nhé.",
-      winner: 'YOU' 
+      isCorrect: isPerfect, 
+      text: isPerfect 
+        ? `CHÍNH XÁC HOÀN TOÀN! Bạn ghi ${ptsForMe}đ.` 
+        : (ptsForOpponent > 0 
+            ? `TRẢ LỜI SAI/CHƯA ĐỦ! Bạn nhận ${ptsForMe}đ, nhưng ${matchData.opponentName} được tặng trọn vẹn ${maxPoints}đ!` 
+            : `CHƯA CHÍNH XÁC! Bạn ghi được ${ptsForMe}đ.`),
+      winner: 'YOU',
+      earnedPoints: ptsForMe,
+      maxPoints: maxPoints
     };
     
-    setScore(s => s + pts);
+    setScore(s => s + ptsForMe);
+    if (ptsForOpponent > 0) {
+      setOpponentScore(s => s + ptsForOpponent);
+    }
+
     setFeedback(fb);
     setGameState('FEEDBACK');
     setFeedbackTimer(FEEDBACK_TIME);
@@ -160,7 +203,12 @@ const GameEngine: React.FC<GameEngineProps> = ({
       channelRef.current.send({ 
         type: 'broadcast', 
         event: 'result', 
-        payload: { player: playerName, points: pts, feedback: fb } 
+        payload: { 
+          player: playerName, 
+          points: ptsForMe, 
+          opponentPoints: ptsForOpponent, // Gửi để bên kia cộng điểm cho chính họ
+          feedback: fb 
+        } 
       });
     }
   };
