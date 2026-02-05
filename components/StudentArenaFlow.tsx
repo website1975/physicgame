@@ -75,16 +75,18 @@ const StudentArenaFlow: React.FC<StudentArenaFlowProps> = ({
     return { tn, ds, tl, total, rounds: rounds.length };
   };
 
-  // Logic Handshake: Đảm bảo cả 2 bên cùng sẵn sàng mới vào trận
+  // LOGIC ĐỒNG BỘ MULTIPLAYER SIÊU BỀN (PERSISTENT HANDSHAKE)
   useEffect(() => {
     if (gameState === 'WAITING_FOR_PLAYERS' && joinedRoom && joinedRoom.code !== 'ARENA_A') {
       const presenceKey = `${playerName}_${uniqueId}`;
-      const channel = supabase.channel(`arena_${joinedRoom.code}_${currentTeacher.id}`, {
+      const channelName = `arena_${joinedRoom.code}_${currentTeacher.id}`;
+      const channel = supabase.channel(channelName, {
         config: { presence: { key: presenceKey } }
       });
 
       matchStartedRef.current = false;
       let syncInterval: number | null = null;
+      let masterData: any = null;
 
       channel
         .on('presence', { event: 'sync' }, () => {
@@ -94,19 +96,18 @@ const StudentArenaFlow: React.FC<StudentArenaFlowProps> = ({
           if (players.length >= 2) {
             const isMaster = players[0] === presenceKey;
             const otherKey = players.find(p => p !== presenceKey);
-            const otherName = otherKey?.split('_')[0] || '';
-            
-            // Cập nhật tên đối thủ ngay khi thấy trong sảnh
+            const otherName = otherKey?.split('_')[0] || 'Đối thủ';
             setOpponentName(otherName);
 
-            // Bước 1: Nếu là Slave (người vào sau), gửi tín hiệu "EM ĐÃ SẴN SÀNG" cho Master
+            // Bước 1: Nếu là SLAVE (người vào sau), phát tín hiệu "GÕ CỬA" liên tục
             if (!isMaster && !matchStartedRef.current) {
               if (!syncInterval) {
                 syncInterval = window.setInterval(() => {
+                  if (matchStartedRef.current) return;
                   channel.send({
                     type: 'broadcast',
                     event: 'slave_ready',
-                    payload: { from: playerName }
+                    payload: { from: playerName, id: uniqueId }
                   });
                 }, 1000);
               }
@@ -116,48 +117,56 @@ const StudentArenaFlow: React.FC<StudentArenaFlowProps> = ({
             if (syncInterval) { clearInterval(syncInterval); syncInterval = null; }
           }
         })
-        // Bước 2: Master nhận lời chào từ Slave và phát lệnh BẮT ĐẦU TRẬN ĐẤU
+        // Bước 2: MASTER nhận tin Slave gõ cửa -> Chọn đề và phát lệnh "VÀO TRẬN" liên tục
         .on('broadcast', { event: 'slave_ready' }, ({ payload }) => {
           const state = channel.presenceState();
           const players = Object.keys(state).sort();
           const isMaster = players[0] === presenceKey;
 
           if (isMaster && !matchStartedRef.current && availableSets.length > 0) {
-            const randomSet = availableSets[Math.floor(Math.random() * availableSets.length)];
-            
-            // Master gửi lệnh chốt đề cho Slave
-            channel.send({ 
-              type: 'broadcast', 
-              event: 'match_start', 
-              payload: { setId: randomSet.id, masterName: playerName, joinedRoom } 
+            // Chỉ chọn đề 1 lần duy nhất
+            if (!masterData) {
+              const randomSet = availableSets[Math.floor(Math.random() * availableSets.length)];
+              masterData = {
+                setId: randomSet.id,
+                title: randomSet.title,
+                rounds: randomSet.rounds,
+                opponentName: payload.from,
+                joinedRoom
+              };
+            }
+
+            // Master phát lệnh Start liên tục cho đến khi chính mình chuyển trang
+            channel.send({
+              type: 'broadcast',
+              event: 'match_start_signal',
+              payload: { ...masterData, masterName: playerName }
             });
 
-            // Master tự vào trận luôn
-            matchStartedRef.current = true;
-            onStartMatch({ 
-              setId: randomSet.id, 
-              title: randomSet.title, 
-              rounds: randomSet.rounds, 
-              opponentName: payload.from, 
-              joinedRoom 
-            });
+            // Master tự đợi 1 chút để lệnh kịp bay đi rồi mới vào trận
+            setTimeout(() => {
+              if (matchStartedRef.current) return;
+              matchStartedRef.current = true;
+              if (syncInterval) clearInterval(syncInterval);
+              onStartMatch(masterData);
+            }, 500);
           }
         })
-        // Bước 3: Slave nhận lệnh từ Master và vào trận
-        .on('broadcast', { event: 'match_start' }, ({ payload }) => {
+        // Bước 3: SLAVE nhận lệnh từ Master
+        .on('broadcast', { event: 'match_start_signal' }, ({ payload }) => {
           if (matchStartedRef.current) return;
-          
+
           const targetSet = availableSets.find(s => s.id === payload.setId);
           if (targetSet) {
             matchStartedRef.current = true;
             if (syncInterval) clearInterval(syncInterval);
             
-            onStartMatch({ 
-              setId: targetSet.id, 
-              title: targetSet.title, 
-              rounds: targetSet.rounds, 
-              opponentName: payload.masterName, 
-              joinedRoom: payload.joinedRoom 
+            onStartMatch({
+              setId: targetSet.id,
+              title: targetSet.title,
+              rounds: targetSet.rounds,
+              opponentName: payload.masterName,
+              joinedRoom: payload.joinedRoom
             });
           }
         })
