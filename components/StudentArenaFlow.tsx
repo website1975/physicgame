@@ -75,7 +75,6 @@ const StudentArenaFlow: React.FC<StudentArenaFlowProps> = ({
     return { tn, ds, tl, total, rounds: rounds.length };
   };
 
-  // LOGIC ĐỒNG BỘ MULTIPLAYER SIÊU BỀN (PERSISTENT HANDSHAKE)
   useEffect(() => {
     if (gameState === 'WAITING_FOR_PLAYERS' && joinedRoom && joinedRoom.code !== 'ARENA_A') {
       const presenceKey = `${playerName}_${uniqueId}`;
@@ -99,7 +98,6 @@ const StudentArenaFlow: React.FC<StudentArenaFlowProps> = ({
             const otherName = otherKey?.split('_')[0] || 'Đối thủ';
             setOpponentName(otherName);
 
-            // Bước 1: Nếu là SLAVE (người vào sau), phát tín hiệu "GÕ CỬA" liên tục
             if (!isMaster && !matchStartedRef.current) {
               if (!syncInterval) {
                 syncInterval = window.setInterval(() => {
@@ -117,14 +115,12 @@ const StudentArenaFlow: React.FC<StudentArenaFlowProps> = ({
             if (syncInterval) { clearInterval(syncInterval); syncInterval = null; }
           }
         })
-        // Bước 2: MASTER nhận tin Slave gõ cửa -> Chọn đề và phát lệnh "VÀO TRẬN" liên tục
         .on('broadcast', { event: 'slave_ready' }, ({ payload }) => {
           const state = channel.presenceState();
           const players = Object.keys(state).sort();
           const isMaster = players[0] === presenceKey;
 
           if (isMaster && !matchStartedRef.current && availableSets.length > 0) {
-            // Chỉ chọn đề 1 lần duy nhất
             if (!masterData) {
               const randomSet = availableSets[Math.floor(Math.random() * availableSets.length)];
               masterData = {
@@ -136,14 +132,12 @@ const StudentArenaFlow: React.FC<StudentArenaFlowProps> = ({
               };
             }
 
-            // Master phát lệnh Start liên tục cho đến khi chính mình chuyển trang
             channel.send({
               type: 'broadcast',
               event: 'match_start_signal',
               payload: { ...masterData, masterName: playerName }
             });
 
-            // Master tự đợi 1 chút để lệnh kịp bay đi rồi mới vào trận
             setTimeout(() => {
               if (matchStartedRef.current) return;
               matchStartedRef.current = true;
@@ -152,7 +146,6 @@ const StudentArenaFlow: React.FC<StudentArenaFlowProps> = ({
             }, 500);
           }
         })
-        // Bước 3: SLAVE nhận lệnh từ Master
         .on('broadcast', { event: 'match_start_signal' }, ({ payload }) => {
           if (matchStartedRef.current) return;
 
@@ -257,30 +250,55 @@ const StudentArenaFlow: React.FC<StudentArenaFlowProps> = ({
 
   if (gameState === 'WAITING_FOR_PLAYERS') {
     return (
-      <div className="min-h-screen flex items-center justify-center p-6 text-center">
-        <div className="bg-white rounded-[4rem] p-12 shadow-2xl max-w-5xl w-full border-b-[12px] border-purple-600 animate-in zoom-in duration-500">
-          <h2 className="text-4xl font-black text-slate-800 uppercase italic mb-10 leading-none">QUÉT TÌM CHIẾN BINH...</h2>
-          <div className="py-16 bg-slate-950 rounded-[3rem] text-white flex flex-col items-center gap-12 relative overflow-hidden">
-             <div className="flex items-center gap-12 relative z-10">
-                <div className="w-32 h-32 bg-blue-600 rounded-full flex items-center justify-center text-5xl shadow-[0_0_40px_#2563eb] border-4 border-white">👤</div>
-                <div className="text-5xl font-black italic text-slate-700 animate-pulse">VS</div>
-                <div className={`w-32 h-32 rounded-full flex items-center justify-center text-5xl border-4 transition-all duration-500 ${opponentName ? 'bg-red-600 border-white shadow-[0_0_50px_rgba(239,68,68,0.8)] scale-110' : 'bg-slate-800 border-slate-600 border-dashed'}`}>
-                  {opponentName ? '👤' : '?'}
+      <div className="min-h-screen flex items-center justify-center p-6">
+        <div className="bg-white rounded-[4rem] p-8 md:p-12 shadow-2xl max-w-6xl w-full border-b-[12px] border-purple-600 animate-in zoom-in duration-500 flex flex-col lg:flex-row gap-10">
+          
+          <div className="flex-1">
+             <h2 className="text-3xl font-black text-slate-800 uppercase italic mb-8">SẢNH CHỜ KẾT NỐI</h2>
+             <div className="py-12 bg-slate-950 rounded-[3rem] text-white flex flex-col items-center gap-10 relative overflow-hidden">
+                <div className="flex items-center gap-8 relative z-10">
+                   <div className="w-24 h-24 bg-blue-600 rounded-full flex items-center justify-center text-4xl shadow-[0_0_40px_#2563eb] border-4 border-white">👤</div>
+                   <div className="text-4xl font-black italic text-slate-700 animate-pulse">VS</div>
+                   <div className={`w-24 h-24 rounded-full flex items-center justify-center text-4xl border-4 transition-all duration-500 ${opponentName ? 'bg-red-600 border-white shadow-[0_0_50px_rgba(239,68,68,0.8)] scale-110' : 'bg-slate-800 border-slate-600 border-dashed'}`}>
+                     {opponentName ? '👤' : '?'}
+                   </div>
+                </div>
+                <div className="flex flex-col items-center gap-3 relative z-10">
+                   <div className="flex items-center gap-3">
+                     {!opponentName && <div className="w-6 h-6 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>}
+                     <span className={`font-black italic uppercase text-xl tracking-tighter transition-all ${opponentName ? 'text-red-400' : 'text-white animate-pulse'}`}>
+                       {opponentName ? `ĐỐI THỦ: ${opponentName.toUpperCase()}` : 'ĐANG QUÉT CHIẾN BINH...'}
+                     </span>
+                   </div>
                 </div>
              </div>
-             <div className="flex flex-col items-center gap-4 relative z-10">
-                <div className="flex items-center gap-4">
-                  {!opponentName && <div className="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>}
-                  <span className={`font-black italic uppercase text-2xl tracking-tighter transition-all ${opponentName ? 'text-red-400' : 'text-white animate-pulse'}`}>
-                    {opponentName ? `ĐÃ KẾT NỐI VỚI ${opponentName.toUpperCase()}!` : 'ĐANG QUÉT ĐỐI THỦ...'}
-                  </span>
-                </div>
-                <p className="text-slate-500 font-bold uppercase text-[10px] tracking-widest italic">
-                  {opponentName ? 'Hai máy đang đồng bộ dữ liệu trận đấu...' : 'Chờ chiến binh khác vào sảnh chờ này'}
-                </p>
-             </div>
+             <button onClick={() => setGameState('SET_SELECTION')} className="mt-8 px-10 py-4 bg-slate-100 text-slate-400 rounded-2xl font-black uppercase text-xs italic hover:bg-red-500 hover:text-white transition-all">Hủy kết nối</button>
           </div>
-          <button onClick={() => setGameState('SET_SELECTION')} className="mt-8 px-10 py-4 bg-slate-100 text-slate-400 rounded-2xl font-black uppercase text-xs italic hover:bg-red-500 hover:text-white transition-all">Hủy tìm kiếm</button>
+
+          <div className="flex-1 bg-slate-50 rounded-[3rem] p-8 text-left border-4 border-white shadow-inner">
+             <h3 className="text-2xl font-black text-slate-800 uppercase italic mb-6 flex items-center gap-3">
+               <span className="w-10 h-10 bg-blue-600 text-white rounded-xl flex items-center justify-center text-sm">📜</span>
+               LUẬT CHƠI ĐẤU TRƯỜNG
+             </h3>
+             <ul className="space-y-4">
+               {[
+                 { t: "Bấm chuông", c: "Ai bấm chuông trước sẽ giành quyền trả lời câu hỏi hiện tại." },
+                 { t: "Thời gian", c: "Bạn có 40 giây để suy nghĩ. Trả lời sai nhường lượt cho đối thủ." },
+                 { t: "Điểm số", c: "Mỗi câu đúng nhận +100đ. Sai không bị trừ điểm nhưng mất lượt." },
+                 { t: "Giải thích", c: "Sau mỗi câu sẽ có 15 giây để xem lời giải chi tiết từ hệ thống." },
+                 { t: "Arena Lab", c: "Với các câu tự luận, hãy sử dụng phím mũi tên hoặc chuột để di chuyển và bắn đáp án." }
+               ].map((item, idx) => (
+                 <li key={idx} className="flex gap-4">
+                    <span className="w-6 h-6 bg-slate-900 text-white rounded-full flex items-center justify-center text-[10px] font-black shrink-0">{idx+1}</span>
+                    <div>
+                       <span className="block font-black text-slate-800 uppercase italic text-[11px] mb-1">{item.t}</span>
+                       <p className="text-xs font-bold text-slate-500 italic">{item.c}</p>
+                    </div>
+                 </li>
+               ))}
+             </ul>
+          </div>
+
         </div>
       </div>
     );
