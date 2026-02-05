@@ -28,6 +28,7 @@ const GameEngine: React.FC<GameEngineProps> = ({
   const [score, setScore] = useState(0);
   const [opponentScore, setOpponentScore] = useState(0);
   const [timeLeft, setTimeLeft] = useState(DEFAULT_TIME);
+  const [feedbackTimer, setFeedbackTimer] = useState(FEEDBACK_TIME);
   const [userAnswer, setUserAnswer] = useState('');
   const [feedback, setFeedback] = useState<any>(null);
   const [buzzerWinner, setBuzzerWinner] = useState<'YOU' | 'OPPONENT' | null>(null);
@@ -39,26 +40,23 @@ const GameEngine: React.FC<GameEngineProps> = ({
   const rounds = matchData.rounds;
   const currentProblem = rounds[currentRoundIdx]?.problems[currentProblemIdx];
 
-  // Khởi tạo kênh truyền tin đồng bộ
   useEffect(() => {
     if (!isArenaA && matchData.joinedRoom) {
-      // Sử dụng chung 1 format kênh cho cả sảnh và trận để tránh lạc tin
       const channel = supabase.channel(`match_${matchData.joinedRoom.code}_${currentTeacher.id}`);
       
       channel
         .on('broadcast', { event: 'buzzer' }, ({ payload }) => {
-          // Nếu người thắng chuông không phải mình
           if (payload.player !== playerName && !buzzerWinner) {
             setBuzzerWinner('OPPONENT');
             setGameState('ANSWERING');
           }
         })
         .on('broadcast', { event: 'result' }, ({ payload }) => {
-          // Nhận kết quả từ đối thủ
           if (payload.player !== playerName) {
             setOpponentScore(s => s + (payload.points || 0));
             setFeedback({ ...payload.feedback, winner: 'OPPONENT' });
             setGameState('FEEDBACK');
+            setFeedbackTimer(FEEDBACK_TIME);
           }
         })
         .subscribe();
@@ -108,8 +106,14 @@ const GameEngine: React.FC<GameEngineProps> = ({
       return () => clearTimeout(timer);
     }
     if (gameState === 'FEEDBACK') {
-      const timer = setTimeout(handleNext, FEEDBACK_TIME * 1000);
-      return () => clearTimeout(timer);
+      const countdownInterval = setInterval(() => {
+        setFeedbackTimer(p => Math.max(0, p - 1));
+      }, 1000);
+      const nextTimeout = setTimeout(handleNext, FEEDBACK_TIME * 1000);
+      return () => {
+        clearInterval(countdownInterval);
+        clearTimeout(nextTimeout);
+      };
     }
   }, [gameState]);
 
@@ -143,13 +147,14 @@ const GameEngine: React.FC<GameEngineProps> = ({
     const pts = isCorrect ? 100 : 0;
     const fb = { 
       isCorrect, 
-      text: isCorrect ? "CHÍNH XÁC! Bạn ghi 100đ." : "SAI RỒI! Hãy xem lời giải bên dưới.",
+      text: isCorrect ? "CHÍNH XÁC! Bạn ghi 100đ." : "CHƯA ĐÚNG! Đừng bỏ cuộc nhé.",
       winner: 'YOU' 
     };
     
     setScore(s => s + pts);
     setFeedback(fb);
     setGameState('FEEDBACK');
+    setFeedbackTimer(FEEDBACK_TIME);
     
     if (channelRef.current) {
       channelRef.current.send({ 
@@ -188,7 +193,7 @@ const GameEngine: React.FC<GameEngineProps> = ({
                <div className="flex flex-col"><span className="text-blue-500 font-black text-xs uppercase">BẠN</span><div className="text-6xl font-black text-slate-900">{score}</div></div>
                {matchData.opponentName && <div className="flex flex-col"><span className="text-red-500 font-black text-xs uppercase">{matchData.opponentName}</span><div className="text-6xl font-black text-slate-900">{opponentScore}</div></div>}
             </div>
-            <button onClick={onExit} className="w-full py-6 bg-slate-900 text-white font-black rounded-[2rem] uppercase italic text-2xl shadow-xl hover:scale-105 transition-all">QUAY LẠI CHỌN ĐỀ</button>
+            <button onClick={onExit} className="w-full py-6 bg-slate-900 text-white font-black rounded-[2rem] uppercase italic text-2xl shadow-xl hover:scale-105 transition-all">THOÁT RA</button>
          </div>
       </div>
     );
@@ -199,7 +204,7 @@ const GameEngine: React.FC<GameEngineProps> = ({
       <ConfirmModal 
         isOpen={showExitConfirm}
         title="Dừng trận đấu?"
-        message="Bạn có chắc chắn muốn thoát? Điểm số sẽ không được lưu và bạn sẽ rời khỏi trận đấu."
+        message="Bạn muốn rời khỏi đấu trường ngay bây giờ?"
         onConfirm={onExit}
         onCancel={() => setShowExitConfirm(false)}
         isDestructive={true}
@@ -216,17 +221,41 @@ const GameEngine: React.FC<GameEngineProps> = ({
 
       <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-6 min-h-0">
         <div className="lg:col-span-7"><ProblemCard problem={currentProblem} /></div>
-        <div className="lg:col-span-5 bg-white rounded-[3rem] p-8 shadow-xl flex flex-col">
+        <div className="lg:col-span-5 bg-white rounded-[3rem] p-8 shadow-xl flex flex-col relative">
           {gameState === 'FEEDBACK' ? (
-            <div className="h-full flex flex-col">
-              <div className={`text-4xl font-black uppercase italic mb-6 text-center ${feedback?.isCorrect ? 'text-emerald-500' : 'text-blue-500'}`}>
-                {feedback?.winner === 'YOU' ? (feedback?.isCorrect ? 'CHÍNH XÁC!' : 'SAI RỒI!') : `${matchData.opponentName?.toUpperCase()} ĐÃ TRẢ LỜI`}
+            <div className="h-full flex flex-col animate-in fade-in zoom-in duration-300">
+              <div className="flex justify-between items-center mb-6">
+                 <div className={`text-4xl font-black uppercase italic ${feedback?.isCorrect ? 'text-emerald-500' : 'text-blue-500'}`}>
+                    {feedback?.winner === 'YOU' ? (feedback?.isCorrect ? 'CHÍNH XÁC!' : 'SAI RỒI!') : `${matchData.opponentName?.toUpperCase()} ĐÃ ĐÁP`}
+                 </div>
+                 <div className="flex items-center gap-2 bg-slate-900 text-white px-5 py-2 rounded-2xl font-black italic text-sm">
+                    KẾ TIẾP: <span className="text-yellow-400 w-6 text-center">{feedbackTimer}s</span>
+                 </div>
               </div>
+
               <div className="flex-1 overflow-y-auto no-scrollbar space-y-6">
-                 <div className="bg-slate-50 p-6 rounded-2xl border-2 border-slate-100 italic text-lg font-bold"><LatexRenderer content={feedback?.text || ""} /></div>
-                 <div className="bg-[#F1F8F6] p-6 rounded-2xl border-2 border-[#E1EFEC]">
-                    <h4 className="text-emerald-600 font-black uppercase text-xs mb-3">💡 Lời giải chi tiết</h4>
-                    <LatexRenderer content={currentProblem?.explanation || ""} className="text-sm text-slate-600 italic" />
+                 <div className="bg-slate-50 p-6 rounded-3xl border-2 border-slate-100 italic text-lg font-bold">
+                   <LatexRenderer content={feedback?.text || ""} />
+                 </div>
+                 <div className="bg-emerald-50/50 p-8 rounded-[2.5rem] border-2 border-emerald-100 relative overflow-hidden">
+                    <div className="absolute top-0 right-0 w-24 h-24 bg-emerald-500/10 rounded-bl-full flex items-center justify-center text-4xl">💡</div>
+                    <h4 className="text-emerald-600 font-black uppercase text-xs mb-4">Lời giải chi tiết</h4>
+                    <div className="text-sm md:text-base text-slate-600 font-medium leading-relaxed italic">
+                       <LatexRenderer content={currentProblem?.explanation || "Chưa có lời giải cụ thể."} />
+                    </div>
+                 </div>
+              </div>
+
+              <div className="mt-8">
+                 <div className="flex justify-between text-[10px] font-black text-slate-300 uppercase italic mb-2 tracking-widest">
+                    <span>Chuẩn bị câu hỏi kế tiếp...</span>
+                    <span>{Math.round((feedbackTimer / FEEDBACK_TIME) * 100)}%</span>
+                 </div>
+                 <div className="w-full bg-slate-100 h-4 rounded-full overflow-hidden border-2 border-slate-50">
+                    <div 
+                      className="h-full bg-gradient-to-r from-blue-500 to-indigo-600 transition-all duration-1000" 
+                      style={{ width: `${(feedbackTimer / FEEDBACK_TIME) * 100}%` }}
+                    />
                  </div>
               </div>
             </div>
@@ -234,7 +263,7 @@ const GameEngine: React.FC<GameEngineProps> = ({
             <div className="flex-1 flex items-center justify-center">
               <button 
                 onClick={handleBuzzer} 
-                className="w-64 h-64 bg-red-600 rounded-full border-[20px] border-red-800 shadow-2xl text-white font-black text-4xl italic hover:scale-110 active:scale-95 transition-all"
+                className="w-64 h-64 bg-red-600 rounded-full border-[20px] border-red-800 shadow-2xl text-white font-black text-4xl italic hover:scale-110 active:scale-95 transition-all animate-bounce"
               >
                 BẤM CHUÔNG!
               </button>
@@ -242,7 +271,7 @@ const GameEngine: React.FC<GameEngineProps> = ({
           ) : buzzerWinner === 'YOU' ? (
             <div className="flex-1 flex flex-col">
               <AnswerInput problem={currentProblem} value={userAnswer} onChange={setUserAnswer} onSubmit={submitAnswer} disabled={false} />
-              <button onClick={submitAnswer} className="w-full py-6 bg-slate-900 text-white rounded-[2rem] font-black italic text-xl mt-4">NỘP ĐÁP ÁN</button>
+              <button onClick={submitAnswer} className="w-full py-6 bg-slate-900 text-white rounded-[2rem] font-black italic text-xl mt-4 border-b-8 border-slate-800 active:translate-y-1 transition-all">NỘP ĐÁP ÁN ✅</button>
             </div>
           ) : (
             <div className="flex-1 flex flex-col items-center justify-center text-center animate-pulse">
