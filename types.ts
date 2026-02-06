@@ -1,5 +1,4 @@
 
-
 export enum Difficulty {
   EASY = 'Dễ',
   MEDIUM = 'Trung bình',
@@ -12,8 +11,6 @@ export enum QuestionType {
   SHORT_ANSWER = 'TL'
 }
 
-// Added SCRAMBLED to support word scrambling challenges
-// Updated FOGGY value to match the string used in AI service prompts
 export enum DisplayChallenge {
   NORMAL = 'Mặc định',
   MEMORY = 'Ghi nhớ nhanh',
@@ -29,7 +26,7 @@ export enum InteractiveMechanic {
   HIDDEN_TILES = 'Lật ô bí mật'
 }
 
-export type UserRole = 'TEACHER' | 'STUDENT';
+export type UserRole = 'TEACHER' | 'STUDENT' | 'ADMIN';
 
 export interface Teacher {
   id: string;
@@ -37,6 +34,7 @@ export interface Teacher {
   tengv: string;
   monday: string;
   pass: string;
+  role: 'ADMIN' | 'TEACHER'; // Trường mới để phân quyền
   email?: string;
 }
 
@@ -80,6 +78,6 @@ export interface GameSettings {
   maxPlayers: number;
 }
 
-export type AdminTab = 'EDITOR' | 'CONTROL' | 'CLOUD' | 'LAB';
+export type AdminTab = 'EDITOR' | 'CONTROL' | 'CLOUD' | 'LAB' | 'MANAGEMENT'; // Thêm MANAGEMENT
 
 export type GameState = 'LOBBY' | 'ROOM_SELECTION' | 'SET_SELECTION' | 'WAITING_ROOM' | 'ADMIN' | 'ROUND_INTRO' | 'STARTING_ROUND' | 'WAITING_FOR_BUZZER' | 'ANSWERING' | 'FEEDBACK' | 'LECTURING' | 'GAME_OVER' | 'ENTER_CODE' | 'STUDENT_SETUP' | 'TEACHER_LOGIN' | 'WAITING_FOR_PLAYERS' | 'KEYWORD_SELECTION';
