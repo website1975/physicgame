@@ -17,11 +17,11 @@ interface StudentArenaFlowProps {
 }
 
 const ARENA_ROOMS = [
-  { id: '1', name: 'Phòng đơn', code: 'ARENA_A', emoji: '🛡️', color: 'bg-blue-600' },
-  { id: '2', name: 'Phòng đôi', code: 'ARENA_B', emoji: '⚔️', color: 'bg-purple-600' },
-  { id: '3', name: 'Phòng 3', code: 'ARENA_C', emoji: '🏹', color: 'bg-emerald-600' },
-  { id: '4', name: 'Phòng 4', code: 'ARENA_D', emoji: '🔱', color: 'bg-amber-500' },
-  { id: '5', name: 'GV tổ chức', code: 'TEACHER_ROOM', emoji: '👨‍🏫', color: 'bg-slate-800' },
+  { id: '1', name: 'Phòng đơn', code: 'ARENA_A', emoji: '🛡️', color: 'bg-blue-600', capacity: 1 },
+  { id: '2', name: 'Phòng đôi', code: 'ARENA_B', emoji: '⚔️', color: 'bg-purple-600', capacity: 2 },
+  { id: '3', name: 'Phòng 3', code: 'ARENA_C', emoji: '🏹', color: 'bg-emerald-600', capacity: 3 },
+  { id: '4', name: 'Phòng 4', code: 'ARENA_D', emoji: '🔱', color: 'bg-amber-500', capacity: 4 },
+  { id: '5', name: 'GV tổ chức', code: 'TEACHER_ROOM', emoji: '👨‍🏫', color: 'bg-slate-800', capacity: 2 },
 ];
 
 const StudentArenaFlow: React.FC<StudentArenaFlowProps> = ({ 
@@ -30,7 +30,7 @@ const StudentArenaFlow: React.FC<StudentArenaFlowProps> = ({
 }) => {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
-  const [opponentName, setOpponentName] = useState('');
+  const [presentPlayers, setPresentPlayers] = useState<string[]>([]);
   const [uniqueId] = useState(() => Math.random().toString(36).substring(7));
   const channelRef = useRef<any>(null);
   const matchStartedRef = useRef(false);
@@ -86,18 +86,19 @@ const StudentArenaFlow: React.FC<StudentArenaFlowProps> = ({
       matchStartedRef.current = false;
       let syncInterval: number | null = null;
       let masterData: any = null;
+      const requiredCapacity = joinedRoom.capacity || 2;
 
       channel
         .on('presence', { event: 'sync' }, () => {
           const state = channel.presenceState();
-          const players = Object.keys(state).sort();
+          const playersKeys = Object.keys(state).sort();
+          const playerNames = playersKeys.map(k => k.split('_')[0]);
+          setPresentPlayers(playerNames);
           
-          if (players.length >= 2) {
-            const isMaster = players[0] === presenceKey;
-            const otherKey = players.find(p => p !== presenceKey);
-            const otherName = otherKey?.split('_')[0] || 'Đối thủ';
-            setOpponentName(otherName);
-
+          if (playersKeys.length >= requiredCapacity) {
+            const isMaster = playersKeys[0] === presenceKey;
+            
+            // Chỉ bắt đầu nếu mình không phải là Master (nhận tín hiệu) hoặc mình là Master (phát tín hiệu)
             if (!isMaster && !matchStartedRef.current) {
               if (!syncInterval) {
                 syncInterval = window.setInterval(() => {
@@ -111,23 +112,23 @@ const StudentArenaFlow: React.FC<StudentArenaFlowProps> = ({
               }
             }
           } else {
-            setOpponentName('');
             if (syncInterval) { clearInterval(syncInterval); syncInterval = null; }
           }
         })
         .on('broadcast', { event: 'slave_ready' }, ({ payload }) => {
           const state = channel.presenceState();
-          const players = Object.keys(state).sort();
-          const isMaster = players[0] === presenceKey;
+          const playersKeys = Object.keys(state).sort();
+          const isMaster = playersKeys[0] === presenceKey;
 
-          if (isMaster && !matchStartedRef.current && availableSets.length > 0) {
+          // Master chỉ phát lệnh khi đủ người
+          if (isMaster && !matchStartedRef.current && playersKeys.length >= requiredCapacity && availableSets.length > 0) {
             if (!masterData) {
               const randomSet = availableSets[Math.floor(Math.random() * availableSets.length)];
               masterData = {
                 setId: randomSet.id,
                 title: randomSet.title,
                 rounds: randomSet.rounds,
-                opponentName: payload.from,
+                opponentName: playersKeys.filter(k => k !== presenceKey).map(k => k.split('_')[0]).join(', '),
                 joinedRoom
               };
             }
@@ -158,7 +159,7 @@ const StudentArenaFlow: React.FC<StudentArenaFlowProps> = ({
               setId: targetSet.id,
               title: targetSet.title,
               rounds: targetSet.rounds,
-              opponentName: payload.masterName,
+              opponentName: payload.masterName, // Trong 2+ người, opponentName sẽ là tên người tạo phòng/Master
               joinedRoom: payload.joinedRoom
             });
           }
@@ -180,7 +181,6 @@ const StudentArenaFlow: React.FC<StudentArenaFlowProps> = ({
   if (gameState === 'ROOM_SELECTION') {
     return (
       <div className="min-h-screen p-8 flex flex-col items-center justify-center relative">
-        {/* Nút thoát dành cho HS */}
         <div className="absolute top-8 right-8 z-50">
            <button 
             onClick={() => setGameState('LOBBY')}
@@ -282,27 +282,45 @@ const StudentArenaFlow: React.FC<StudentArenaFlowProps> = ({
   }
 
   if (gameState === 'WAITING_FOR_PLAYERS') {
+    const required = joinedRoom.capacity || 2;
+    const slots = Array.from({ length: required });
+
     return (
       <div className="min-h-screen flex items-center justify-center p-6">
         <div className="bg-white rounded-[4rem] p-8 md:p-12 shadow-2xl max-w-6xl w-full border-b-[12px] border-purple-600 animate-in zoom-in duration-500 flex flex-col lg:flex-row gap-10">
           
           <div className="flex-1">
-             <h2 className="text-3xl font-black text-slate-800 uppercase italic mb-8">SẢNH CHỜ KẾT NỐI</h2>
+             <h2 className="text-3xl font-black text-slate-800 uppercase italic mb-4">SẢNH CHỜ KẾT NỐI</h2>
+             <div className="text-[10px] font-black text-blue-500 uppercase tracking-widest mb-8">PHÒNG {joinedRoom.name} - YÊU CẦU: {required} CHIẾN BINH</div>
+             
              <div className="py-12 bg-slate-950 rounded-[3rem] text-white flex flex-col items-center gap-10 relative overflow-hidden">
-                <div className="flex items-center gap-8 relative z-10">
-                   <div className="w-24 h-24 bg-blue-600 rounded-full flex items-center justify-center text-4xl shadow-[0_0_40px_#2563eb] border-4 border-white">👤</div>
-                   <div className="text-4xl font-black italic text-slate-700 animate-pulse">VS</div>
-                   <div className={`w-24 h-24 rounded-full flex items-center justify-center text-4xl border-4 transition-all duration-500 ${opponentName ? 'bg-red-600 border-white shadow-[0_0_50px_rgba(239,68,68,0.8)] scale-110' : 'bg-slate-800 border-slate-600 border-dashed'}`}>
-                     {opponentName ? '👤' : '?'}
-                   </div>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-6 relative z-10 w-full px-10">
+                   {slots.map((_, idx) => {
+                      const pName = presentPlayers[idx];
+                      const isMe = pName === playerName;
+                      return (
+                        <div key={idx} className="flex flex-col items-center gap-3">
+                           <div className={`w-20 h-20 rounded-full flex items-center justify-center text-3xl border-4 transition-all duration-500 
+                             ${pName ? (isMe ? 'bg-blue-600 border-white shadow-[0_0_30px_#2563eb]' : 'bg-red-600 border-white shadow-[0_0_30px_#dc2626]') : 'bg-slate-800 border-slate-700 border-dashed opacity-40'}`}>
+                             {pName ? '👤' : '?'}
+                           </div>
+                           <div className={`text-[10px] font-black uppercase italic truncate max-w-full ${pName ? 'text-white' : 'text-slate-600'}`}>
+                             {pName || 'ĐANG ĐỢI...'}
+                           </div>
+                           {isMe && <div className="text-[8px] bg-blue-500 px-2 py-0.5 rounded font-black">BẠN</div>}
+                        </div>
+                      );
+                   })}
                 </div>
+                
                 <div className="flex flex-col items-center gap-3 relative z-10">
                    <div className="flex items-center gap-3">
-                     {!opponentName && <div className="w-6 h-6 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>}
-                     <span className={`font-black italic uppercase text-xl tracking-tighter transition-all ${opponentName ? 'text-red-400' : 'text-white animate-pulse'}`}>
-                       {opponentName ? `ĐỐI THỦ: ${opponentName.toUpperCase()}` : 'ĐANG QUÉT CHIẾN BINH...'}
+                     {presentPlayers.length < required && <div className="w-6 h-6 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>}
+                     <span className={`font-black italic uppercase text-xl tracking-tighter transition-all ${presentPlayers.length >= required ? 'text-emerald-400' : 'text-white animate-pulse'}`}>
+                       {presentPlayers.length >= required ? 'ĐỦ QUÂN SỐ - BẮT ĐẦU!' : `ĐANG ĐỢI THÊM ${required - presentPlayers.length} NGƯỜI...`}
                      </span>
                    </div>
+                   <div className="text-[9px] font-black text-slate-500 uppercase tracking-widest">TIẾN ĐỘ: {presentPlayers.length}/{required}</div>
                 </div>
              </div>
              <button onClick={() => setGameState('SET_SELECTION')} className="mt-8 px-10 py-4 bg-slate-100 text-slate-400 rounded-2xl font-black uppercase text-xs italic hover:bg-red-500 hover:text-white transition-all">Hủy kết nối</button>
