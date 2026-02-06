@@ -7,6 +7,17 @@ import TeacherPortal from './components/TeacherPortal';
 import StudentArenaFlow from './components/StudentArenaFlow';
 import GameEngine from './components/GameEngine';
 
+// Logic lấy API Key an toàn như thầy/cô đề xuất
+const getSafeEnv = (key: string): string => {
+  try {
+    const fromProcess = (process.env as any)[key] || (process.env as any)[`VITE_${key}`];
+    if (fromProcess) return fromProcess;
+    const fromMeta = (import.meta as any).env?.[key] || (import.meta as any).env?.[`VITE_${key}`];
+    if (fromMeta) return fromMeta;
+  } catch (e) {}
+  return "";
+};
+
 const App: React.FC = () => {
   const [gameState, setGameState] = useState<GameState>('LOBBY');
   const [playerName, setPlayerName] = useState('');
@@ -19,38 +30,24 @@ const App: React.FC = () => {
   const [apiStatus, setApiStatus] = useState<'checking' | 'online' | 'offline'>('checking');
   const [lastApiError, setLastApiError] = useState('');
   
-  // Quản lý Tab lọc cho Kho đề
   const [activeCategory, setActiveCategory] = useState('Tất cả');
-
-  // Trạng thái cho Teacher Portal
   const [adminTab, setAdminTab] = useState<AdminTab>('EDITOR');
   const [examSets, setExamSets] = useState<any[]>([]);
   const [loadedSetTitle, setLoadedSetTitle] = useState<string | null>(null);
   const [loadedSetId, setLoadedSetId] = useState<string | null>(null);
   const [rounds, setRounds] = useState<Round[]>([{ number: 1, problems: [], description: '' }]);
   const [settings, setSettings] = useState<GameSettings>({ autoNext: true, autoNextDelay: 20, maxPlayers: 2 });
-
-  // Trạng thái cho Học sinh
   const [joinedRoom, setJoinedRoom] = useState<any>(null);
   const [availableSets, setAvailableSets] = useState<any[]>([]);
-
-  // Trạng thái trận đấu
   const [matchData, setMatchData] = useState<{ setId: string, title: string, rounds: Round[], opponentName?: string, joinedRoom?: any } | null>(null);
 
-  // Hàm lấy API Key an toàn
-  const getApiKey = () => {
-    // Ưu tiên API_KEY, nếu không có thử VITE_API_KEY (dành cho Vite/Vercel)
-    return process.env.API_KEY || (process.env as any).VITE_API_KEY || "";
-  };
-
-  // Kiểm tra kết nối AI
   const checkAI = async () => {
     setApiStatus('checking');
-    const key = getApiKey();
+    const key = getSafeEnv('API_KEY');
     
     if (!key) {
       setApiStatus('offline');
-      setLastApiError("Thiếu API_KEY trong cấu hình Vercel.");
+      setLastApiError("Không tìm thấy mã API_KEY. Hãy kiểm tra Vercel Env.");
       return;
     }
 
@@ -61,29 +58,26 @@ const App: React.FC = () => {
         contents: 'ping',
         config: { maxOutputTokens: 1 }
       });
-      
-      if (response.text) {
+      if (response) {
         setApiStatus('online');
         setLastApiError('');
       }
     } catch (e: any) {
-      console.error("AI Error:", e);
       setApiStatus('offline');
-      setLastApiError(e.message || "Lỗi API_KEY_INVALID hoặc lỗi kết nối.");
+      setLastApiError(e.message?.includes('API_KEY_INVALID') 
+        ? "Mã Key không hợp lệ hoặc sai định dạng." 
+        : e.message || "Lỗi kết nối AI.");
     }
   };
 
-  useEffect(() => {
-    checkAI();
-  }, []);
+  useEffect(() => { checkAI(); }, []);
 
   const handleOpenKeySelector = async () => {
     if ((window as any).aistudio?.openSelectKey) {
       await (window as any).aistudio.openSelectKey();
-      // Sau khi chọn xong, kiểm tra lại
-      setTimeout(checkAI, 1000);
+      setTimeout(checkAI, 500);
     } else {
-      alert("Hệ thống không hỗ trợ hộp thoại chọn Key trực tiếp. Vui lòng kiểm tra lại biến VITE_API_KEY trên Vercel.");
+      alert("Tính năng này chỉ hỗ trợ trên môi trường AI Studio.");
     }
   };
 
@@ -97,26 +91,22 @@ const App: React.FC = () => {
   };
 
   useEffect(() => {
-    if (gameState === 'ADMIN' && currentTeacher) {
-      refreshSets(currentTeacher.id);
-    }
+    if (gameState === 'ADMIN' && currentTeacher) refreshSets(currentTeacher.id);
   }, [gameState, currentTeacher?.id]);
 
-  const handleStartMatch = (data: { setId: string, title: string, rounds: Round[], opponentName?: string, joinedRoom?: any }) => {
+  const handleStartMatch = (data: any) => {
     setMatchData(data);
     setGameState('ROUND_INTRO');
   };
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-900">
-      {/* 1. LOBBY CHÍNH */}
       {gameState === 'LOBBY' && (
         <div className="min-h-screen flex items-center justify-center p-4">
           <div className="bg-white rounded-[4rem] p-12 shadow-2xl max-w-2xl w-full text-center border-b-[12px] border-blue-600 animate-in zoom-in duration-500">
             <h1 className="text-7xl font-black text-slate-800 mb-2 uppercase italic tracking-tighter">PhysiQuest</h1>
-            <p className="text-slate-400 font-bold uppercase text-[10px] mb-8 tracking-[0.3em]">HỆ THỐNG ĐẤU TRƯỜNG VẬT LÝ</p>
+            <p className="text-slate-400 font-bold uppercase text-[10px] mb-8 tracking-[0.3em]">Hệ Thống Đấu Trường Vật Lý</p>
             
-            {/* Đèn báo AI tại sảnh */}
             <div className="flex flex-col items-center gap-2 mb-8">
               <div className="flex items-center gap-2 bg-slate-50 py-2 px-4 rounded-full border border-slate-100">
                 <div className={`w-3 h-3 rounded-full ${apiStatus === 'online' ? 'bg-emerald-500 shadow-[0_0_12px_#10b981]' : apiStatus === 'offline' ? 'bg-red-500 shadow-[0_0_12px_#ef4444]' : 'bg-amber-400 animate-pulse'}`}></div>
@@ -125,46 +115,24 @@ const App: React.FC = () => {
                 </span>
               </div>
               {apiStatus === 'offline' && (
-                <button 
-                  onClick={handleOpenKeySelector}
-                  className="text-[10px] font-black text-blue-600 underline uppercase hover:text-blue-800 transition-colors"
-                >
-                  Cấu hình lại API Key 🔑
-                </button>
+                <button onClick={handleOpenKeySelector} className="text-[10px] font-black text-blue-600 underline uppercase italic">Cấu hình lại API Key 🔑</button>
               )}
-              {lastApiError && apiStatus === 'offline' && (
-                <p className="text-[8px] text-red-400 font-bold max-w-xs">{lastApiError}</p>
-              )}
+              {lastApiError && <p className="text-[8px] text-red-400 font-bold uppercase">{lastApiError}</p>}
             </div>
 
-            <input 
-              type="text" 
-              placeholder="Nhập tên thi đấu..." 
-              className="w-full p-6 bg-slate-50 border-4 border-slate-100 rounded-3xl font-black text-center text-2xl mb-8 outline-none focus:border-blue-500 transition-all" 
-              value={playerName} 
-              onChange={e => setPlayerName(e.target.value)} 
-            />
+            <input type="text" placeholder="Tên thi đấu..." className="w-full p-6 bg-slate-50 border-4 border-slate-100 rounded-3xl font-black text-center text-2xl mb-8 outline-none focus:border-blue-500 transition-all" value={playerName} onChange={e => setPlayerName(e.target.value)} />
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <button disabled={!playerName} onClick={() => setGameState('STUDENT_SETUP')} className="py-6 bg-blue-600 text-white font-black rounded-3xl uppercase italic shadow-xl text-xl hover:scale-105 active:scale-95 transition-all disabled:opacity-50">Học sinh 🎒</button>
-              <button disabled={!playerName} onClick={() => setGameState('TEACHER_LOGIN')} className="py-6 bg-purple-600 text-white font-black rounded-3xl uppercase italic shadow-xl text-xl hover:scale-105 active:scale-95 transition-all disabled:opacity-50">Giáo viên 👨‍🏫</button>
+              <button disabled={!playerName} onClick={() => setGameState('STUDENT_SETUP')} className="py-6 bg-blue-600 text-white font-black rounded-3xl uppercase italic shadow-xl text-xl hover:scale-105 active:scale-95 transition-all">Học sinh 🎒</button>
+              <button disabled={!playerName} onClick={() => setGameState('TEACHER_LOGIN')} className="py-6 bg-purple-600 text-white font-black rounded-3xl uppercase italic shadow-xl text-xl hover:scale-105 active:scale-95 transition-all">Giáo viên 👨‍🏫</button>
             </div>
           </div>
         </div>
       )}
 
-      {/* 2. ĐĂNG NHẬP / SETUP */}
       {(gameState === 'TEACHER_LOGIN' || gameState === 'STUDENT_SETUP') && (
         <div className="min-h-screen flex items-center justify-center p-4">
-          <div className="bg-white rounded-[4rem] p-12 shadow-2xl max-w-md w-full text-center animate-in fade-in slide-in-from-bottom-4">
-            <h2 className="text-3xl font-black text-slate-800 uppercase italic mb-4 tracking-tighter">
-              {gameState === 'TEACHER_LOGIN' ? 'GIÁO VIÊN ĐĂNG NHẬP' : 'KẾT NỐI HỆ THỐNG'}
-            </h2>
-            
-            <div className="flex items-center justify-center gap-2 mb-8">
-              <div className={`w-3 h-3 rounded-full ${apiStatus === 'online' ? 'bg-emerald-500 shadow-[0_0_10px_#10b981]' : apiStatus === 'offline' ? 'bg-red-500 shadow-[0_0_10px_#ef4444]' : 'bg-amber-400 animate-pulse'}`}></div>
-              <span className="text-[9px] font-black text-slate-400 uppercase italic">Hệ thống: {apiStatus === 'online' ? 'Trực tuyến' : 'Ngoại tuyến'}</span>
-            </div>
-
+          <div className="bg-white rounded-[4rem] p-12 shadow-2xl max-w-md w-full text-center animate-in slide-in-from-bottom-4">
+            <h2 className="text-3xl font-black text-slate-800 uppercase italic mb-4">{gameState === 'TEACHER_LOGIN' ? 'ĐĂNG NHẬP' : 'KẾT NỐI'}</h2>
             {errorMsg && <div className="mb-6 p-4 bg-red-50 text-red-500 rounded-2xl font-bold text-xs border-2 border-red-100">{errorMsg}</div>}
             <div className="space-y-4 mb-8">
                <input type="text" placeholder="Mã Giáo Viên" className="w-full p-5 bg-slate-50 border-4 border-slate-100 rounded-3xl font-black text-center text-xl uppercase outline-none focus:border-blue-500" value={teacherIdInput} onChange={e => setTeacherIdInput(e.target.value)} />
@@ -172,61 +140,47 @@ const App: React.FC = () => {
                  <input type="password" placeholder="Mật khẩu" className="w-full p-5 bg-slate-50 border-4 border-slate-100 rounded-3xl font-black text-center text-xl outline-none focus:border-blue-500" value={teacherPass} onChange={e => setTeacherPass(e.target.value)} />
                ) : (
                  <div className="pt-2">
-                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3 italic">Chọn khối lớp của bạn:</p>
+                    <p className="text-[10px] font-black text-slate-400 uppercase mb-3 italic">Chọn khối lớp của bạn:</p>
                     <div className="flex gap-2">
                       {['10', '11', '12'].map(g => (
-                        <button key={g} onClick={() => setStudentGrade(g as any)} className={`flex-1 py-4 rounded-2xl font-black italic transition-all border-4 ${studentGrade === g ? 'bg-blue-600 text-white border-blue-500 shadow-lg' : 'bg-slate-50 text-slate-300 border-slate-100'}`}>K{g}</button>
+                        <button 
+                          key={g} 
+                          onClick={() => setStudentGrade(g as any)} 
+                          className={`flex-1 py-4 rounded-2xl font-black italic transition-all border-4 
+                            ${studentGrade === g 
+                              ? 'bg-blue-600 text-white border-blue-400 shadow-[0_0_15px_rgba(37,99,235,0.6)] scale-105' 
+                              : 'bg-slate-50 text-slate-300 border-slate-100'}`}
+                        >K{g}</button>
                       ))}
                     </div>
                  </div>
                )}
             </div>
             <div className="grid grid-cols-2 gap-3">
-              <button onClick={() => { setGameState('LOBBY'); setErrorMsg(''); }} className="py-5 bg-slate-100 text-slate-400 rounded-3xl font-black uppercase italic">Hủy</button>
+              <button onClick={() => setGameState('LOBBY')} className="py-5 bg-slate-100 text-slate-400 rounded-3xl font-black uppercase italic">Hủy</button>
               <button onClick={gameState === 'TEACHER_LOGIN' ? async () => {
                 const { teacher, error } = await loginTeacher(teacherIdInput, teacherPass);
                 if (teacher) { setCurrentTeacher(teacher); setGameState('ADMIN'); }
-                else setErrorMsg(error || 'Lỗi đăng nhập');
+                else setErrorMsg(error || 'Lỗi');
               } : async () => {
-                if (!studentGrade) { setErrorMsg('Vui lòng chọn khối lớp!'); return; }
+                if (!studentGrade) { setErrorMsg('Chọn khối lớp!'); return; }
                 const teacher = await fetchTeacherByMaGV(teacherIdInput);
                 if (teacher) { setCurrentTeacher(teacher); setGameState('ROOM_SELECTION'); }
-                else setErrorMsg('Không tìm thấy giáo viên với mã này');
-              }} className="py-5 bg-blue-600 text-white font-black rounded-3xl uppercase italic shadow-lg">Xác nhận</button>
+                else setErrorMsg('Không tìm thấy GV');
+              }} className="py-5 bg-blue-600 text-white font-black rounded-3xl uppercase italic shadow-lg">Vào Arena</button>
             </div>
           </div>
         </div>
       )}
 
-      {/* 3. QUY TRÌNH HỌC SINH */}
-      {(gameState === 'ROOM_SELECTION' || gameState === 'SET_SELECTION' || gameState === 'WAITING_FOR_PLAYERS' || gameState === 'KEYWORD_SELECTION') && currentTeacher && (
-        <StudentArenaFlow 
-          gameState={gameState}
-          setGameState={setGameState}
-          playerName={playerName}
-          studentGrade={studentGrade!}
-          currentTeacher={currentTeacher}
-          onStartMatch={handleStartMatch}
-          joinedRoom={joinedRoom}
-          setJoinedRoom={setJoinedRoom}
-          availableSets={availableSets}
-          setAvailableSets={setAvailableSets}
-        />
-      )}
-
-      {/* 4. TRÌNH QUẢN LÝ GIÁO VIÊN */}
       {gameState === 'ADMIN' && currentTeacher && (
         <TeacherPortal 
           adminTab={adminTab} setAdminTab={setAdminTab} playerName={currentTeacher.tengv} teacherId={currentTeacher.id} 
           teacherMaGV={currentTeacher.magv} teacherSubject={currentTeacher.monday} onLogout={() => setGameState('LOBBY')}
           topicInput="" setTopicInput={() => {}} isGenerating={false} onGenerateSet={() => {}} 
           examSets={examSets} searchLibrary="" setSearchLibrary={() => {}} 
-          activeCategory={activeCategory}
-          setActiveCategory={setActiveCategory} 
-          categories={[]} 
-          onLoadSet={async (id, title) => {
-            const data = await fetchSetData(id); setRounds(data.rounds); setLoadedSetId(id); setLoadedSetTitle(title); return true;
-          }}
+          activeCategory={activeCategory} setActiveCategory={setActiveCategory} categories={[]} 
+          onLoadSet={async (id, title) => { const data = await fetchSetData(id); setRounds(data.rounds); setLoadedSetId(id); setLoadedSetTitle(title); return true; }}
           onDeleteSet={async (id) => { await deleteExamSet(id); refreshSets(currentTeacher.id); return true; }}
           onDistribute={async (setId, title, roomCode) => { await assignSetToRoom(currentTeacher.id, roomCode, setId); }}
           onStartGame={() => setGameState('ROOM_SELECTION')} rounds={rounds} setRounds={setRounds} settings={settings} setSettings={setSettings}
@@ -242,22 +196,23 @@ const App: React.FC = () => {
         />
       )}
 
-      {/* 5. ENGINE TRẬN ĐẤU */}
-      {matchData && ['ROUND_INTRO', 'STARTING_ROUND', 'WAITING_FOR_BUZZER', 'ANSWERING', 'FEEDBACK', 'GAME_OVER'].includes(gameState) && (
-        <GameEngine 
-          gameState={gameState}
-          setGameState={setGameState}
-          playerName={playerName}
-          currentTeacher={currentTeacher!}
-          matchData={matchData}
-          onExit={() => { 
-            setMatchData(null); 
-            setGameState(joinedRoom ? 'SET_SELECTION' : 'ROOM_SELECTION'); 
-          }}
+      {(['ROOM_SELECTION', 'SET_SELECTION', 'WAITING_FOR_PLAYERS', 'KEYWORD_SELECTION'].includes(gameState)) && currentTeacher && (
+        <StudentArenaFlow 
+          gameState={gameState} setGameState={setGameState} playerName={playerName} studentGrade={studentGrade!} currentTeacher={currentTeacher}
+          onStartMatch={handleStartMatch} joinedRoom={joinedRoom} setJoinedRoom={setJoinedRoom} availableSets={availableSets} setAvailableSets={setAvailableSets}
         />
+      )}
+
+      {matchData && ['ROUND_INTRO', 'STARTING_ROUND', 'WAITING_FOR_BUZZER', 'ANSWERING', 'FEEDBACK', 'GAME_OVER'].includes(gameState) && (
+        <GameEngine gameState={gameState} setGameState={setGameState} playerName={playerName} currentTeacher={currentTeacher!} matchData={matchData} onExit={onExit} />
       )}
     </div>
   );
+
+  function onExit() {
+    setMatchData(null);
+    setGameState(joinedRoom ? 'SET_SELECTION' : 'ROOM_SELECTION');
+  }
 };
 
 export default App;
