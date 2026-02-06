@@ -14,7 +14,21 @@ const Whiteboard: React.FC<WhiteboardProps> = ({ isTeacher, channel, roomCode })
   const [color, setColor] = useState('#ffffff');
   const [brushSize, setBrushSize] = useState(3);
 
-  // Hiệu ứng 1: Chỉ chạy khi mount hoặc resize cửa sổ (Tránh xóa canvas khi đổi màu)
+  const getCanvasCoords = (e: React.PointerEvent | PointerEvent) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return { x: 0, y: 0 };
+    const rect = canvas.getBoundingClientRect();
+    
+    // Tính toán tỷ lệ giữa kích thước hiển thị và kích thước nội tại của canvas
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    
+    return {
+      x: (e.clientX - rect.left) * scaleX,
+      y: (e.clientY - rect.top) * scaleY
+    };
+  };
+
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -23,26 +37,25 @@ const Whiteboard: React.FC<WhiteboardProps> = ({ isTeacher, channel, roomCode })
       const parent = canvas.parentElement;
       if (!parent) return;
       
-      // Lưu nội dung cũ trước khi resize nếu cần (tùy chọn)
-      // Trong trường hợp này, ta ưu tiên việc không resize liên tục
       const rect = parent.getBoundingClientRect();
-      if (canvas.width !== rect.width || canvas.height !== rect.height) {
-        canvas.width = rect.width;
-        canvas.height = rect.height;
-        
-        const ctx = canvas.getContext('2d');
-        if (ctx) {
-          ctx.lineCap = 'round';
-          ctx.lineJoin = 'round';
-          contextRef.current = ctx;
-        }
+      // Luôn đồng bộ kích thước nội tại với kích thước hiển thị CSS
+      canvas.width = rect.width;
+      canvas.height = rect.height;
+      
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        ctx.strokeStyle = color;
+        ctx.lineWidth = brushSize;
+        contextRef.current = ctx;
       }
     };
 
     resizeCanvas();
-    window.addEventListener('resize', resizeCanvas);
+    const observer = new ResizeObserver(resizeCanvas);
+    observer.observe(canvas.parentElement!);
 
-    // Lắng nghe lệnh vẽ từ GV (dành cho HS)
     if (!isTeacher && channel) {
       channel.on('broadcast', { event: 'draw_stroke' }, ({ payload }: any) => {
         drawRemote(payload);
@@ -51,10 +64,9 @@ const Whiteboard: React.FC<WhiteboardProps> = ({ isTeacher, channel, roomCode })
       });
     }
 
-    return () => window.removeEventListener('resize', resizeCanvas);
+    return () => observer.disconnect();
   }, [isTeacher, channel]);
 
-  // Cập nhật thuộc tính ngữ cảnh vẽ khi màu hoặc kích thước thay đổi mà KHÔNG resize canvas
   useEffect(() => {
     if (contextRef.current) {
       contextRef.current.strokeStyle = color;
@@ -66,7 +78,6 @@ const Whiteboard: React.FC<WhiteboardProps> = ({ isTeacher, channel, roomCode })
     const ctx = contextRef.current;
     if (!ctx || !canvasRef.current) return;
     
-    // Lưu trạng thái hiện tại
     const prevColor = ctx.strokeStyle;
     const prevWidth = ctx.lineWidth;
 
@@ -78,7 +89,6 @@ const Whiteboard: React.FC<WhiteboardProps> = ({ isTeacher, channel, roomCode })
     ctx.stroke();
     ctx.closePath();
 
-    // Khôi phục trạng thái cho GV vẽ tiếp
     ctx.strokeStyle = prevColor;
     ctx.lineWidth = prevWidth;
   };
@@ -99,23 +109,21 @@ const Whiteboard: React.FC<WhiteboardProps> = ({ isTeacher, channel, roomCode })
   const lastPos = useRef({ x: 0, y: 0 });
 
   const startDrawing = (e: React.PointerEvent) => {
-    if (!isTeacher || !canvasRef.current) return;
-    const rect = canvasRef.current.getBoundingClientRect();
-    lastPos.current = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+    if (!isTeacher) return;
+    const coords = getCanvasCoords(e);
+    lastPos.current = coords;
     setIsDrawing(true);
   };
 
   const draw = (e: React.PointerEvent) => {
     if (!isDrawing || !isTeacher || !contextRef.current || !canvasRef.current) return;
     
-    const rect = canvasRef.current.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-
+    const coords = getCanvasCoords(e);
     const ctx = contextRef.current;
+    
     ctx.beginPath();
     ctx.moveTo(lastPos.current.x, lastPos.current.y);
-    ctx.lineTo(x, y);
+    ctx.lineTo(coords.x, coords.y);
     ctx.stroke();
     ctx.closePath();
 
@@ -126,15 +134,15 @@ const Whiteboard: React.FC<WhiteboardProps> = ({ isTeacher, channel, roomCode })
         payload: {
           x0: lastPos.current.x / canvasRef.current.width,
           y0: lastPos.current.y / canvasRef.current.height,
-          x1: x / canvasRef.current.width,
-          y1: y / canvasRef.current.height,
+          x1: coords.x / canvasRef.current.width,
+          y1: coords.y / canvasRef.current.height,
           color,
           size: brushSize
         }
       });
     }
 
-    lastPos.current = { x, y };
+    lastPos.current = coords;
   };
 
   const stopDrawing = () => {
