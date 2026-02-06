@@ -46,11 +46,8 @@ const GameEngine: React.FC<GameEngineProps> = ({
   const rounds = matchData.rounds;
   const currentProblem = rounds[currentRoundIdx]?.problems[currentProblemIdx];
 
-  // Kênh điều khiển từ GV (Sử dụng ID của GV sở hữu phòng)
   useEffect(() => {
     if (isTeacherRoom) {
-      // Tìm ID giáo viên sở hữu phòng - ở chế độ này GV đang ở tab CONTROL sẽ phát lệnh
-      // Cần lấy ID từ matchData hoặc thông tin phòng đã kết nối
       const channel = supabase.channel(`control_TEACHER_ROOM_${currentTeacher.id}`, {
         config: { presence: { key: `${playerName}_${Math.random().toString(36).substring(7)}` } }
       });
@@ -144,7 +141,6 @@ const GameEngine: React.FC<GameEngineProps> = ({
         const nextTimeout = setTimeout(handleNext, FEEDBACK_TIME * 1000);
         return () => { clearInterval(countdownInterval); clearTimeout(nextTimeout); };
       }
-      // Trong phòng GV, không tự chuyển, cho phép giảng bài không giới hạn thời gian
     }
   }, [gameState, isTeacherRoom]);
 
@@ -169,6 +165,15 @@ const GameEngine: React.FC<GameEngineProps> = ({
     setGameState('FEEDBACK');
     setFeedbackTimer(FEEDBACK_TIME);
     
+    // Phát kết quả cho GV (nếu ở phòng GV)
+    if (isTeacherRoom && controlChannelRef.current) {
+        controlChannelRef.current.send({
+            type: 'broadcast',
+            event: 'student_answer',
+            payload: { playerName, isCorrect: isPerfect }
+        });
+    }
+
     if (channelRef.current && !isTeacherRoom) {
       channelRef.current.send({ type: 'broadcast', event: 'result', payload: { player: playerName, points: isPerfect ? 100 : 0, feedback: fb } });
     }
