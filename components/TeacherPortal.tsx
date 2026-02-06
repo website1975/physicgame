@@ -4,6 +4,7 @@ import ExamLibrary from './ExamLibrary';
 import AdminPanel from './AdminPanel';
 import AnswerInput from './AnswerInput';
 import ConfirmModal from './ConfirmModal';
+import TeacherManagement from './TeacherManagement'; // Mới
 import { standardizeLegacySets } from '../services/supabaseService';
 import { Round, GameSettings, GameState, Player, AdminTab, Teacher, InteractiveMechanic, QuestionType, Difficulty, DisplayChallenge } from '../types';
 
@@ -14,6 +15,7 @@ interface TeacherPortalProps {
   teacherId: string;
   teacherMaGV?: string;
   teacherSubject?: string; 
+  teacherRole?: 'ADMIN' | 'TEACHER'; // Mới
   onLogout: () => void;
   topicInput: string;
   setTopicInput: (s: string) => void;
@@ -47,7 +49,7 @@ interface TeacherPortalProps {
 }
 
 const TeacherPortal: React.FC<TeacherPortalProps> = (props) => {
-  const { adminTab, setAdminTab, playerName, teacherId, teacherMaGV, teacherSubject, onLogout, topicInput, setTopicInput, isGenerating, onGenerateSet, examSets, searchLibrary, setSearchLibrary, activeCategory, setActiveCategory, categories, onLoadSet, onDeleteSet, onDistribute, onStartGame, rounds, setRounds, settings, setSettings, currentGameState, onNextQuestion, players, myPlayerId, onSaveSet, loadedSetTitle, loadedSetTopic, loadedSetId, onResetToNew, onRefreshSets, isLoadingSets } = props;
+  const { adminTab, setAdminTab, playerName, teacherId, teacherMaGV, teacherSubject, teacherRole, onLogout, topicInput, setTopicInput, isGenerating, onGenerateSet, examSets, searchLibrary, setSearchLibrary, activeCategory, setActiveCategory, categories, onLoadSet, onDeleteSet, onDistribute, onStartGame, rounds, setRounds, settings, setSettings, currentGameState, onNextQuestion, players, myPlayerId, onSaveSet, loadedSetTitle, loadedSetTopic, loadedSetId, onResetToNew, onRefreshSets, isLoadingSets } = props;
 
   const [testMechanic, setTestMechanic] = useState<InteractiveMechanic | null>(null);
   const [testValue, setTestValue] = useState('');
@@ -104,7 +106,6 @@ const TeacherPortal: React.FC<TeacherPortalProps> = (props) => {
 
   return (
     <div className="min-h-screen bg-slate-50 flex relative">
-      {/* Lớp thông báo và Modal đặt ở ngoài cùng để tránh bị đè */}
       <div className="fixed inset-0 pointer-events-none z-[9999]">
         {statusMsg && (
           <div className={`pointer-events-auto absolute top-10 left-1/2 -translate-x-1/2 px-10 py-5 rounded-[2rem] font-black text-xs uppercase italic shadow-2xl animate-in slide-in-from-top-10 duration-500 border-4 ${statusMsg.type === 'success' ? 'bg-emerald-600 border-emerald-500' : 'bg-red-600 border-red-500'} text-white`}>
@@ -132,7 +133,7 @@ const TeacherPortal: React.FC<TeacherPortalProps> = (props) => {
              <span className="text-4xl">👑</span>
           </div>
           <h2 className="text-2xl font-black italic tracking-tighter text-white uppercase leading-none">PhysiQuest</h2>
-          <div className="text-[10px] text-purple-400 font-bold uppercase mt-2 tracking-widest tracking-[0.2em]">Tổ chuyên môn</div>
+          <div className="text-[10px] text-purple-400 font-bold uppercase mt-2 tracking-widest tracking-[0.2em]">Hệ thống nhà trường</div>
         </div>
         
         <nav className="flex-1 space-y-4">
@@ -140,7 +141,10 @@ const TeacherPortal: React.FC<TeacherPortalProps> = (props) => {
              <span className="text-[8px] font-black uppercase text-slate-500 block mb-2 tracking-widest">Tài khoản</span>
              <div className="flex flex-col">
                 <span className="text-sm font-black italic text-white uppercase truncate">{playerName}</span>
-                <span className="text-[9px] font-bold text-blue-400 uppercase italic">Mã: {teacherMaGV}</span>
+                <div className="flex items-center gap-2 mt-1">
+                   <span className="text-[9px] font-bold text-blue-400 uppercase italic">{teacherMaGV}</span>
+                   {teacherRole === 'ADMIN' && <span className="text-[7px] bg-purple-600 text-white px-1.5 py-0.5 rounded font-black uppercase tracking-tighter">Hiệu Phó</span>}
+                </div>
              </div>
            </div>
 
@@ -160,6 +164,16 @@ const TeacherPortal: React.FC<TeacherPortalProps> = (props) => {
               <button onClick={() => { setAdminTab('CONTROL'); setTestMechanic(null); }} className={`w-full text-left p-4 rounded-2xl font-black text-[10px] uppercase transition-all flex items-center gap-3 ${adminTab === 'CONTROL' ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-500/20' : 'text-slate-400 hover:bg-white/5'}`}>
                  <span>🕹️</span> Quản lý Arena
               </button>
+              
+              {/* MENU DÀNH RIÊNG CHO ADMIN */}
+              {teacherRole === 'ADMIN' && (
+                <button 
+                  onClick={() => { setAdminTab('MANAGEMENT'); setTestMechanic(null); }} 
+                  className={`w-full text-left p-4 rounded-2xl font-black text-[10px] uppercase transition-all flex items-center gap-3 mt-4 ${adminTab === 'MANAGEMENT' ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/20' : 'text-slate-300 hover:bg-white/5 border border-dashed border-white/10'}`}
+                >
+                   <span>👥</span> Quản lý giáo viên
+                </button>
+              )}
            </div>
         </nav>
 
@@ -173,11 +187,14 @@ const TeacherPortal: React.FC<TeacherPortalProps> = (props) => {
             <div className="flex-1 w-full text-center xl:text-left">
               <div className="flex items-center gap-4 mb-4">
                 <h3 className="text-7xl font-black italic uppercase text-slate-900 tracking-tighter leading-none animate-in slide-in-from-left duration-500">
-                  {adminTab === 'EDITOR' ? 'Workshop' : adminTab === 'CLOUD' ? 'KHO ĐỀ' : adminTab === 'LAB' ? 'ARENA LAB' : 'CONTROL'}
+                  {adminTab === 'EDITOR' ? 'Workshop' : 
+                   adminTab === 'CLOUD' ? 'KHO ĐỀ' : 
+                   adminTab === 'LAB' ? 'ARENA LAB' : 
+                   adminTab === 'MANAGEMENT' ? 'Dân số GV' : 'CONTROL'}
                 </h3>
                 {adminTab === 'CLOUD' && hasLegacy && (
                   <button 
-                    onClick={() => { console.log('Click chuẩn hoá'); setShowConfirmStandardize(true); }}
+                    onClick={() => { setShowConfirmStandardize(true); }}
                     disabled={isStandardizing}
                     className="px-6 py-3 bg-amber-500 text-white font-black rounded-2xl uppercase italic text-[10px] shadow-lg animate-bounce hover:scale-110 active:scale-95 transition-all"
                   >
@@ -185,7 +202,7 @@ const TeacherPortal: React.FC<TeacherPortalProps> = (props) => {
                   </button>
                 )}
               </div>
-              <p className="text-slate-400 font-bold italic text-base">Chào mừng Thầy/Cô {playerName} quay trở lại!</p>
+              <p className="text-slate-400 font-bold italic text-base">Hệ thống quản lý chuyên môn nhà trường</p>
             </div>
             {adminTab === 'CLOUD' && (
               <div className="flex items-center gap-4 bg-white p-4 rounded-[4rem] shadow-[0_20px_50px_rgba(0,0,0,0.05)] border-4 border-slate-50 w-full max-w-2xl animate-in zoom-in duration-300">
@@ -224,6 +241,8 @@ const TeacherPortal: React.FC<TeacherPortalProps> = (props) => {
              teacherSubject={teacherSubject}
              isLoadingSets={isLoadingSets}
            />
+         ) : adminTab === 'MANAGEMENT' ? (
+           <TeacherManagement />
          ) : adminTab === 'LAB' ? (
            <div className="max-w-6xl mx-auto space-y-12 animate-in fade-in duration-500">
               {testMechanic ? (
