@@ -18,7 +18,7 @@ const App: React.FC = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [apiStatus, setApiStatus] = useState<'checking' | 'online' | 'offline'>('checking');
   
-  // Thêm state quản lý Tab lọc cho Kho đề
+  // Trạng thái quản lý bộ lọc Kho đề - Đảm bảo đồng bộ xuyên suốt
   const [activeCategory, setActiveCategory] = useState('Tất cả');
 
   // Trạng thái cho Teacher Portal
@@ -29,26 +29,39 @@ const App: React.FC = () => {
   const [rounds, setRounds] = useState<Round[]>([{ number: 1, problems: [], description: '' }]);
   const [settings, setSettings] = useState<GameSettings>({ autoNext: true, autoNextDelay: 20, maxPlayers: 2 });
 
-  // Trạng thái dùng chung cho quy trình Học sinh
+  // Trạng thái cho Học sinh
   const [joinedRoom, setJoinedRoom] = useState<any>(null);
   const [availableSets, setAvailableSets] = useState<any[]>([]);
 
   // Trạng thái trận đấu
   const [matchData, setMatchData] = useState<{ setId: string, title: string, rounds: Round[], opponentName?: string, joinedRoom?: any } | null>(null);
 
-  // Kiểm tra kết nối AI
+  // Kiểm tra kết nối Gemini AI
   useEffect(() => {
     const checkAI = async () => {
+      setApiStatus('checking');
       try {
-        const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-        await ai.models.generateContent({
+        const key = process.env.API_KEY;
+        if (!key) {
+          console.warn("⚠️ [PhysiQuest] process.env.API_KEY is undefined. Check Vercel Environment Variables.");
+          setApiStatus('offline');
+          return;
+        }
+        
+        const ai = new GoogleGenAI({ apiKey: key });
+        // Sử dụng model gemini-3-flash-preview theo hướng dẫn mới nhất
+        const response = await ai.models.generateContent({
           model: 'gemini-3-flash-preview',
           contents: 'ping',
           config: { maxOutputTokens: 1 }
         });
-        setApiStatus('online');
+        
+        if (response) {
+          console.log("✅ [PhysiQuest] Gemini AI Connected Successfully.");
+          setApiStatus('online');
+        }
       } catch (e) {
-        console.error("AI Connection Error:", e);
+        console.error("❌ [PhysiQuest] AI Connection Failed:", e);
         setApiStatus('offline');
       }
     };
@@ -84,11 +97,10 @@ const App: React.FC = () => {
             <h1 className="text-7xl font-black text-slate-800 mb-2 uppercase italic tracking-tighter">PhysiQuest</h1>
             <p className="text-slate-400 font-bold uppercase text-[10px] mb-8 tracking-[0.3em]">HỆ THỐNG ĐẤU TRƯỜNG VẬT LÝ</p>
             
-            {/* Đèn báo AI tại sảnh */}
             <div className="flex items-center justify-center gap-2 mb-8 bg-slate-50 py-2 px-4 rounded-full w-fit mx-auto border border-slate-100">
-              <div className={`w-3 h-3 rounded-full ${apiStatus === 'online' ? 'bg-emerald-500 shadow-[0_0_10px_#10b981]' : apiStatus === 'offline' ? 'bg-red-500 shadow-[0_0_10px_#ef4444]' : 'bg-amber-400 animate-pulse'}`}></div>
+              <div className={`w-3 h-3 rounded-full ${apiStatus === 'online' ? 'bg-emerald-500 shadow-[0_0_12px_#10b981]' : apiStatus === 'offline' ? 'bg-red-500 shadow-[0_0_12px_#ef4444]' : 'bg-amber-400 animate-pulse'}`}></div>
               <span className="text-[9px] font-black text-slate-400 uppercase italic">
-                AI System: {apiStatus === 'online' ? 'Sẵn sàng' : apiStatus === 'offline' ? 'Ngoại tuyến' : 'Đang kiểm tra...'}
+                {apiStatus === 'online' ? 'Hệ thống AI: Sẵn sàng' : apiStatus === 'offline' ? 'Hệ thống AI: Ngoại tuyến (Kiểm tra Console)' : 'Hệ thống AI: Đang quét...'}
               </span>
             </div>
 
@@ -115,10 +127,9 @@ const App: React.FC = () => {
               {gameState === 'TEACHER_LOGIN' ? 'GIÁO VIÊN ĐĂNG NHẬP' : 'KẾT NỐI HỆ THỐNG'}
             </h2>
             
-            {/* Đèn báo AI tại form nhập */}
             <div className="flex items-center justify-center gap-2 mb-8">
-              <div className={`w-2.5 h-2.5 rounded-full ${apiStatus === 'online' ? 'bg-emerald-500 shadow-[0_0_8px_#10b981]' : apiStatus === 'offline' ? 'bg-red-500' : 'bg-amber-400 animate-pulse'}`}></div>
-              <span className="text-[8px] font-black text-slate-400 uppercase italic">Hệ thống AI: {apiStatus === 'online' ? 'Đã kết nối' : apiStatus === 'offline' ? 'Lỗi kết nối' : 'Đang quét...'}</span>
+              <div className={`w-3 h-3 rounded-full ${apiStatus === 'online' ? 'bg-emerald-500 shadow-[0_0_10px_#10b981]' : apiStatus === 'offline' ? 'bg-red-500 shadow-[0_0_10px_#ef4444]' : 'bg-amber-400 animate-pulse'}`}></div>
+              <span className="text-[9px] font-black text-slate-400 uppercase italic">Trạng thái AI: {apiStatus === 'online' ? 'Trực tuyến' : apiStatus === 'offline' ? 'Lỗi kết nối' : 'Đang xử lý...'}</span>
             </div>
 
             {errorMsg && <div className="mb-6 p-4 bg-red-50 text-red-500 rounded-2xl font-bold text-xs border-2 border-red-100">{errorMsg}</div>}
