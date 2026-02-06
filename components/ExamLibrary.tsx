@@ -47,20 +47,23 @@ const ExamLibrary: React.FC<ExamLibraryProps> = ({
 
   const filteredExamSets = useMemo(() => {
     return examSets.filter(set => {
+      // 1. Lọc theo tìm kiếm
       const matchSearch = (set.title || "").toLowerCase().includes(searchLibrary.toLowerCase());
+      if (!matchSearch) return false;
       
-      let matchCat = true;
-      if (activeCategory === 'Tất cả') {
-        matchCat = true;
-      } else if (['10', '11', '12'].includes(activeCategory)) {
-        matchCat = set.grade === activeCategory;
-      } else {
-        matchCat = (set.topic && set.topic === activeCategory) || 
-                   (set.subject && set.subject === activeCategory) ||
-                   ((set.title || "").toLowerCase().includes(activeCategory.toLowerCase()));
+      // 2. Lọc theo Tab (Thể loại / Khối lớp)
+      if (activeCategory === 'Tất cả') return true;
+
+      // Nếu activeCategory là khối lớp '10', '11', '12'
+      if (['10', '11', '12'].includes(activeCategory)) {
+        // Đảm bảo so sánh chính xác chuỗi hoặc số từ database
+        return String(set.grade) === activeCategory;
       }
-                       
-      return matchSearch && matchCat;
+
+      // Lọc theo môn học hoặc chủ đề
+      return (set.topic && set.topic === activeCategory) || 
+             (set.subject && set.subject === activeCategory) ||
+             ((set.title || "").toLowerCase().includes(activeCategory.toLowerCase()));
     });
   }, [examSets, searchLibrary, activeCategory]);
 
@@ -237,7 +240,10 @@ const ExamLibrary: React.FC<ExamLibraryProps> = ({
             <button 
               key={cat} 
               onClick={() => setActiveCategory(cat)}
-              className={`px-10 py-5 rounded-full font-black text-xs uppercase italic transition-all shadow-xl whitespace-nowrap border-4 ${activeCategory === cat ? 'bg-slate-900 text-white border-slate-800' : 'bg-white text-slate-400 border-slate-50 hover:border-slate-200'}`}
+              className={`px-10 py-5 rounded-full font-black text-xs uppercase italic transition-all shadow-xl whitespace-nowrap border-4 transform active:scale-95 duration-200
+                ${activeCategory === cat 
+                  ? 'bg-blue-600 text-white border-blue-500 shadow-[0_0_20px_rgba(37,99,235,0.4)] scale-105' 
+                  : 'bg-white text-slate-400 border-slate-50 hover:border-blue-200 hover:bg-blue-50/10'}`}
             >
               {['10', '11', '12'].includes(cat) ? `KHỐI ${cat}` : cat}
             </button>
