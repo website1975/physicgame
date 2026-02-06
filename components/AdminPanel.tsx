@@ -61,6 +61,7 @@ const AdminPanel: React.FC<AdminPanelProps> = (props) => {
 
   // Real-time Control State
   const [connectedStudents, setConnectedStudents] = useState<string[]>([]);
+  const [studentResults, setStudentResults] = useState<Record<string, { answered: boolean, isCorrect: boolean }>>({});
   const [isWhiteboardActive, setIsWhiteboardActive] = useState(false);
   const [isLiveGameActive, setIsLiveGameActive] = useState(false);
   const controlChannelRef = useRef<any>(null);
@@ -70,7 +71,6 @@ const AdminPanel: React.FC<AdminPanelProps> = (props) => {
     setCurrentTopic(loadedSetTopic || 'Khác');
   }, [loadedSetTitle, loadedSetId, loadedSetTopic]);
 
-  // Lấy mã GV để hiển thị làm mã phòng
   useEffect(() => {
     const fetchGV = async () => {
       const { data } = await supabase.from('giaovien').select('magv').eq('id', teacherId).single();
@@ -79,7 +79,6 @@ const AdminPanel: React.FC<AdminPanelProps> = (props) => {
     fetchGV();
   }, [teacherId]);
 
-  // Thiết lập kênh điều khiển Arena khi ở tab CONTROL
   useEffect(() => {
     if (adminTab === 'CONTROL') {
       const channel = supabase.channel(`control_TEACHER_ROOM_${teacherId}`, {
@@ -93,6 +92,12 @@ const AdminPanel: React.FC<AdminPanelProps> = (props) => {
             .filter(key => key !== 'teacher')
             .map(key => key.split('_')[0]);
           setConnectedStudents(players);
+        })
+        .on('broadcast', { event: 'student_answer' }, ({ payload }) => {
+          setStudentResults(prev => ({
+            ...prev,
+            [payload.playerName]: { answered: true, isCorrect: payload.isCorrect }
+          }));
         })
         .subscribe(async (status) => {
           if (status === 'SUBSCRIBED') {
@@ -121,6 +126,7 @@ const AdminPanel: React.FC<AdminPanelProps> = (props) => {
     }
 
     setIsLiveGameActive(true);
+    setStudentResults({});
     if (controlChannelRef.current) {
       controlChannelRef.current.send({
         type: 'broadcast',
@@ -132,6 +138,7 @@ const AdminPanel: React.FC<AdminPanelProps> = (props) => {
   };
 
   const handleNextLiveQuestion = () => {
+    setStudentResults({}); 
     if (controlChannelRef.current) {
       controlChannelRef.current.send({ type: 'broadcast', event: 'teacher_next_question' });
       notify("Đã chuyển sang câu tiếp theo cho cả lớp!");
@@ -297,16 +304,26 @@ const AdminPanel: React.FC<AdminPanelProps> = (props) => {
                <div className="bg-white p-8 rounded-[3rem] border-4 border-slate-50 shadow-xl flex flex-col h-1/2 overflow-hidden">
                   <h4 className="text-xl font-black text-slate-800 uppercase italic mb-6 flex items-center gap-3">
                      <span className="w-8 h-8 bg-blue-100 text-blue-600 rounded-lg flex items-center justify-center text-sm">👥</span>
-                     HỌC SINH ĐANG CHỜ ({connectedStudents.length})
+                     HỌC SINH ({connectedStudents.length})
                   </h4>
                   <div className="flex-1 overflow-y-auto space-y-3 no-scrollbar">
-                     {connectedStudents.length > 0 ? connectedStudents.map((s, i) => (
-                       <div key={i} className="p-4 bg-slate-50 rounded-2xl border-2 border-slate-100 flex items-center gap-4">
-                          <div className="w-10 h-10 bg-white rounded-full flex items-center justify-center text-lg border border-slate-200">👤</div>
-                          <div className="font-black text-slate-700 uppercase italic text-sm">{s}</div>
-                          <div className="ml-auto w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></div>
-                       </div>
-                     )) : (
+                     {connectedStudents.length > 0 ? connectedStudents.map((s, i) => {
+                       const res = studentResults[s];
+                       return (
+                        <div key={i} className={`p-4 rounded-2xl border-2 flex items-center gap-4 transition-all ${res ? (res.isCorrect ? 'bg-emerald-50 border-emerald-100' : 'bg-red-50 border-red-100') : 'bg-slate-50 border-slate-100'}`}>
+                           <div className="w-10 h-10 bg-white rounded-full flex items-center justify-center text-lg border border-slate-200">👤</div>
+                           <div className="flex-1">
+                              <div className="font-black text-slate-700 uppercase italic text-sm">{s}</div>
+                              <div className={`text-[9px] font-black uppercase ${res ? (res.isCorrect ? 'text-emerald-500' : 'text-red-500') : 'text-slate-400'}`}>
+                                 {res ? (res.isCorrect ? 'ĐÃ LÀM: ĐÚNG ✅' : 'ĐÃ LÀM: SAI ❌') : 'ĐANG LÀM... ⏳'}
+                              </div>
+                           </div>
+                           {res && (
+                             <div className={`w-3 h-3 rounded-full ${res.isCorrect ? 'bg-emerald-500' : 'bg-red-500'} animate-pulse`}></div>
+                           )}
+                        </div>
+                       );
+                     }) : (
                        <div className="h-full flex flex-col items-center justify-center text-slate-200 italic text-xs text-center px-10">Đang đợi học sinh nhập mã {teacherMaGV}...</div>
                      )}
                   </div>
@@ -322,7 +339,7 @@ const AdminPanel: React.FC<AdminPanelProps> = (props) => {
                        <div className="text-[10px] font-black uppercase text-blue-400 mb-2 italic">CHỦ ĐỀ</div>
                        <div className="text-xl font-black uppercase italic leading-tight mb-8 flex-1 line-clamp-3">{loadedSetTitle}</div>
                        <div className="grid grid-cols-2 gap-4">
-                          <div className="bg-white/5 p-3 rounded-2xl text-center"><div className="text-[8px] font-black uppercase text-white/50">SỐ CÂU</div><div className="text-xl font-black text-blue-400">{rounds[0]?.problems?.length || 0}</div></div>
+                          <div className="bg-white/5 p-3 rounded-2xl text-center"><div className="text-[8px] font-black uppercase text-white/50">SỐ CÂU</div><div className="text-xl font-black text-blue-400">{rounds[activeRoundIdx]?.problems?.length || 0}</div></div>
                           <div className="bg-white/5 p-3 rounded-2xl text-center"><div className="text-[8px] font-black uppercase text-white/50">VÒNG</div><div className="text-xl font-black text-purple-400">{rounds.length}</div></div>
                        </div>
                     </div>
@@ -343,12 +360,13 @@ const AdminPanel: React.FC<AdminPanelProps> = (props) => {
       {status && <div className={`fixed top-6 left-1/2 -translate-x-1/2 px-10 py-4 rounded-full font-black text-xs uppercase shadow-2xl z-[10000] animate-in slide-in-from-top-4 ${status.type === 'success' ? 'bg-emerald-600' : 'bg-red-600'} text-white`}>{status.text}</div>}
       <ConfirmModal isOpen={roundToDeleteIdx !== null} title="Xóa vòng thi?" message={`Bạn có chắc muốn xóa Vòng ${roundToDeleteIdx !== null && rounds[roundToDeleteIdx] ? rounds[roundToDeleteIdx].number : ''}?`} onConfirm={confirmDeleteRound} onCancel={() => setRoundToDeleteIdx(null)} isDestructive={true} confirmText="Xóa vòng" />
 
+      {/* HEADER: Thông tin bộ đề */}
       <div className="bg-white p-6 rounded-[2.5rem] shadow-xl border-4 border-slate-100 flex items-center gap-6 shrink-0">
         <div className="flex items-center gap-4 flex-1">
           <div className="text-4xl bg-emerald-50 w-16 h-16 rounded-2xl flex items-center justify-center shadow-inner">📗</div>
           <div className="flex-1 grid grid-cols-1 md:grid-cols-12 gap-4">
             <div className="md:col-span-6 text-left">
-              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1 block ml-1 italic text-left">Tên bộ đề</label>
+              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1 block ml-1 italic text-left">Tên bộ đề (Nạp vào phòng GV khi bấm Sửa)</label>
               <input type="text" className="w-full bg-slate-50 border-2 border-slate-100 rounded-2xl px-6 py-3 font-black text-slate-700 outline-none focus:border-blue-200 text-sm" value={currentTitle} onChange={e => setCurrentTitle(e.target.value)} placeholder="Nhập tên bộ đề..." />
             </div>
             <div className="md:col-span-4 text-left">
@@ -367,6 +385,35 @@ const AdminPanel: React.FC<AdminPanelProps> = (props) => {
           <button onClick={() => setShowAIInput(!showAIInput)} className={`px-8 py-6 rounded-[2rem] font-black uppercase italic shadow-lg transition-all text-sm ${showAIInput ? 'bg-slate-900 text-white' : 'bg-emerald-500 text-white'}`}>{showAIInput ? 'ĐÓNG AI' : 'AI TRÍCH XUẤT'}</button>
           <button onClick={() => onSaveSet(currentTitle, !loadedSetId, currentTopic, currentGrade)} disabled={isSaving} className="px-12 py-6 bg-blue-600 text-white rounded-[2rem] font-black uppercase italic shadow-lg hover:scale-105 transition-all text-sm">LƯU ĐỀ</button>
         </div>
+      </div>
+
+      {/* TOOLBAR THÊM CÂU HỎI (MỚI) */}
+      <div className="bg-white px-10 py-6 rounded-[2.5rem] shadow-md border-4 border-slate-100 flex items-center justify-around shrink-0 animate-in fade-in slide-in-from-top-2">
+         {[
+           { type: QuestionType.MULTIPLE_CHOICE, label: 'Trắc Nghiệm', color: 'blue' },
+           { type: QuestionType.TRUE_FALSE, label: 'Đúng / Sai', color: 'emerald' },
+           { type: QuestionType.SHORT_ANSWER, label: 'Tự Luận', color: 'purple' }
+         ].map((item) => (
+           <div key={item.type} className="flex flex-col items-center gap-3 px-8 border-x border-slate-50 last:border-r-0 first:border-l-0">
+              <span className={`text-sm font-black text-slate-800 uppercase italic tracking-widest`}>
+                {item.label}
+              </span>
+              <div className="flex gap-2">
+                 <button 
+                  onClick={() => addNewProblem(item.type)}
+                  className={`px-8 py-3 bg-white border-2 border-slate-200 text-slate-600 rounded-2xl font-black text-[11px] uppercase italic hover:bg-slate-900 hover:text-white hover:border-slate-900 transition-all shadow-sm`}
+                 >
+                   New
+                 </button>
+                 <button 
+                  onClick={() => handleOpenLibrary(item.type)}
+                  className={`px-8 py-3 bg-white border-2 border-slate-200 text-slate-600 rounded-2xl font-black text-[11px] uppercase italic hover:bg-blue-600 hover:text-white hover:border-blue-600 transition-all shadow-sm`}
+                 >
+                   CSDL
+                 </button>
+              </div>
+           </div>
+         ))}
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 flex-1 min-h-0">
@@ -411,6 +458,42 @@ const AdminPanel: React.FC<AdminPanelProps> = (props) => {
           )}
         </div>
       </div>
+
+      {/* MODAL THƯ VIỆN CSDL */}
+      {showLibModal && (
+        <div className="fixed inset-0 z-[11000] flex items-center justify-center p-6">
+           <div className="absolute inset-0 bg-slate-950/90 backdrop-blur-md" onClick={() => setShowLibModal(false)}></div>
+           <div className="bg-white rounded-[3rem] w-full max-w-5xl h-[85vh] flex flex-col relative z-10 border-4 border-slate-100 shadow-2xl overflow-hidden animate-in zoom-in duration-300">
+              <header className="p-8 border-b-2 border-slate-50 flex justify-between items-center bg-slate-50">
+                 <div>
+                    <h3 className="text-3xl font-black text-slate-800 uppercase italic leading-none">THƯ VIỆN CÂU HỎI</h3>
+                    <p className="text-[10px] font-black text-blue-500 uppercase mt-2">Dữ liệu từ Khối {currentGrade}</p>
+                 </div>
+                 <button onClick={() => setShowLibModal(false)} className="w-12 h-12 bg-white text-slate-400 rounded-xl flex items-center justify-center font-black shadow-sm">✕</button>
+              </header>
+              <div className="flex-1 overflow-y-auto p-8 space-y-4 no-scrollbar">
+                 {libLoading ? (
+                    <div className="h-full flex flex-col items-center justify-center">
+                       <div className="w-12 h-12 border-4 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+                    </div>
+                 ) : libQuestions.length > 0 ? libQuestions.map((q, i) => (
+                    <div key={i} className="bg-slate-50 p-6 rounded-3xl border-2 border-slate-100 flex items-center gap-6 hover:border-blue-200 transition-all group">
+                       <div className="flex-1">
+                          <div className="flex items-center gap-2 mb-2">
+                             <span className="px-2 py-0.5 bg-blue-100 text-blue-600 text-[9px] font-black uppercase rounded">{q.type}</span>
+                             <span className="text-[10px] font-black text-slate-400 uppercase italic">{q.topic}</span>
+                          </div>
+                          <h5 className="font-bold text-slate-700 line-clamp-1">{q.content}</h5>
+                       </div>
+                       <button onClick={() => addFromLibrary(q)} className="px-6 py-3 bg-blue-600 text-white font-black rounded-xl uppercase italic text-[10px] opacity-0 group-hover:opacity-100 transition-all shadow-lg">+ Thêm vào đề</button>
+                    </div>
+                 )) : (
+                    <div className="h-full flex flex-col items-center justify-center text-slate-300 italic text-center">Chưa có dữ liệu.</div>
+                 )}
+              </div>
+           </div>
+        </div>
+      )}
     </div>
   );
 };
