@@ -1,5 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
+import { GoogleGenAI } from "@google/genai";
 import { GameState, Round, Teacher, GameSettings, AdminTab } from './types';
 import { loginTeacher, fetchTeacherByMaGV, supabase, fetchAllExamSets, fetchSetData, saveExamSet, updateExamSet, deleteExamSet, assignSetToRoom } from './services/supabaseService';
 import TeacherPortal from './components/TeacherPortal';
@@ -15,6 +16,10 @@ const App: React.FC = () => {
   const [currentTeacher, setCurrentTeacher] = useState<Teacher | null>(null);
   const [errorMsg, setErrorMsg] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [apiStatus, setApiStatus] = useState<'checking' | 'online' | 'offline'>('checking');
+  
+  // Thêm state quản lý Tab lọc cho Kho đề
+  const [activeCategory, setActiveCategory] = useState('Tất cả');
 
   // Trạng thái cho Teacher Portal
   const [adminTab, setAdminTab] = useState<AdminTab>('EDITOR');
@@ -24,12 +29,31 @@ const App: React.FC = () => {
   const [rounds, setRounds] = useState<Round[]>([{ number: 1, problems: [], description: '' }]);
   const [settings, setSettings] = useState<GameSettings>({ autoNext: true, autoNextDelay: 20, maxPlayers: 2 });
 
-  // Trạng thái dùng chung cho quy trình Học sinh (Nâng cấp lên đây để tránh mất dữ liệu)
+  // Trạng thái dùng chung cho quy trình Học sinh
   const [joinedRoom, setJoinedRoom] = useState<any>(null);
   const [availableSets, setAvailableSets] = useState<any[]>([]);
 
   // Trạng thái trận đấu
   const [matchData, setMatchData] = useState<{ setId: string, title: string, rounds: Round[], opponentName?: string, joinedRoom?: any } | null>(null);
+
+  // Kiểm tra kết nối AI
+  useEffect(() => {
+    const checkAI = async () => {
+      try {
+        const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+        await ai.models.generateContent({
+          model: 'gemini-3-flash-preview',
+          contents: 'ping',
+          config: { maxOutputTokens: 1 }
+        });
+        setApiStatus('online');
+      } catch (e) {
+        console.error("AI Connection Error:", e);
+        setApiStatus('offline');
+      }
+    };
+    checkAI();
+  }, []);
 
   const refreshSets = async (tId: string) => {
     setIsLoading(true);
@@ -59,6 +83,15 @@ const App: React.FC = () => {
           <div className="bg-white rounded-[4rem] p-12 shadow-2xl max-w-2xl w-full text-center border-b-[12px] border-blue-600 animate-in zoom-in duration-500">
             <h1 className="text-7xl font-black text-slate-800 mb-2 uppercase italic tracking-tighter">PhysiQuest</h1>
             <p className="text-slate-400 font-bold uppercase text-[10px] mb-8 tracking-[0.3em]">HỆ THỐNG ĐẤU TRƯỜNG VẬT LÝ</p>
+            
+            {/* Đèn báo AI tại sảnh */}
+            <div className="flex items-center justify-center gap-2 mb-8 bg-slate-50 py-2 px-4 rounded-full w-fit mx-auto border border-slate-100">
+              <div className={`w-3 h-3 rounded-full ${apiStatus === 'online' ? 'bg-emerald-500 shadow-[0_0_10px_#10b981]' : apiStatus === 'offline' ? 'bg-red-500 shadow-[0_0_10px_#ef4444]' : 'bg-amber-400 animate-pulse'}`}></div>
+              <span className="text-[9px] font-black text-slate-400 uppercase italic">
+                AI System: {apiStatus === 'online' ? 'Sẵn sàng' : apiStatus === 'offline' ? 'Ngoại tuyến' : 'Đang kiểm tra...'}
+              </span>
+            </div>
+
             <input 
               type="text" 
               placeholder="Nhập tên thi đấu..." 
@@ -78,9 +111,16 @@ const App: React.FC = () => {
       {(gameState === 'TEACHER_LOGIN' || gameState === 'STUDENT_SETUP') && (
         <div className="min-h-screen flex items-center justify-center p-4">
           <div className="bg-white rounded-[4rem] p-12 shadow-2xl max-w-md w-full text-center animate-in fade-in slide-in-from-bottom-4">
-            <h2 className="text-3xl font-black text-slate-800 uppercase italic mb-8 tracking-tighter">
+            <h2 className="text-3xl font-black text-slate-800 uppercase italic mb-4 tracking-tighter">
               {gameState === 'TEACHER_LOGIN' ? 'GIÁO VIÊN ĐĂNG NHẬP' : 'KẾT NỐI HỆ THỐNG'}
             </h2>
+            
+            {/* Đèn báo AI tại form nhập */}
+            <div className="flex items-center justify-center gap-2 mb-8">
+              <div className={`w-2.5 h-2.5 rounded-full ${apiStatus === 'online' ? 'bg-emerald-500 shadow-[0_0_8px_#10b981]' : apiStatus === 'offline' ? 'bg-red-500' : 'bg-amber-400 animate-pulse'}`}></div>
+              <span className="text-[8px] font-black text-slate-400 uppercase italic">Hệ thống AI: {apiStatus === 'online' ? 'Đã kết nối' : apiStatus === 'offline' ? 'Lỗi kết nối' : 'Đang quét...'}</span>
+            </div>
+
             {errorMsg && <div className="mb-6 p-4 bg-red-50 text-red-500 rounded-2xl font-bold text-xs border-2 border-red-100">{errorMsg}</div>}
             <div className="space-y-4 mb-8">
                <input type="text" placeholder="Mã Giáo Viên" className="w-full p-5 bg-slate-50 border-4 border-slate-100 rounded-3xl font-black text-center text-xl uppercase outline-none focus:border-blue-500" value={teacherIdInput} onChange={e => setTeacherIdInput(e.target.value)} />
@@ -114,7 +154,7 @@ const App: React.FC = () => {
         </div>
       )}
 
-      {/* 3. QUY TRÌNH HỌC SINH (Sử dụng dữ liệu phòng được lưu ở App.tsx) */}
+      {/* 3. QUY TRÌNH HỌC SINH */}
       {(gameState === 'ROOM_SELECTION' || gameState === 'SET_SELECTION' || gameState === 'WAITING_FOR_PLAYERS' || gameState === 'KEYWORD_SELECTION') && currentTeacher && (
         <StudentArenaFlow 
           gameState={gameState}
@@ -136,8 +176,10 @@ const App: React.FC = () => {
           adminTab={adminTab} setAdminTab={setAdminTab} playerName={currentTeacher.tengv} teacherId={currentTeacher.id} 
           teacherMaGV={currentTeacher.magv} teacherSubject={currentTeacher.monday} onLogout={() => setGameState('LOBBY')}
           topicInput="" setTopicInput={() => {}} isGenerating={false} onGenerateSet={() => {}} 
-          examSets={examSets} searchLibrary="" setSearchLibrary={() => {}} activeCategory="Tất cả"
-          setActiveCategory={() => {}} categories={[]} 
+          examSets={examSets} searchLibrary="" setSearchLibrary={() => {}} 
+          activeCategory={activeCategory}
+          setActiveCategory={setActiveCategory} 
+          categories={[]} 
           onLoadSet={async (id, title) => {
             const data = await fetchSetData(id); setRounds(data.rounds); setLoadedSetId(id); setLoadedSetTitle(title); return true;
           }}
@@ -166,7 +208,6 @@ const App: React.FC = () => {
           matchData={matchData}
           onExit={() => { 
             setMatchData(null); 
-            // Nếu có dữ liệu phòng, quay về chọn đề, nếu không quay về chọn phòng
             setGameState(joinedRoom ? 'SET_SELECTION' : 'ROOM_SELECTION'); 
           }}
         />
