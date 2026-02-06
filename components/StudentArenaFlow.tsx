@@ -179,17 +179,50 @@ const StudentArenaFlow: React.FC<StudentArenaFlowProps> = ({
 
   if (gameState === 'ROOM_SELECTION') {
     return (
-      <div className="min-h-screen p-8 flex flex-col items-center justify-center">
-        <h2 className="text-4xl font-black text-white italic uppercase mb-12">Hệ thống Đấu Trường</h2>
-        {error && <div className="mb-8 p-4 bg-red-500/20 text-red-400 rounded-2xl border border-red-500/30 font-bold">{error}</div>}
+      <div className="min-h-screen p-8 flex flex-col items-center justify-center relative">
+        {/* Nút thoát dành cho HS */}
+        <div className="absolute top-8 right-8 z-50">
+           <button 
+            onClick={() => setGameState('LOBBY')}
+            className="group flex items-center gap-3 bg-red-500/10 hover:bg-red-500 text-red-500 hover:text-white px-8 py-4 rounded-2xl border-2 border-red-500/20 hover:border-red-500 transition-all font-black uppercase italic text-sm shadow-xl"
+           >
+             <span className="text-xl group-hover:rotate-12 transition-transform">🚪</span>
+             <span>Thoát ra</span>
+           </button>
+        </div>
+
+        <div className="text-center mb-12 animate-in slide-in-from-top-4 duration-500">
+          <h2 className="text-6xl font-black text-white italic uppercase tracking-tighter">Hệ thống Đấu Trường</h2>
+          <p className="text-blue-400 font-bold uppercase text-[10px] mt-2 tracking-[0.3em]">Chào mừng chiến binh: {playerName}</p>
+        </div>
+
+        {error && (
+          <div className="mb-8 p-6 bg-red-500/20 text-red-400 rounded-[2rem] border-2 border-red-500/30 font-black uppercase italic text-xs animate-in zoom-in">
+            ⚠️ {error}
+          </div>
+        )}
+
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-6 w-full max-w-7xl">
           {ARENA_ROOMS.map(room => (
-            <button key={room.code} onClick={() => handleRoomJoin(room)} className="bg-white p-8 rounded-[4rem] flex flex-col items-center gap-6 hover:scale-105 transition-all shadow-2xl group">
+            <button 
+              key={room.code} 
+              onClick={() => handleRoomJoin(room)} 
+              disabled={isLoading}
+              className={`bg-white p-8 rounded-[4rem] flex flex-col items-center gap-6 hover:scale-105 transition-all shadow-2xl group ${isLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
+            >
               <div className={`text-5xl p-6 rounded-[2rem] ${room.color} text-white shadow-lg group-hover:rotate-12 transition-transform`}>{room.emoji}</div>
-              <div className="font-black text-slate-800 uppercase italic text-lg">{room.name}</div>
+              <div className="font-black text-slate-800 uppercase italic text-lg leading-none">{room.name}</div>
+              <div className="text-[9px] font-black text-slate-300 uppercase tracking-widest">{room.code}</div>
             </button>
           ))}
         </div>
+        
+        {isLoading && (
+          <div className="mt-12 flex flex-col items-center gap-4">
+             <div className="w-10 h-10 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+             <span className="font-black text-blue-400 uppercase italic text-[10px]">Đang mở cổng kết nối...</span>
+          </div>
+        )}
       </div>
     );
   }
@@ -203,7 +236,7 @@ const StudentArenaFlow: React.FC<StudentArenaFlowProps> = ({
               <h2 className="text-6xl font-black text-white uppercase italic tracking-tighter">THƯ VIỆN ĐỀ THI</h2>
               <p className="text-blue-500 font-black uppercase italic text-2xl mt-2">PHÒNG {joinedRoom?.name?.toUpperCase()} – KHỐI {studentGrade}</p>
             </div>
-            <button onClick={() => { setJoinedRoom(null); setGameState('ROOM_SELECTION'); }} className="px-10 py-4 bg-white/10 text-white rounded-2xl font-black uppercase italic border-2 border-white/20 hover:bg-white hover:text-slate-900 transition-all">THOÁT ✕</button>
+            <button onClick={() => { setJoinedRoom(null); setGameState('ROOM_SELECTION'); }} className="px-10 py-4 bg-white/10 text-white rounded-2xl font-black uppercase italic border-2 border-white/20 hover:bg-white hover:text-slate-900 transition-all">QUAY LẠI ✕</button>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-8 mb-20">
