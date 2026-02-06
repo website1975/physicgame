@@ -14,6 +14,7 @@ export const loginTeacher = async (maGV: string, pass: string): Promise<{ teache
     const { data, error } = await supabase.from('giaovien').select('*').ilike('magv', cleanMaGV).maybeSingle();
     if (error) return { teacher: null, error: `Lỗi CSDL: ${error.message}` };
     if (!data) return { teacher: null, error: `Không tìm thấy giáo viên mã: ${cleanMaGV}` };
+    
     const dbPass = data.pass || data.PASS || "";
     if (String(dbPass).trim() !== cleanPass) return { teacher: null, error: "Mật khẩu không chính xác!" };
     
@@ -23,7 +24,8 @@ export const loginTeacher = async (maGV: string, pass: string): Promise<{ teache
         magv: data.magv || data.maGV || cleanMaGV, 
         tengv: data.tengv || data.TenGV, 
         monday: data.monday || data.MonDay, 
-        pass: dbPass 
+        pass: dbPass,
+        role: (data.role || 'TEACHER').toUpperCase() as 'ADMIN' | 'TEACHER'
       }, 
       error: null 
     };
@@ -38,11 +40,53 @@ export const fetchTeacherByMaGV = async (maGV: string): Promise<Teacher | null> 
     magv: data.magv || data.maGV, 
     tengv: data.tengv || data.TenGV, 
     monday: data.monday || data.MonDay, 
-    pass: data.pass || data.PASS 
+    pass: data.pass || data.PASS,
+    role: (data.role || 'TEACHER').toUpperCase() as 'ADMIN' | 'TEACHER'
   } as Teacher;
 };
 
-export const fetchAllExamSets = async (teacherId: string, maGV?: string) => {
+/* --- QUẢN LÝ GIÁO VIÊN (DÀNH CHO ADMIN) --- */
+
+export const getAllTeachers = async (): Promise<Teacher[]> => {
+  const { data, error } = await supabase.from('giaovien').select('*').order('tengv', { ascending: true });
+  if (error) throw error;
+  return (data || []).map(d => ({
+    id: d.id,
+    magv: d.magv || d.maGV,
+    tengv: d.tengv || d.TenGV,
+    monday: d.monday || d.MonDay,
+    pass: d.pass || d.PASS,
+    role: (d.role || 'TEACHER').toUpperCase() as 'ADMIN' | 'TEACHER'
+  }));
+};
+
+export const createTeacher = async (teacher: Omit<Teacher, 'id'>) => {
+  const { data, error } = await supabase.from('giaovien').insert([{
+    magv: teacher.magv,
+    tengv: teacher.tengv,
+    monday: teacher.monday,
+    pass: teacher.pass,
+    role: teacher.role
+  }]).select().single();
+  if (error) throw error;
+  return data;
+};
+
+export const updateTeacher = async (id: string, updates: Partial<Teacher>) => {
+  const { error } = await supabase.from('giaovien').update(updates).eq('id', id);
+  if (error) throw error;
+  return true;
+};
+
+export const deleteTeacher = async (id: string) => {
+  const { error } = await supabase.from('giaovien').delete().eq('id', id);
+  if (error) throw error;
+  return true;
+};
+
+/* --- KHO ĐỀ --- */
+
+export const fetchAllExamSets = async (teacherId: string) => {
   const { data, error } = await supabase
     .from('exam_sets')
     .select('*')
@@ -106,13 +150,12 @@ export const assignSetToRoom = async (teacherId: string, roomCode: string, setId
   return true;
 };
 
-// Trả về cả ID và thời gian gán
 export const getRoomAssignments = async (teacherId: string, roomCode: string): Promise<{set_id: string, assigned_at: string}[]> => {
   const { data, error } = await supabase.from('room_assignments')
     .select('set_id, assigned_at')
     .eq('teacher_id', teacherId)
     .eq('room_code', roomCode)
-    .order('assigned_at', { ascending: true }); // Sắp xếp theo thứ tự gán ngay từ câu query
+    .order('assigned_at', { ascending: true });
   if (error || !data) return [];
   return data.map(row => ({ set_id: row.set_id, assigned_at: row.assigned_at }));
 };
