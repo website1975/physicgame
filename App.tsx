@@ -7,7 +7,6 @@ import TeacherPortal from './components/TeacherPortal';
 import StudentArenaFlow from './components/StudentArenaFlow';
 import GameEngine from './components/GameEngine';
 
-// Logic lấy API Key an toàn như thầy/cô đề xuất
 const getSafeEnv = (key: string): string => {
   try {
     const fromProcess = (process.env as any)[key] || (process.env as any)[`VITE_${key}`];
@@ -28,7 +27,6 @@ const App: React.FC = () => {
   const [errorMsg, setErrorMsg] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [apiStatus, setApiStatus] = useState<'checking' | 'online' | 'offline'>('checking');
-  const [lastApiError, setLastApiError] = useState('');
   
   const [activeCategory, setActiveCategory] = useState('Tất cả');
   const [adminTab, setAdminTab] = useState<AdminTab>('EDITOR');
@@ -44,42 +42,15 @@ const App: React.FC = () => {
   const checkAI = async () => {
     setApiStatus('checking');
     const key = getSafeEnv('API_KEY');
-    
-    if (!key) {
-      setApiStatus('offline');
-      setLastApiError("Không tìm thấy mã API_KEY. Hãy kiểm tra Vercel Env.");
-      return;
-    }
-
+    if (!key) { setApiStatus('offline'); return; }
     try {
       const ai = new GoogleGenAI({ apiKey: key });
-      const response = await ai.models.generateContent({
-        model: 'gemini-3-flash-preview',
-        contents: 'ping',
-        config: { maxOutputTokens: 1 }
-      });
-      if (response) {
-        setApiStatus('online');
-        setLastApiError('');
-      }
-    } catch (e: any) {
-      setApiStatus('offline');
-      setLastApiError(e.message?.includes('API_KEY_INVALID') 
-        ? "Mã Key không hợp lệ hoặc sai định dạng." 
-        : e.message || "Lỗi kết nối AI.");
-    }
+      await ai.models.generateContent({ model: 'gemini-3-flash-preview', contents: 'ping', config: { maxOutputTokens: 1 } });
+      setApiStatus('online');
+    } catch (e) { setApiStatus('offline'); }
   };
 
   useEffect(() => { checkAI(); }, []);
-
-  const handleOpenKeySelector = async () => {
-    if ((window as any).aistudio?.openSelectKey) {
-      await (window as any).aistudio.openSelectKey();
-      setTimeout(checkAI, 500);
-    } else {
-      alert("Tính năng này chỉ hỗ trợ trên môi trường AI Studio.");
-    }
-  };
 
   const refreshSets = async (tId: string) => {
     setIsLoading(true);
@@ -94,32 +65,14 @@ const App: React.FC = () => {
     if (gameState === 'ADMIN' && currentTeacher) refreshSets(currentTeacher.id);
   }, [gameState, currentTeacher?.id]);
 
-  const handleStartMatch = (data: any) => {
-    setMatchData(data);
-    setGameState('ROUND_INTRO');
-  };
-
   return (
     <div className="min-h-screen bg-slate-950 text-slate-900">
       {gameState === 'LOBBY' && (
         <div className="min-h-screen flex items-center justify-center p-4">
           <div className="bg-white rounded-[4rem] p-12 shadow-2xl max-w-2xl w-full text-center border-b-[12px] border-blue-600 animate-in zoom-in duration-500">
-            <h1 className="text-7xl font-black text-slate-800 mb-2 uppercase italic tracking-tighter">PhysiQuest</h1>
-            <p className="text-slate-400 font-bold uppercase text-[10px] mb-8 tracking-[0.3em]">Hệ Thống Đấu Trường Vật Lý</p>
+            <h1 className="text-7xl font-black text-slate-800 mb-2 uppercase italic tracking-tighter text-left ml-4">PhysiQuest</h1>
+            <p className="text-slate-400 font-bold uppercase text-[10px] mb-8 tracking-[0.3em] text-left ml-6">Hệ Thống Đấu Trường Vật Lý</p>
             
-            <div className="flex flex-col items-center gap-2 mb-8">
-              <div className="flex items-center gap-2 bg-slate-50 py-2 px-4 rounded-full border border-slate-100">
-                <div className={`w-3 h-3 rounded-full ${apiStatus === 'online' ? 'bg-emerald-500 shadow-[0_0_12px_#10b981]' : apiStatus === 'offline' ? 'bg-red-500 shadow-[0_0_12px_#ef4444]' : 'bg-amber-400 animate-pulse'}`}></div>
-                <span className="text-[9px] font-black text-slate-400 uppercase italic">
-                  AI: {apiStatus === 'online' ? 'Sẵn sàng' : apiStatus === 'offline' ? 'Ngoại tuyến' : 'Đang quét...'}
-                </span>
-              </div>
-              {apiStatus === 'offline' && (
-                <button onClick={handleOpenKeySelector} className="text-[10px] font-black text-blue-600 underline uppercase italic">Cấu hình lại API Key 🔑</button>
-              )}
-              {lastApiError && <p className="text-[8px] text-red-400 font-bold uppercase">{lastApiError}</p>}
-            </div>
-
             <input type="text" placeholder="Tên thi đấu..." className="w-full p-6 bg-slate-50 border-4 border-slate-100 rounded-3xl font-black text-center text-2xl mb-8 outline-none focus:border-blue-500 transition-all" value={playerName} onChange={e => setPlayerName(e.target.value)} />
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <button disabled={!playerName} onClick={() => setGameState('STUDENT_SETUP')} className="py-6 bg-blue-600 text-white font-black rounded-3xl uppercase italic shadow-xl text-xl hover:scale-105 active:scale-95 transition-all">Học sinh 🎒</button>
@@ -176,7 +129,7 @@ const App: React.FC = () => {
       {gameState === 'ADMIN' && currentTeacher && (
         <TeacherPortal 
           adminTab={adminTab} setAdminTab={setAdminTab} playerName={currentTeacher.tengv} teacherId={currentTeacher.id} 
-          teacherMaGV={currentTeacher.magv} teacherSubject={currentTeacher.monday} onLogout={() => setGameState('LOBBY')}
+          teacherMaGV={currentTeacher.magv} teacherSubject={currentTeacher.monday} teacherRole={currentTeacher.role} onLogout={() => setGameState('LOBBY')}
           topicInput="" setTopicInput={() => {}} isGenerating={false} onGenerateSet={() => {}} 
           examSets={examSets} searchLibrary="" setSearchLibrary={() => {}} 
           activeCategory={activeCategory} setActiveCategory={setActiveCategory} categories={[]} 
@@ -199,20 +152,15 @@ const App: React.FC = () => {
       {(['ROOM_SELECTION', 'SET_SELECTION', 'WAITING_FOR_PLAYERS', 'KEYWORD_SELECTION'].includes(gameState)) && currentTeacher && (
         <StudentArenaFlow 
           gameState={gameState} setGameState={setGameState} playerName={playerName} studentGrade={studentGrade!} currentTeacher={currentTeacher}
-          onStartMatch={handleStartMatch} joinedRoom={joinedRoom} setJoinedRoom={setJoinedRoom} availableSets={availableSets} setAvailableSets={setAvailableSets}
+          onStartMatch={(data) => { setMatchData(data); setGameState('ROUND_INTRO'); }} joinedRoom={joinedRoom} setJoinedRoom={setJoinedRoom} availableSets={availableSets} setAvailableSets={setAvailableSets}
         />
       )}
 
       {matchData && ['ROUND_INTRO', 'STARTING_ROUND', 'WAITING_FOR_BUZZER', 'ANSWERING', 'FEEDBACK', 'GAME_OVER'].includes(gameState) && (
-        <GameEngine gameState={gameState} setGameState={setGameState} playerName={playerName} currentTeacher={currentTeacher!} matchData={matchData} onExit={onExit} />
+        <GameEngine gameState={gameState} setGameState={setGameState} playerName={playerName} currentTeacher={currentTeacher!} matchData={matchData} onExit={() => { setMatchData(null); setGameState('ROOM_SELECTION'); }} />
       )}
     </div>
   );
-
-  function onExit() {
-    setMatchData(null);
-    setGameState(joinedRoom ? 'SET_SELECTION' : 'ROOM_SELECTION');
-  }
 };
 
 export default App;
