@@ -17,8 +17,9 @@ const App: React.FC = () => {
   const [errorMsg, setErrorMsg] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [apiStatus, setApiStatus] = useState<'checking' | 'online' | 'offline'>('checking');
+  const [lastApiError, setLastApiError] = useState('');
   
-  // Trạng thái quản lý bộ lọc Kho đề - Đảm bảo đồng bộ xuyên suốt
+  // Quản lý Tab lọc cho Kho đề
   const [activeCategory, setActiveCategory] = useState('Tất cả');
 
   // Trạng thái cho Teacher Portal
@@ -36,37 +37,55 @@ const App: React.FC = () => {
   // Trạng thái trận đấu
   const [matchData, setMatchData] = useState<{ setId: string, title: string, rounds: Round[], opponentName?: string, joinedRoom?: any } | null>(null);
 
-  // Kiểm tra kết nối Gemini AI
-  useEffect(() => {
-    const checkAI = async () => {
-      setApiStatus('checking');
-      try {
-        const key = process.env.API_KEY;
-        if (!key) {
-          console.warn("⚠️ [PhysiQuest] process.env.API_KEY is undefined. Check Vercel Environment Variables.");
-          setApiStatus('offline');
-          return;
-        }
-        
-        const ai = new GoogleGenAI({ apiKey: key });
-        // Sử dụng model gemini-3-flash-preview theo hướng dẫn mới nhất
-        const response = await ai.models.generateContent({
-          model: 'gemini-3-flash-preview',
-          contents: 'ping',
-          config: { maxOutputTokens: 1 }
-        });
-        
-        if (response) {
-          console.log("✅ [PhysiQuest] Gemini AI Connected Successfully.");
-          setApiStatus('online');
-        }
-      } catch (e) {
-        console.error("❌ [PhysiQuest] AI Connection Failed:", e);
-        setApiStatus('offline');
+  // Hàm lấy API Key an toàn
+  const getApiKey = () => {
+    // Ưu tiên API_KEY, nếu không có thử VITE_API_KEY (dành cho Vite/Vercel)
+    return process.env.API_KEY || (process.env as any).VITE_API_KEY || "";
+  };
+
+  // Kiểm tra kết nối AI
+  const checkAI = async () => {
+    setApiStatus('checking');
+    const key = getApiKey();
+    
+    if (!key) {
+      setApiStatus('offline');
+      setLastApiError("Thiếu API_KEY trong cấu hình Vercel.");
+      return;
+    }
+
+    try {
+      const ai = new GoogleGenAI({ apiKey: key });
+      const response = await ai.models.generateContent({
+        model: 'gemini-3-flash-preview',
+        contents: 'ping',
+        config: { maxOutputTokens: 1 }
+      });
+      
+      if (response.text) {
+        setApiStatus('online');
+        setLastApiError('');
       }
-    };
+    } catch (e: any) {
+      console.error("AI Error:", e);
+      setApiStatus('offline');
+      setLastApiError(e.message || "Lỗi API_KEY_INVALID hoặc lỗi kết nối.");
+    }
+  };
+
+  useEffect(() => {
     checkAI();
   }, []);
+
+  const handleOpenKeySelector = async () => {
+    if ((window as any).aistudio?.openSelectKey) {
+      await (window as any).aistudio.openSelectKey();
+      // Sau khi chọn xong, kiểm tra lại
+      setTimeout(checkAI, 1000);
+    } else {
+      alert("Hệ thống không hỗ trợ hộp thoại chọn Key trực tiếp. Vui lòng kiểm tra lại biến VITE_API_KEY trên Vercel.");
+    }
+  };
 
   const refreshSets = async (tId: string) => {
     setIsLoading(true);
@@ -97,11 +116,25 @@ const App: React.FC = () => {
             <h1 className="text-7xl font-black text-slate-800 mb-2 uppercase italic tracking-tighter">PhysiQuest</h1>
             <p className="text-slate-400 font-bold uppercase text-[10px] mb-8 tracking-[0.3em]">HỆ THỐNG ĐẤU TRƯỜNG VẬT LÝ</p>
             
-            <div className="flex items-center justify-center gap-2 mb-8 bg-slate-50 py-2 px-4 rounded-full w-fit mx-auto border border-slate-100">
-              <div className={`w-3 h-3 rounded-full ${apiStatus === 'online' ? 'bg-emerald-500 shadow-[0_0_12px_#10b981]' : apiStatus === 'offline' ? 'bg-red-500 shadow-[0_0_12px_#ef4444]' : 'bg-amber-400 animate-pulse'}`}></div>
-              <span className="text-[9px] font-black text-slate-400 uppercase italic">
-                {apiStatus === 'online' ? 'Hệ thống AI: Sẵn sàng' : apiStatus === 'offline' ? 'Hệ thống AI: Ngoại tuyến (Kiểm tra Console)' : 'Hệ thống AI: Đang quét...'}
-              </span>
+            {/* Đèn báo AI tại sảnh */}
+            <div className="flex flex-col items-center gap-2 mb-8">
+              <div className="flex items-center gap-2 bg-slate-50 py-2 px-4 rounded-full border border-slate-100">
+                <div className={`w-3 h-3 rounded-full ${apiStatus === 'online' ? 'bg-emerald-500 shadow-[0_0_12px_#10b981]' : apiStatus === 'offline' ? 'bg-red-500 shadow-[0_0_12px_#ef4444]' : 'bg-amber-400 animate-pulse'}`}></div>
+                <span className="text-[9px] font-black text-slate-400 uppercase italic">
+                  AI: {apiStatus === 'online' ? 'Sẵn sàng' : apiStatus === 'offline' ? 'Ngoại tuyến' : 'Đang quét...'}
+                </span>
+              </div>
+              {apiStatus === 'offline' && (
+                <button 
+                  onClick={handleOpenKeySelector}
+                  className="text-[10px] font-black text-blue-600 underline uppercase hover:text-blue-800 transition-colors"
+                >
+                  Cấu hình lại API Key 🔑
+                </button>
+              )}
+              {lastApiError && apiStatus === 'offline' && (
+                <p className="text-[8px] text-red-400 font-bold max-w-xs">{lastApiError}</p>
+              )}
             </div>
 
             <input 
@@ -129,7 +162,7 @@ const App: React.FC = () => {
             
             <div className="flex items-center justify-center gap-2 mb-8">
               <div className={`w-3 h-3 rounded-full ${apiStatus === 'online' ? 'bg-emerald-500 shadow-[0_0_10px_#10b981]' : apiStatus === 'offline' ? 'bg-red-500 shadow-[0_0_10px_#ef4444]' : 'bg-amber-400 animate-pulse'}`}></div>
-              <span className="text-[9px] font-black text-slate-400 uppercase italic">Trạng thái AI: {apiStatus === 'online' ? 'Trực tuyến' : apiStatus === 'offline' ? 'Lỗi kết nối' : 'Đang xử lý...'}</span>
+              <span className="text-[9px] font-black text-slate-400 uppercase italic">Hệ thống: {apiStatus === 'online' ? 'Trực tuyến' : 'Ngoại tuyến'}</span>
             </div>
 
             {errorMsg && <div className="mb-6 p-4 bg-red-50 text-red-500 rounded-2xl font-bold text-xs border-2 border-red-100">{errorMsg}</div>}
