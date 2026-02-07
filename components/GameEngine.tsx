@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { GameState, Teacher, Round, QuestionType } from '../types';
 import ProblemCard from './ProblemCard';
 import AnswerInput from './AnswerInput';
@@ -52,12 +52,60 @@ const GameEngine: React.FC<GameEngineProps> = ({
   const controlChannelRef = useRef<any>(null);
   const presenceKey = useRef(`${playerName}_${Math.random().toString(36).substring(7)}`);
   
+  // Sử dụng Refs để tránh stale closures trong các hàm callback của Supabase
+  const currentProblemIdxRef = useRef(currentProblemIdx);
+  const currentRoundIdxRef = useRef(currentRoundIdx);
+  const gameStateRef = useRef(gameState);
+
+  useEffect(() => { currentProblemIdxRef.current = currentProblemIdx; }, [currentProblemIdx]);
+  useEffect(() => { currentRoundIdxRef.current = currentRoundIdx; }, [currentRoundIdx]);
+  useEffect(() => { gameStateRef.current = gameState; }, [gameState]);
+
   const rounds = matchData.rounds;
   const currentProblem = rounds[currentRoundIdx]?.problems[currentProblemIdx];
 
+  const handleNext = useCallback(() => {
+    const nextProb = currentProblemIdxRef.current + 1;
+    const currentRound = rounds[currentRoundIdxRef.current];
+
+    if (nextProb < (currentRound?.problems.length || 0)) {
+      setCurrentProblemIdx(nextProb);
+      startProblem();
+    } else if (currentRoundIdxRef.current + 1 < rounds.length) {
+      setCurrentRoundIdx(prev => prev + 1);
+      setCurrentProblemIdx(0);
+      setGameState('ROUND_INTRO');
+    } else {
+      setGameState('GAME_OVER');
+    }
+  }, [rounds]);
+
+  const startProblem = () => {
+    setUserAnswer('');
+    setFeedback(null);
+    setBuzzerWinner(null);
+    setGameState('STARTING_ROUND');
+    setCountdown(3);
+    
+    const interval = setInterval(() => {
+      setCountdown(prev => {
+        if (prev && prev <= 1) {
+          clearInterval(interval);
+          const nextState = (isArenaA || isTeacherRoom) ? 'ANSWERING' : 'WAITING_FOR_BUZZER';
+          setGameState(nextState);
+          return null;
+        }
+        return prev ? prev - 1 : null;
+      });
+    }, 1000);
+  };
+
   useEffect(() => {
-    startProblem();
-  }, []);
+    if (gameState === 'ANSWERING' || gameState === 'WAITING_FOR_BUZZER') {
+        setTimeLeft(currentProblem?.timeLimit || DEFAULT_TIME);
+        if (isArenaA || isTeacherRoom) setBuzzerWinner('YOU');
+    }
+  }, [gameState, currentProblem?.id]);
 
   // Kênh điều khiển cho phòng Giáo Viên
   useEffect(() => {
@@ -90,9 +138,9 @@ const GameEngine: React.FC<GameEngineProps> = ({
       controlChannelRef.current = channel;
       return () => { supabase.removeChannel(channel); };
     }
-  }, [isTeacherRoom, currentTeacher.id, playerName]);
+  }, [isTeacherRoom, currentTeacher.id, playerName, handleNext]);
 
-  // Kênh thi đấu cho Arena (Đấu đối kháng 1-1, 1-2, 1-3)
+  // Kênh thi đấu cho Arena
   useEffect(() => {
     if (!isArenaA && matchData.joinedRoom && !isTeacherRoom) {
       const channel = supabase.channel(`match_${matchData.joinedRoom.code}_${currentTeacher.id}`, {
@@ -103,11 +151,10 @@ const GameEngine: React.FC<GameEngineProps> = ({
         .on('presence', { event: 'sync' }, () => {
           const state = channel.presenceState();
           const keys = Object.keys(state).sort();
-          // Xác định máy chủ (Master) để điều phối trận đấu
           setIsMaster(keys[0] === presenceKey.current);
         })
         .on('broadcast', { event: 'buzzer_signal' }, ({ payload }) => {
-          if (payload.player !== playerName && !buzzerWinner && gameState === 'WAITING_FOR_BUZZER') {
+          if (payload.player !== playerName && !buzzerWinner && (gameStateRef.current === 'WAITING_FOR_BUZZER' || gameStateRef.current === 'ANSWERING')) {
             setBuzzerWinner('OPPONENT');
             setGameState('ANSWERING');
             setTimeLeft(20);
@@ -119,8 +166,7 @@ const GameEngine: React.FC<GameEngineProps> = ({
                ...prev,
                [payload.player]: (prev[payload.player] || 0) + (payload.points || 0)
             }));
-            // Chỉ hiển thị feedback của đối thủ nếu mình chưa trả lời xong
-            if (gameState !== 'FEEDBACK') {
+            if (gameStateRef.current !== 'FEEDBACK') {
               setFeedback({ ...payload.feedback, winner: 'OPPONENT', winnerName: payload.player });
               setGameState('FEEDBACK');
               setFeedbackTimer(FEEDBACK_TIME);
@@ -128,6 +174,7 @@ const GameEngine: React.FC<GameEngineProps> = ({
           }
         })
         .on('broadcast', { event: 'match_next_question' }, () => {
+          // Khi nhận lệnh từ Master, chuyển câu ngay lập tức
           handleNext();
         })
         .subscribe(async (status) => {
@@ -139,61 +186,9 @@ const GameEngine: React.FC<GameEngineProps> = ({
       channelRef.current = channel;
       return () => { supabase.removeChannel(channel); };
     }
-  }, [isArenaA, isTeacherRoom, matchData.joinedRoom, playerName, gameState]);
+  }, [isArenaA, isTeacherRoom, matchData.joinedRoom, playerName, handleNext]);
 
-  const startProblem = () => {
-    setUserAnswer('');
-    setFeedback(null);
-    setBuzzerWinner(null);
-    setGameState('STARTING_ROUND');
-    setCountdown(3);
-    
-    const interval = setInterval(() => {
-      setCountdown(prev => {
-        if (prev && prev <= 1) {
-          clearInterval(interval);
-          const nextState = (isArenaA || isTeacherRoom) ? 'ANSWERING' : 'WAITING_FOR_BUZZER';
-          setGameState(nextState);
-          setTimeLeft(currentProblem?.timeLimit || DEFAULT_TIME); 
-          if (isArenaA || isTeacherRoom) setBuzzerWinner('YOU');
-          return null;
-        }
-        return prev ? prev - 1 : null;
-      });
-    }, 1000);
-  };
-
-  const handleBuzzerClick = () => {
-    if (gameState !== 'WAITING_FOR_BUZZER' || buzzerWinner) return;
-    
-    setBuzzerWinner('YOU');
-    setGameState('ANSWERING');
-    setTimeLeft(20);
-
-    if (channelRef.current) {
-      channelRef.current.send({
-        type: 'broadcast',
-        event: 'buzzer_signal',
-        payload: { player: playerName }
-      });
-    }
-  };
-
-  const handleNext = () => {
-    const nextProb = currentProblemIdx + 1;
-    if (nextProb < (rounds[currentRoundIdx]?.problems.length || 0)) {
-      setCurrentProblemIdx(nextProb);
-      startProblem();
-    } else if (currentRoundIdx + 1 < rounds.length) {
-      setCurrentRoundIdx(prev => prev + 1);
-      setCurrentProblemIdx(0);
-      setGameState('ROUND_INTRO');
-    } else {
-      setGameState('GAME_OVER');
-    }
-  };
-
-  // Đếm ngược Feedback và ĐỒNG BỘ CHUYỂN CÂU
+  // Logic đếm ngược Feedback và ĐỒNG BỘ
   useEffect(() => {
     if (gameState === 'ROUND_INTRO') {
       const timer = setTimeout(startProblem, ROUND_INTRO_TIME * 1000);
@@ -206,16 +201,23 @@ const GameEngine: React.FC<GameEngineProps> = ({
           if (p <= 1) {
             clearInterval(countdownInterval);
             
-            // Logic quan trọng: Chỉ Master mới được quyền phát lệnh chuyển câu cho cả phòng
             if (!isTeacherRoom) {
-               if (isMaster && channelRef.current) {
-                  channelRef.current.send({
-                     type: 'broadcast',
-                     event: 'match_next_question'
-                  });
-               } else if (isArenaA) {
-                  // Nếu đấu đơn thì tự nhảy
+               if (isArenaA) {
                   handleNext();
+               } else if (isMaster) {
+                  // Master gửi lệnh cho cả phòng rồi tự nhảy
+                  if (channelRef.current) {
+                    channelRef.current.send({
+                       type: 'broadcast',
+                       event: 'match_next_question'
+                    });
+                  }
+                  setTimeout(handleNext, 100); 
+               } else {
+                  // Slave: Chờ lệnh Master 2 giây, nếu không thấy thì tự nhảy (phòng hờ Master lag)
+                  setTimeout(() => {
+                    if (gameStateRef.current === 'FEEDBACK') handleNext();
+                  }, 2000);
                }
             }
             return 0;
@@ -225,16 +227,16 @@ const GameEngine: React.FC<GameEngineProps> = ({
       }, 1000);
       return () => clearInterval(countdownInterval);
     }
-  }, [gameState, isTeacherRoom, isMaster, isArenaA]);
+  }, [gameState, isTeacherRoom, isMaster, isArenaA, handleNext]);
 
   // Đếm ngược thời gian làm bài
   useEffect(() => {
-    if ((gameState === 'WAITING_FOR_BUZZER' || gameState === 'ANSWERING') && timeLeft > 0) {
+    if ((gameState === 'WAITING_FOR_BUZZER' || gameState === 'ANSWERING') && timeLeft > 0 && !isWhiteboardActive) {
       const t = setInterval(() => setTimeLeft(p => p - 1), 1000);
       return () => clearInterval(t);
     }
     
-    if (timeLeft === 0) {
+    if (timeLeft === 0 && !isWhiteboardActive) {
       if (gameState === 'ANSWERING' && buzzerWinner === 'YOU') {
         submitAnswer();
       } else if (gameState === 'WAITING_FOR_BUZZER') {
@@ -243,10 +245,26 @@ const GameEngine: React.FC<GameEngineProps> = ({
         setFeedbackTimer(FEEDBACK_TIME);
       }
     }
-  }, [gameState, timeLeft, buzzerWinner]);
+  }, [gameState, timeLeft, buzzerWinner, isWhiteboardActive]);
+
+  // handleBuzzerClick: Xử lý khi người chơi nhấn chuông giành quyền trả lời.
+  const handleBuzzerClick = () => {
+    if (gameState === 'WAITING_FOR_BUZZER' && !buzzerWinner) {
+      if (channelRef.current) {
+        channelRef.current.send({
+          type: 'broadcast',
+          event: 'buzzer_signal',
+          payload: { player: playerName }
+        });
+      }
+      setBuzzerWinner('YOU');
+      setGameState('ANSWERING');
+      setTimeLeft(20);
+    }
+  };
 
   const submitAnswer = () => {
-    const prob = rounds[currentRoundIdx]?.problems[currentProblemIdx];
+    const prob = rounds[currentRoundIdxRef.current]?.problems[currentProblemIdxRef.current];
     const correct = (prob?.correctAnswer || "").trim().toUpperCase();
     const user = userAnswer.trim().toUpperCase();
     const isPerfect = user === correct;
@@ -278,8 +296,6 @@ const GameEngine: React.FC<GameEngineProps> = ({
       });
     }
   };
-
-  const totalOpponentScore = Object.values(opponentScores).reduce((a, b) => a + b, 0);
 
   if (gameState === 'ROUND_INTRO') {
     return (
@@ -370,24 +386,24 @@ const GameEngine: React.FC<GameEngineProps> = ({
           
           {gameState === 'FEEDBACK' ? (
             <div className="h-full flex flex-col animate-in fade-in zoom-in overflow-hidden">
-              <div className="flex justify-between items-center mb-4 shrink-0 px-2">
+              <div className="flex justify-between items-center mb-2 shrink-0 px-2">
                  <div className={`text-3xl font-black uppercase italic ${feedback?.isCorrect ? 'text-emerald-500' : 'text-blue-500'}`}>
                     {feedback?.isCorrect ? 'CHÍNH XÁC!' : 'SAI RỒI!'}
                  </div>
                  <div className="bg-slate-900 text-white px-4 py-1.5 rounded-xl font-black italic text-[10px] flex items-center gap-2">
-                    <span className="opacity-40 uppercase">ĐANG ĐỒNG BỘ:</span>
+                    <span className="opacity-40 uppercase">{isMaster ? 'MASTER SYNC' : 'ĐỒNG BỘ'}:</span>
                     <span className="text-yellow-400 text-sm">{feedbackTimer}s</span>
                  </div>
               </div>
 
-              <div className="w-full h-2 bg-slate-100 rounded-full mb-6 overflow-hidden shrink-0">
+              <div className="w-full h-1.5 bg-slate-100 rounded-full mb-4 overflow-hidden shrink-0">
                  <div 
                    className="h-full bg-yellow-400 transition-all duration-1000 ease-linear"
                    style={{ width: `${(feedbackTimer / FEEDBACK_TIME) * 100}%` }}
                  />
               </div>
 
-              <div className="flex-1 overflow-y-auto no-scrollbar space-y-4 px-2">
+              <div className="flex-1 overflow-y-auto no-scrollbar space-y-4 px-2 pb-4">
                  {feedback?.winnerName && (
                     <div className="bg-blue-50 p-3 rounded-xl border border-blue-100 text-[10px] font-black uppercase italic text-blue-600">
                        🔥 {feedback.winnerName} ĐÃ GIÀNH QUYỀN TRẢ LỜI
@@ -408,16 +424,17 @@ const GameEngine: React.FC<GameEngineProps> = ({
             </div>
           ) : gameState === 'WAITING_FOR_BUZZER' ? (
             <div className="h-full flex flex-col items-center justify-center text-center animate-in fade-in px-4">
-               <div className="text-[5rem] mb-4 animate-bounce">🔔</div>
+               <div className="text-5xl mb-4 animate-bounce">🔔</div>
                <h3 className="text-2xl font-black text-slate-800 uppercase italic mb-2">SẴN SÀNG CHƯA?</h3>
                <p className="text-slate-400 font-bold text-[9px] uppercase mb-8 italic tracking-widest">Nhấn chuông để giành quyền trả lời!</p>
                
                <button 
                 onClick={handleBuzzerClick}
-                className="w-40 h-40 bg-red-600 rounded-full border-[10px] border-red-800 shadow-[0_12px_0_#991b1b,0_20px_40px_rgba(220,38,38,0.3)] hover:scale-105 active:translate-y-2 active:shadow-none transition-all flex items-center justify-center group"
+                className="w-44 h-44 bg-red-600 rounded-full border-[12px] border-red-800 shadow-[0_15px_0_#991b1b,0_25px_50px_rgba(220,38,38,0.3)] hover:scale-105 active:translate-y-3 active:shadow-none transition-all flex items-center justify-center group"
                >
-                  <span className="text-white font-black text-xl uppercase italic group-active:scale-90 transition-transform text-center px-4 leading-tight">BẤM<br/>CHUÔNG!</span>
+                  <span className="text-white font-black text-2xl uppercase italic group-active:scale-90 transition-transform text-center px-4 leading-tight">GIÀNH<br/>QUYỀN!</span>
                </button>
+               <p className="mt-8 text-slate-300 font-black uppercase italic text-[8px] tracking-[0.2em] animate-pulse">NHẤN CHUÔNG ĐỂ MỞ BÀN PHÍM</p>
             </div>
           ) : gameState === 'ANSWERING' && buzzerWinner === 'OPPONENT' ? (
             <div className="h-full flex flex-col items-center justify-center text-center animate-in slide-in-from-right px-4">
@@ -428,7 +445,7 @@ const GameEngine: React.FC<GameEngineProps> = ({
                     Đối thủ đang giành quyền trả lời...
                   </p>
                </div>
-               <p className="mt-8 text-slate-300 font-black uppercase italic tracking-widest text-[9px] animate-pulse">Hệ thống đang đồng bộ dữ liệu toàn phòng</p>
+               <p className="mt-8 text-slate-300 font-black uppercase italic tracking-widest text-[9px] animate-pulse">ĐANG CHỜ KẾT QUẢ ĐỒNG BỘ</p>
             </div>
           ) : (
             <div className="flex-1 flex flex-col overflow-hidden">
