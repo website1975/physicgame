@@ -281,10 +281,10 @@ const StudentArenaFlow: React.FC<StudentArenaFlowProps> = ({
     );
   }
 
-  if (gameState === 'WAITING_FOR_PLAYERS') {
+  /* Added null check for joinedRoom to fix potential crash and ensured requiredCapacity is defined within scope */
+  if (gameState === 'WAITING_FOR_PLAYERS' && joinedRoom) {
     const isTeacherRoom = joinedRoom.code === 'TEACHER_ROOM';
-    // Fix: Define requiredCapacity in the current scope so it's accessible in the JSX below.
-    const requiredCapacity = joinedRoom?.capacity || 2;
+    const requiredCapacity = joinedRoom.capacity || 2;
     return (
       <div className="min-h-screen flex items-center justify-center p-6">
         <div className="bg-white rounded-[4rem] p-12 shadow-2xl max-w-6xl w-full border-b-[12px] border-purple-600 animate-in zoom-in duration-500 flex flex-col lg:flex-row gap-10">
