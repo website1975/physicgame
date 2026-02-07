@@ -134,7 +134,15 @@ const StudentArenaFlow: React.FC<StudentArenaFlowProps> = ({
         .on('broadcast', { event: 'teacher_start_game' }, ({ payload }) => {
           if (!isTeacherRoom || matchStartedRef.current) return;
           matchStartedRef.current = true;
-          onStartMatch({ setId: payload.setId, title: payload.title, rounds: payload.rounds, joinedRoom: joinedRoom, opponentName: "Cả lớp" });
+          // NHẬN currentQuestionIndex ĐỂ SYNC VỚI GV
+          onStartMatch({ 
+            setId: payload.setId, 
+            title: payload.title, 
+            rounds: payload.rounds, 
+            joinedRoom: joinedRoom, 
+            opponentName: "Cả lớp",
+            startIndex: payload.currentQuestionIndex || 0 
+          });
         })
         .subscribe(async (status) => {
           if (status === 'SUBSCRIBED') {
