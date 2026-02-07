@@ -2,16 +2,6 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { PhysicsProblem, Difficulty, QuestionType, InteractiveMechanic, DisplayChallenge } from "../types";
 
-const getSafeEnv = (key: string): string => {
-  try {
-    const fromProcess = (process.env as any)[key] || (process.env as any)[`VITE_${key}`];
-    if (fromProcess) return fromProcess;
-    const fromMeta = (import.meta as any).env?.[key] || (import.meta as any).env?.[`VITE_${key}`];
-    if (fromMeta) return fromMeta;
-  } catch (e) {}
-  return "";
-};
-
 const SYSTEM_PROMPT = `Bạn là chuyên gia soạn đề Vật lý theo chương trình GDPT 2018. 
 Quy tắc định dạng đáp án (correctAnswer) BẮT BUỘC:
 1. Loại Trắc nghiệm (type: 'TN'): correctAnswer chỉ là 1 ký tự viết hoa 'A', 'B', 'C' hoặc 'D'.
@@ -19,10 +9,11 @@ Quy tắc định dạng đáp án (correctAnswer) BẮT BUỘC:
 3. Loại Tr trả lời ngắn (type: 'TL'): correctAnswer là số hoặc cụm từ ngắn gọn.`;
 
 export const generateQuestionSet = async (topic: string, count: number): Promise<PhysicsProblem[]> => {
-  const key = getSafeEnv('API_KEY');
-  const ai = new GoogleGenAI({ apiKey: key });
+  // Always use new GoogleGenAI({ apiKey: process.env.API_KEY })
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   const response = await ai.models.generateContent({
-    model: 'gemini-3-flash-preview',
+    // Use gemini-3-pro-preview for complex STEM tasks like Physics question generation.
+    model: 'gemini-3-pro-preview',
     contents: `Hãy tạo một bộ gồm ${count} câu hỏi đa dạng về chủ đề: ${topic}. 
     ${SYSTEM_PROMPT}
     Trả về JSON mảng đối tượng.`,
@@ -59,10 +50,11 @@ export const generateQuestionSet = async (topic: string, count: number): Promise
 };
 
 export const parseQuestionsFromText = async (rawText: string): Promise<PhysicsProblem[]> => {
-  const key = getSafeEnv('API_KEY');
-  const ai = new GoogleGenAI({ apiKey: key });
+  // Always use new GoogleGenAI({ apiKey: process.env.API_KEY })
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   const response = await ai.models.generateContent({
-    model: 'gemini-3-flash-preview',
+    // Use gemini-3-pro-preview for STEM tasks.
+    model: 'gemini-3-pro-preview',
     contents: `Phân tích văn bản và trích xuất câu hỏi: "${rawText}". ${SYSTEM_PROMPT}`,
     config: {
       responseMimeType: "application/json",
