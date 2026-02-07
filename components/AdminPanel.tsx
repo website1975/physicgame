@@ -67,10 +67,27 @@ const AdminPanel: React.FC<AdminPanelProps> = (props) => {
   const [liveProblemIdx, setLiveProblemIdx] = useState(0); 
   const controlChannelRef = useRef<any>(null);
 
+  // LOGIC RESET KHI NẠP ĐỀ MỚI:
+  // Mỗi khi loadedSetId thay đổi, ta đưa mọi thứ về trạng thái ban đầu để tránh xung đột với đề cũ
   useEffect(() => {
     setCurrentTitle(loadedSetTitle || '');
     setCurrentTopic(loadedSetTopic || 'Khác');
-  }, [loadedSetTitle, loadedSetId, loadedSetTopic]);
+    
+    // Reset trạng thái Live
+    setIsLiveGameActive(false);
+    setLiveProblemIdx(0);
+    setStudentResults({});
+    setIsWhiteboardActive(false);
+    
+    // Thông báo cho học sinh trong phòng rằng GV đã nạp đề mới nhưng chưa bắt đầu
+    if (controlChannelRef.current) {
+      controlChannelRef.current.send({
+        type: 'broadcast',
+        event: 'teacher_reset_room',
+        payload: { title: loadedSetTitle }
+      });
+    }
+  }, [loadedSetId]);
 
   useEffect(() => {
     const fetchGV = async () => {
@@ -80,10 +97,9 @@ const AdminPanel: React.FC<AdminPanelProps> = (props) => {
     fetchGV();
   }, [teacherId]);
 
-  // LOGIC ĐỒNG BỘ: Khi có học sinh mới vào, tự động gửi lại thông tin trận đấu
+  // LOGIC ĐỒNG BỘ: Khi có học sinh mới vào phòng khi trận đấu ĐANG DIỄN RA
   useEffect(() => {
     if (isLiveGameActive && connectedStudents.length > 0 && controlChannelRef.current) {
-      // Gửi tín hiệu để các máy mới nạp đúng đề và câu hiện tại
       controlChannelRef.current.send({
         type: 'broadcast',
         event: 'teacher_start_game',
@@ -91,7 +107,7 @@ const AdminPanel: React.FC<AdminPanelProps> = (props) => {
           setId: loadedSetId, 
           title: loadedSetTitle, 
           rounds: rounds, 
-          currentQuestionIndex: liveProblemIdx // Học sinh vào sau sẽ nhảy đúng câu này
+          currentQuestionIndex: liveProblemIdx 
         }
       });
     }
@@ -139,7 +155,7 @@ const AdminPanel: React.FC<AdminPanelProps> = (props) => {
       return;
     }
     if (!loadedSetId) {
-      notify("Hãy nạp một bộ đề trước khi mở đấu trường!", "error");
+      notify("Hãy nạp một bộ đề từ Kho Đề trước!", "error");
       return;
     }
 
@@ -276,7 +292,7 @@ const AdminPanel: React.FC<AdminPanelProps> = (props) => {
                </div>
                <div className="text-left">
                   <h3 className="text-2xl font-black text-slate-800 uppercase italic leading-none">ARENA CONTROL</h3>
-                  <p className="text-[10px] font-black text-slate-400 uppercase mt-2 italic tracking-widest leading-none">Trực tiếp: {loadedSetTitle || 'Chưa nạp đề'}</p>
+                  <p className="text-[10px] font-black text-slate-400 uppercase mt-2 italic tracking-widest leading-none">Dữ liệu sẵn sàng: {loadedSetTitle || 'Trống'}</p>
                </div>
             </div>
             <div className="flex gap-4">
@@ -284,11 +300,11 @@ const AdminPanel: React.FC<AdminPanelProps> = (props) => {
                  <span className="text-xl">🎨</span> {isWhiteboardActive ? 'ĐANG GIẢNG BÀI' : 'MỞ BẢNG TRẮNG'}
                </button>
                {!isLiveGameActive ? (
-                 <button onClick={handleStartLiveMatch} className="px-12 py-5 bg-blue-600 text-white rounded-2xl font-black uppercase italic shadow-xl hover:scale-105 transition-all flex items-center gap-3">
+                 <button onClick={handleStartLiveMatch} className="px-12 py-5 bg-blue-600 text-white rounded-2xl font-black uppercase italic shadow-xl hover:scale-105 transition-all flex items-center gap-3 border-b-8 border-blue-800">
                    <span className="text-xl">⚡</span> KHỞI CHẠY ARENA
                  </button>
                ) : (
-                 <button onClick={handleNextLiveQuestion} className="px-12 py-5 bg-amber-500 text-white rounded-2xl font-black uppercase italic shadow-xl hover:scale-105 transition-all flex items-center gap-3">
+                 <button onClick={handleNextLiveQuestion} className="px-12 py-5 bg-amber-500 text-white rounded-2xl font-black uppercase italic shadow-xl hover:scale-105 transition-all flex items-center gap-3 border-b-8 border-amber-700">
                    <span className="text-xl">⏩</span> CÂU KẾ TIẾP ({liveProblemIdx + 1})
                  </button>
                )}
@@ -304,8 +320,17 @@ const AdminPanel: React.FC<AdminPanelProps> = (props) => {
                     <div className="h-full flex flex-col items-center justify-center text-center bg-slate-50/50 rounded-[2.5rem]">
                        <div className="text-[10rem] opacity-5 select-none absolute">📺</div>
                        <div className="relative z-10 px-10">
-                          <p className="font-black uppercase italic tracking-[0.3em] text-2xl text-slate-300">Whiteboard Standby</p>
-                          <p className="text-slate-400 font-bold mt-4 italic text-xs max-w-sm mx-auto">Sử dụng bảng vẽ để minh họa bài giảng trực tiếp cho học sinh.</p>
+                          {isLiveGameActive ? (
+                            <>
+                              <p className="font-black uppercase italic tracking-[0.3em] text-2xl text-blue-600 animate-pulse">Trận đấu đang diễn ra</p>
+                              <p className="text-slate-400 font-bold mt-4 italic text-xs max-w-sm mx-auto">Học sinh đang tập trung làm bài. Thầy có thể mở Bảng trắng để hỗ trợ giải thích.</p>
+                            </>
+                          ) : (
+                            <>
+                              <p className="font-black uppercase italic tracking-[0.3em] text-2xl text-slate-300">Đấu trường sẵn sàng</p>
+                              <p className="text-slate-400 font-bold mt-4 italic text-xs max-w-sm mx-auto">Nhấn "Khởi chạy Arena" để bắt đầu phát đề cho toàn bộ học sinh trong phòng.</p>
+                            </>
+                          )}
                        </div>
                     </div>
                   )}
@@ -319,7 +344,7 @@ const AdminPanel: React.FC<AdminPanelProps> = (props) => {
                        <span className="w-8 h-8 bg-blue-100 text-blue-600 rounded-lg flex items-center justify-center text-sm shadow-sm">👥</span>
                        HỌC SINH ({connectedStudents.length})
                     </h4>
-                    <span className="text-[9px] font-black bg-slate-900 text-white px-3 py-1 rounded-full animate-pulse">LIVE</span>
+                    <span className={`text-[9px] font-black px-3 py-1 rounded-full ${isLiveGameActive ? 'bg-emerald-500 animate-pulse' : 'bg-slate-300'} text-white`}>{isLiveGameActive ? 'LIVE' : 'CHỜ'}</span>
                   </div>
                   
                   <div className="flex-1 overflow-y-auto pr-1 custom-scrollbar no-scrollbar border-t border-slate-50">
@@ -337,7 +362,7 @@ const AdminPanel: React.FC<AdminPanelProps> = (props) => {
                                  {res.isCorrect ? 'ĐÚNG' : 'SAI'}
                                </span>
                              ) : (
-                               <span className="text-[8px] font-black text-slate-300 uppercase italic italic">Thinking...</span>
+                               <span className="text-[8px] font-black text-slate-300 uppercase italic italic">{isLiveGameActive ? 'Đang giải...' : 'Sẵn sàng'}</span>
                              )}
                            </div>
                         </div>
@@ -345,7 +370,7 @@ const AdminPanel: React.FC<AdminPanelProps> = (props) => {
                      }) : (
                        <div className="h-full flex flex-col items-center justify-center text-slate-200 italic text-sm text-center px-6 gap-4 py-10 opacity-60">
                           <div className="text-5xl">📡</div>
-                          Đang đợi kết nối...
+                          Đang đợi học sinh kết nối mã {teacherMaGV}...
                        </div>
                      )}
                   </div>
@@ -354,23 +379,23 @@ const AdminPanel: React.FC<AdminPanelProps> = (props) => {
                <div className="bg-white p-6 rounded-[2.5rem] border-4 border-slate-50 shadow-xl flex flex-col h-[225px]">
                   <h4 className="text-lg font-black text-slate-800 uppercase italic mb-4 flex items-center gap-3 shrink-0">
                      <span className="w-8 h-8 bg-purple-100 text-purple-600 rounded-lg flex items-center justify-center text-sm shadow-sm">📄</span>
-                     ARENA DATA
+                     DỮ LIỆU PHÒNG
                   </h4>
                   {loadedSetId ? (
                     <div className="bg-slate-900 p-5 rounded-[1.8rem] text-white flex-1 flex flex-col justify-center text-left relative overflow-hidden">
-                       <div className="text-[9px] font-black uppercase text-blue-400 mb-1 italic">ĐANG DẠY</div>
+                       <div className="text-[9px] font-black uppercase text-blue-400 mb-1 italic">BỘ ĐỀ ĐANG NẠP</div>
                        <div className="text-lg font-black uppercase italic leading-tight mb-4 truncate text-blue-100">{loadedSetTitle}</div>
                        <div className="flex items-center gap-6">
                           <div>
-                             <div className="text-[8px] font-black uppercase text-white/40 italic">CÂU HIỆN TẠI</div>
-                             <div className="text-xl font-black text-white leading-none">{liveProblemIdx + 1} / {rounds[activeRoundIdx]?.problems?.length || 0}</div>
+                             <div className="text-[8px] font-black uppercase text-white/40 italic">TIẾN ĐỘ</div>
+                             <div className="text-xl font-black text-white leading-none">{isLiveGameActive ? `${liveProblemIdx + 1} / ${rounds[activeRoundIdx]?.problems?.length || 0}` : 'Chưa bắt đầu'}</div>
                           </div>
                        </div>
                     </div>
                   ) : (
                     <div className="h-full flex flex-col items-center justify-center text-slate-200 italic text-xs text-center px-6 gap-2 opacity-50">
                        <div className="text-4xl">📁</div>
-                       Arena chưa có đề.
+                       Vào Kho Đề nhấn "Dạy Live" để nạp dữ liệu.
                     </div>
                   )}
                </div>
@@ -392,7 +417,7 @@ const AdminPanel: React.FC<AdminPanelProps> = (props) => {
           <div className="text-4xl bg-emerald-50 w-16 h-16 rounded-2xl flex items-center justify-center shadow-inner">📗</div>
           <div className="flex-1 grid grid-cols-1 md:grid-cols-12 gap-4">
             <div className="md:col-span-6 text-left">
-              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1 block ml-1 italic text-left">Tên bộ đề (Nạp vào phòng GV khi bấm Sửa)</label>
+              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1 block ml-1 italic text-left">Tên bộ đề</label>
               <input type="text" className="w-full bg-slate-50 border-2 border-slate-100 rounded-2xl px-6 py-3 font-black text-slate-700 outline-none focus:border-blue-200 text-sm" value={currentTitle} onChange={e => setCurrentTitle(e.target.value)} placeholder="Nhập tên bộ đề..." />
             </div>
             <div className="md:col-span-4 text-left">
