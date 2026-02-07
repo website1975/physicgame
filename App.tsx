@@ -7,16 +7,6 @@ import TeacherPortal from './components/TeacherPortal';
 import StudentArenaFlow from './components/StudentArenaFlow';
 import GameEngine from './components/GameEngine';
 
-const getSafeEnv = (key: string): string => {
-  try {
-    const fromProcess = (process.env as any)[key] || (process.env as any)[`VITE_${key}`];
-    if (fromProcess) return fromProcess;
-    const fromMeta = (import.meta as any).env?.[key] || (import.meta as any).env?.[`VITE_${key}`];
-    if (fromMeta) return fromMeta;
-  } catch (e) {}
-  return "";
-};
-
 const App: React.FC = () => {
   const [gameState, setGameState] = useState<GameState>('LOBBY');
   const [playerName, setPlayerName] = useState('');
@@ -44,10 +34,10 @@ const App: React.FC = () => {
 
   const checkAI = async () => {
     setApiStatus('checking');
-    const key = getSafeEnv('API_KEY');
-    if (!key) { setApiStatus('offline'); return; }
+    // Guidelines: Use process.env.API_KEY directly.
+    if (!process.env.API_KEY) { setApiStatus('offline'); return; }
     try {
-      const ai = new GoogleGenAI({ apiKey: key });
+      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
       await ai.models.generateContent({ model: 'gemini-3-flash-preview', contents: 'ping', config: { maxOutputTokens: 1 } });
       setApiStatus('online');
     } catch (e) { setApiStatus('offline'); }
@@ -104,7 +94,7 @@ const App: React.FC = () => {
 
       {(gameState === 'TEACHER_LOGIN' || gameState === 'STUDENT_SETUP') && (
         <div className="min-h-screen flex items-center justify-center p-4">
-          <div className="bg-white rounded-[4rem] p-12 shadow-2xl max-w-md w-full text-center animate-in slide-in-from-bottom-4">
+          <div className="bg-white rounded-[4rem] p-12 shadow-2xl max-md w-full text-center animate-in slide-in-from-bottom-4">
             <h2 className="text-3xl font-black text-slate-800 uppercase italic mb-4">{gameState === 'TEACHER_LOGIN' ? 'ĐĂNG NHẬP' : 'KẾT NỐI'}</h2>
             {errorMsg && <div className="mb-6 p-4 bg-red-50 text-red-500 rounded-2xl font-bold text-xs border-2 border-red-100">{errorMsg}</div>}
             <div className="space-y-4 mb-8">
