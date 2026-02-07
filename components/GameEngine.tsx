@@ -17,7 +17,14 @@ interface GameEngineProps {
   setGameState: (s: GameState) => void;
   playerName: string;
   currentTeacher: Teacher;
-  matchData: { setId: string, title: string, rounds: Round[], opponentName?: string, joinedRoom?: any };
+  matchData: { 
+    setId: string, 
+    title: string, 
+    rounds: Round[], 
+    opponentName?: string, 
+    joinedRoom?: any,
+    startIndex?: number // Nhận chỉ số bắt đầu từ props
+  };
   onExit: () => void;
 }
 
@@ -25,7 +32,7 @@ const GameEngine: React.FC<GameEngineProps> = ({
   gameState, setGameState, playerName, currentTeacher, matchData, onExit 
 }) => {
   const [currentRoundIdx, setCurrentRoundIdx] = useState(0);
-  const [currentProblemIdx, setCurrentProblemIdx] = useState(0);
+  const [currentProblemIdx, setCurrentProblemIdx] = useState(matchData.startIndex || 0); // Sử dụng startIndex
   const [score, setScore] = useState(0);
   const [opponentScore, setOpponentScore] = useState(0);
   const [timeLeft, setTimeLeft] = useState(DEFAULT_TIME);
@@ -36,7 +43,6 @@ const GameEngine: React.FC<GameEngineProps> = ({
   const [countdown, setCountdown] = useState<number | null>(null);
   const [showExitConfirm, setShowExitConfirm] = useState(false);
   
-  // Real-time Remote Control
   const [isWhiteboardActive, setIsWhiteboardActive] = useState(false);
   const isTeacherRoom = matchData.joinedRoom?.code === 'TEACHER_ROOM';
 
@@ -46,6 +52,11 @@ const GameEngine: React.FC<GameEngineProps> = ({
   const rounds = matchData.rounds;
   const currentProblem = rounds[currentRoundIdx]?.problems[currentProblemIdx];
 
+  // Khởi chạy câu hỏi đầu tiên khi component mount
+  useEffect(() => {
+    startProblem();
+  }, []);
+
   useEffect(() => {
     if (isTeacherRoom) {
       const channel = supabase.channel(`control_TEACHER_ROOM_${currentTeacher.id}`, {
@@ -54,15 +65,13 @@ const GameEngine: React.FC<GameEngineProps> = ({
 
       channel
         .on('presence', { event: 'sync' }, () => {
-          // Sync presence if needed
+          // Sync presence
         })
         .on('broadcast', { event: 'teacher_next_question' }, ({ payload }) => {
-          // SỬ DỤNG CHỈ SỐ CÂU HỎI TRỰC TIẾP TỪ GV
           if (payload && typeof payload.nextIndex === 'number') {
              setCurrentProblemIdx(payload.nextIndex);
              startProblem();
           } else {
-             // Fallback cho logic cũ nếu không có payload
              handleNext();
           }
         })
@@ -107,22 +116,18 @@ const GameEngine: React.FC<GameEngineProps> = ({
   }, [isArenaA, isTeacherRoom, matchData.joinedRoom, playerName]);
 
   const startProblem = () => {
-    // Lưu ý: React cập nhật state bất đồng bộ, nên startProblem có thể vẫn thấy currentProblem cũ
-    // Tuy nhiên cơ chế countdown sẽ giúp bù đắp khoảng thời gian này
     setUserAnswer('');
     setFeedback(null);
     setGameState('STARTING_ROUND');
     setCountdown(3);
     
-    // Đảm bảo lấy được problem mới nhất khi hết countdown
     const interval = setInterval(() => {
       setCountdown(prev => {
         if (prev && prev <= 1) {
           clearInterval(interval);
           setGameState(isArenaA || isTeacherRoom ? 'ANSWERING' : 'WAITING_FOR_BUZZER');
-          // Lấy problem thực tế lúc này
-          const prob = rounds[currentRoundIdx]?.problems[currentProblemIdx];
-          setTimeLeft(prob?.timeLimit || DEFAULT_TIME);
+          // Update state logic might be delayed, but the next render will catch it
+          setTimeLeft(DEFAULT_TIME); 
           setBuzzerWinner(isArenaA || isTeacherRoom ? 'YOU' : null);
           return null;
         }
