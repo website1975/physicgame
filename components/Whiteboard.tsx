@@ -1,10 +1,49 @@
 
-import React, { useRef, useEffect, useState } from 'react';
+import React, { useRef, useEffect, useState, useCallback } from 'react';
 
 interface WhiteboardProps {
   isTeacher: boolean;
   channel: any;
   roomCode: string;
+}
+
+// Helper functions for audio encoding/decoding (Standard PCM 16kHz)
+function encodeAudio(bytes: Uint8Array) {
+  let binary = '';
+  const len = bytes.byteLength;
+  for (let i = 0; i < len; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return btoa(binary);
+}
+
+function decodeAudio(base64: string) {
+  const binaryString = atob(base64);
+  const len = binaryString.length;
+  const bytes = new Uint8Array(len);
+  for (let i = 0; i < len; i++) {
+    bytes[i] = binaryString.charCodeAt(i);
+  }
+  return bytes;
+}
+
+async function decodeAudioData(
+  data: Uint8Array,
+  ctx: AudioContext,
+  sampleRate: number,
+  numChannels: number,
+): Promise<AudioBuffer> {
+  const dataInt16 = new Int16Array(data.buffer);
+  const frameCount = dataInt16.length / numChannels;
+  const buffer = ctx.createBuffer(numChannels, frameCount, sampleRate);
+
+  for (let channel = 0; channel < numChannels; channel++) {
+    const channelData = buffer.getChannelData(channel);
+    for (let i = 0; i < frameCount; i++) {
+      channelData[i] = dataInt16[i * numChannels + channel] / 32768.0;
+    }
+  }
+  return buffer;
 }
 
 const Whiteboard: React.FC<WhiteboardProps> = ({ isTeacher, channel, roomCode }) => {
@@ -16,7 +55,97 @@ const Whiteboard: React.FC<WhiteboardProps> = ({ isTeacher, channel, roomCode })
   const [brushSize, setBrushSize] = useState(3);
   const [showStatus, setShowStatus] = useState(false);
   
+  // Audio states
+  const [isMicOn, setIsMicOn] = useState(false);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const nextStartTimeRef = useRef(0);
+  const streamRef = useRef<MediaStream | null>(null);
+  const processorRef = useRef<ScriptProcessorNode | null>(null);
+
   const ASPECT_RATIO = 16 / 9;
+
+  // --- AUDIO LOGIC ---
+
+  // Initialize Audio for Student (Receiver)
+  useEffect(() => {
+    if (!isTeacher) {
+      audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
+    }
+    return () => {
+      audioContextRef.current?.close();
+    };
+  }, [isTeacher]);
+
+  const startVoiceBroadcast = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      streamRef.current = stream;
+      
+      const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
+      const source = audioCtx.createMediaStreamSource(stream);
+      const scriptProcessor = audioCtx.createScriptProcessor(4096, 1, 1);
+      
+      scriptProcessor.onaudioprocess = (e) => {
+        const inputData = e.inputBuffer.getChannelData(0);
+        const l = inputData.length;
+        const int16 = new Int16Array(l);
+        for (let i = 0; i < l; i++) {
+          int16[i] = inputData[i] * 32768;
+        }
+        const base64Audio = encodeAudio(new Uint8Array(int16.buffer));
+        
+        if (channel) {
+          channel.send({
+            type: 'broadcast',
+            event: 'voice_stream',
+            payload: { data: base64Audio }
+          });
+        }
+      };
+
+      source.connect(scriptProcessor);
+      scriptProcessor.connect(audioCtx.destination);
+      processorRef.current = scriptProcessor;
+      setIsMicOn(true);
+    } catch (err) {
+      console.error("Không thể truy cập Microphone:", err);
+      alert("Vui lòng cấp quyền Microphone để giảng bài!");
+    }
+  };
+
+  const stopVoiceBroadcast = () => {
+    streamRef.current?.getTracks().forEach(track => track.stop());
+    processorRef.current?.disconnect();
+    setIsMicOn(false);
+  };
+
+  const handleVoiceData = useCallback(async (payload: any) => {
+    if (isTeacher || !audioContextRef.current) return;
+    
+    const ctx = audioContextRef.current;
+    if (ctx.state === 'suspended') await ctx.resume();
+
+    const audioBuffer = await decodeAudioData(
+      decodeAudio(payload.data),
+      ctx,
+      16000,
+      1
+    );
+
+    const source = ctx.createBufferSource();
+    source.buffer = audioBuffer;
+    source.connect(ctx.destination);
+    
+    const currentTime = ctx.currentTime;
+    if (nextStartTimeRef.current < currentTime) {
+      nextStartTimeRef.current = currentTime;
+    }
+    
+    source.start(nextStartTimeRef.current);
+    nextStartTimeRef.current += audioBuffer.duration;
+  }, [isTeacher]);
+
+  // --- DRAWING LOGIC ---
 
   const getCanvasCoords = (e: React.PointerEvent | PointerEvent) => {
     const canvas = canvasRef.current;
@@ -75,14 +204,17 @@ const Whiteboard: React.FC<WhiteboardProps> = ({ isTeacher, channel, roomCode })
     });
     if (containerRef.current) observer.observe(containerRef.current);
 
-    if (!isTeacher && channel) {
+    if (channel) {
       const handleDraw = ({ payload }: any) => drawRemote(payload);
       const handleClear = () => clearLocal();
+      const handleVoice = ({ payload }: any) => handleVoiceData(payload);
+
       channel.on('broadcast', { event: 'draw_stroke' }, handleDraw);
       channel.on('broadcast', { event: 'clear_canvas' }, handleClear);
+      channel.on('broadcast', { event: 'voice_stream' }, handleVoice);
     }
     return () => observer.disconnect();
-  }, [isTeacher, channel]);
+  }, [channel, handleVoiceData]);
 
   useEffect(() => {
     if (contextRef.current) {
@@ -166,7 +298,16 @@ const Whiteboard: React.FC<WhiteboardProps> = ({ isTeacher, channel, roomCode })
                <span className="text-white font-black text-[10px] w-4 opacity-50">{brushSize}</span>
             </div>
           </div>
-          <button onClick={handleClear} className="px-5 py-2 bg-red-500/10 text-red-400 hover:bg-red-500 hover:text-white rounded-xl font-black text-[9px] uppercase transition-all border border-red-500/20">Xoá Bảng</button>
+          
+          <div className="flex items-center gap-3">
+             <button 
+                onClick={isMicOn ? stopVoiceBroadcast : startVoiceBroadcast} 
+                className={`flex items-center gap-2 px-5 py-2 rounded-xl font-black text-[9px] uppercase transition-all border ${isMicOn ? 'bg-emerald-600 text-white border-emerald-500 animate-pulse' : 'bg-slate-700 text-slate-300 border-white/10 hover:bg-slate-600'}`}
+             >
+                <span className="text-sm">{isMicOn ? '🎤 Mic Đang Bật' : '🎙️ Bật Mic Giảng Bài'}</span>
+             </button>
+             <button onClick={handleClear} className="px-5 py-2 bg-red-500/10 text-red-400 hover:bg-red-500 hover:text-white rounded-xl font-black text-[9px] uppercase transition-all border border-red-500/20">Xoá Bảng</button>
+          </div>
         </div>
       )}
 
@@ -188,14 +329,14 @@ const Whiteboard: React.FC<WhiteboardProps> = ({ isTeacher, channel, roomCode })
           className="absolute top-4 left-4 z-50 flex items-center gap-3 cursor-help pointer-events-auto"
         >
            <div className="relative flex items-center justify-center w-8 h-8">
-              <div className="absolute inset-0 bg-blue-500 rounded-full animate-ping opacity-20" />
-              <div className="relative w-3 h-3 bg-blue-500 rounded-full border-2 border-white shadow-[0_0_10px_rgba(59,130,246,0.5)]" />
+              <div className={`absolute inset-0 rounded-full animate-ping opacity-20 ${isMicOn ? 'bg-emerald-500' : 'bg-blue-500'}`} />
+              <div className={`relative w-3 h-3 rounded-full border-2 border-white shadow-lg ${isMicOn ? 'bg-emerald-500 shadow-emerald-500/50' : 'bg-blue-500 shadow-blue-500/50'}`} />
            </div>
            
-           <div className={`transition-all duration-300 overflow-hidden flex items-center ${showStatus ? 'max-w-xs opacity-100 translate-x-0' : 'max-w-0 opacity-0 -translate-x-4'}`}>
+           <div className={`transition-all duration-300 overflow-hidden flex items-center ${showStatus || isMicOn ? 'max-w-xs opacity-100 translate-x-0' : 'max-w-0 opacity-0 -translate-x-4'}`}>
               <div className="bg-slate-900/90 backdrop-blur-md px-4 py-2 rounded-xl border border-white/10 shadow-2xl whitespace-nowrap">
                  <span className="text-white text-[10px] font-black uppercase tracking-widest italic">
-                    {isTeacher ? 'LIVE BOARD: GIÁO VIÊN' : 'CHẾ ĐỘ: THEO DÕI BÀI GIẢNG'}
+                    {isTeacher ? (isMicOn ? 'ĐANG PHÁT GIỌNG NÓI TRỰC TIẾP...' : 'LIVE BOARD: GIÁO VIÊN') : 'CHẾ ĐỘ: THEO DÕI BÀI GIẢNG & VOICE'}
                  </span>
               </div>
            </div>
