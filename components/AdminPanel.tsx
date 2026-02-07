@@ -30,13 +30,14 @@ interface AdminPanelProps {
   categories: string[];
   fullView?: boolean;
   onResetToNew: () => void;
+  onLoadSet: (setId: string, title: string) => Promise<boolean>;
 }
 
 const AdminPanel: React.FC<AdminPanelProps> = (props) => {
   const { 
     rounds, setRounds, onSaveSet, loadedSetTitle, loadedSetId, 
     loadedSetTopic, teacherId, adminTab, setAdminTab, onStartGame,
-    onNextQuestion, currentProblemIdx, totalProblems
+    onNextQuestion, currentProblemIdx, totalProblems, examSets
   } = props;
 
   const [activeRoundIdx, setActiveRoundIdx] = useState(0);
@@ -59,11 +60,11 @@ const AdminPanel: React.FC<AdminPanelProps> = (props) => {
   const [roundToDeleteIdx, setRoundToDeleteIdx] = useState<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Real-time Control State
   const [connectedStudents, setConnectedStudents] = useState<string[]>([]);
   const [studentResults, setStudentResults] = useState<Record<string, { answered: boolean, isCorrect: boolean }>>({});
   const [isWhiteboardActive, setIsWhiteboardActive] = useState(false);
   const [isLiveGameActive, setIsLiveGameActive] = useState(false);
+  const [liveProblemIdx, setLiveProblemIdx] = useState(0); // Quản lý câu hỏi đang chạy LIVE
   const controlChannelRef = useRef<any>(null);
 
   useEffect(() => {
@@ -127,6 +128,7 @@ const AdminPanel: React.FC<AdminPanelProps> = (props) => {
 
     setIsLiveGameActive(true);
     setStudentResults({});
+    setLiveProblemIdx(0); // Reset về câu 1
     if (controlChannelRef.current) {
       controlChannelRef.current.send({
         type: 'broadcast',
@@ -138,10 +140,23 @@ const AdminPanel: React.FC<AdminPanelProps> = (props) => {
   };
 
   const handleNextLiveQuestion = () => {
+    const nextIdx = liveProblemIdx + 1;
+    const totalInRound = rounds[activeRoundIdx]?.problems?.length || 0;
+    
+    if (nextIdx >= totalInRound) {
+       notify("Đã hết câu hỏi trong vòng này!", "error");
+       return;
+    }
+
+    setLiveProblemIdx(nextIdx);
     setStudentResults({}); 
     if (controlChannelRef.current) {
-      controlChannelRef.current.send({ type: 'broadcast', event: 'teacher_next_question' });
-      notify("Đã chuyển sang câu tiếp theo cho cả lớp!");
+      controlChannelRef.current.send({ 
+        type: 'broadcast', 
+        event: 'teacher_next_question',
+        payload: { nextIndex: nextIdx } // Gửi chính xác chỉ số câu tiếp theo
+      });
+      notify(`Đã chuyển sang câu ${nextIdx + 1}!`);
     }
   };
 
@@ -171,26 +186,6 @@ const AdminPanel: React.FC<AdminPanelProps> = (props) => {
     if (updated[activeRoundIdx]) {
       updated[activeRoundIdx].description = desc;
       setRounds(updated);
-    }
-  };
-
-  const handleAIParse = async () => {
-    if (!rawText.trim()) return;
-    setIsParsing(true);
-    try {
-      const parsedProbs = await parseQuestionsFromText(rawText);
-      const updated = [...rounds];
-      if (updated[activeRoundIdx]) {
-        updated[activeRoundIdx].problems.push(...parsedProbs);
-        setRounds(updated);
-        setRawText('');
-        setShowAIInput(false);
-        notify(`AI đã trích xuất thành công ${parsedProbs.length} câu hỏi!`);
-      }
-    } catch (e) {
-      notify("Lỗi AI không thể phân tích", "error");
-    } finally {
-      setIsParsing(false);
     }
   };
 
@@ -255,96 +250,124 @@ const AdminPanel: React.FC<AdminPanelProps> = (props) => {
 
   if (adminTab === 'CONTROL') {
     return (
-      <div className="h-full flex flex-col gap-6 animate-in fade-in duration-500">
-         <header className="bg-white p-8 rounded-[3rem] shadow-xl border-4 border-slate-50 flex flex-col md:flex-row items-center justify-between gap-6">
+      <div className="flex flex-col gap-6 animate-in fade-in duration-500 text-left">
+         {/* HEADER CỐ ĐỊNH PHÍA TRÊN */}
+         <header className="bg-white p-6 rounded-[2.5rem] shadow-xl border-2 border-slate-50 flex flex-col md:flex-row items-center justify-between gap-6 shrink-0">
             <div className="flex items-center gap-6">
-               <div className="bg-slate-900 text-white p-6 rounded-[2rem] text-center min-w-[150px] shadow-2xl border-b-8 border-slate-800">
-                  <span className="text-[10px] font-black uppercase text-blue-400 block mb-1">MÃ PHÒNG HỌC</span>
-                  <div className="text-4xl font-black tracking-widest uppercase italic">{teacherMaGV || '...'}</div>
+               <div className="bg-slate-900 text-white p-5 rounded-[2rem] text-center min-w-[140px] shadow-xl border-b-8 border-slate-800">
+                  <span className="text-[10px] font-black uppercase text-blue-400 block mb-1">MÃ PHÒNG</span>
+                  <div className="text-3xl font-black tracking-widest uppercase italic leading-none">{teacherMaGV || '...'}</div>
                </div>
-               <div>
-                  <h3 className="text-3xl font-black text-slate-800 uppercase italic leading-none">TRUNG TÂM ĐIỀU HÀNH</h3>
-                  <p className="text-[10px] font-black text-slate-400 uppercase mt-2 italic tracking-widest">Học sinh nhập mã trên để vào lớp của Thầy/Cô</p>
+               <div className="text-left">
+                  <h3 className="text-2xl font-black text-slate-800 uppercase italic leading-none">ARENA CONTROL</h3>
+                  <p className="text-[10px] font-black text-slate-400 uppercase mt-2 italic tracking-widest leading-none">Theo dõi lớp học và bảng vẽ tương tác</p>
                </div>
             </div>
             <div className="flex gap-4">
-               <button onClick={toggleWhiteboard} className={`px-8 py-5 rounded-2xl font-black uppercase italic shadow-lg transition-all flex items-center gap-3 ${isWhiteboardActive ? 'bg-emerald-600 text-white' : 'bg-slate-100 text-slate-400 hover:bg-slate-200'}`}>
-                 <span>🎨</span> {isWhiteboardActive ? 'ĐANG GIẢNG BÀI' : 'MỞ BẢNG TRẮNG'}
+               <button onClick={toggleWhiteboard} className={`px-10 py-5 rounded-2xl font-black uppercase italic shadow-lg transition-all flex items-center gap-3 ${isWhiteboardActive ? 'bg-emerald-600 text-white' : 'bg-slate-100 text-slate-400 hover:bg-slate-200'}`}>
+                 <span className="text-xl">🎨</span> {isWhiteboardActive ? 'ĐANG GIẢNG BÀI' : 'MỞ BẢNG TRẮNG'}
                </button>
                {!isLiveGameActive ? (
-                 <button onClick={handleStartLiveMatch} className="px-10 py-5 bg-blue-600 text-white rounded-2xl font-black uppercase italic shadow-xl hover:scale-105 transition-all flex items-center gap-3">
-                   <span>⚡</span> KHỞI CHẠY TRẬN ĐẤU
+                 <button onClick={handleStartLiveMatch} className="px-12 py-5 bg-blue-600 text-white rounded-2xl font-black uppercase italic shadow-xl hover:scale-105 transition-all flex items-center gap-3">
+                   <span className="text-xl">⚡</span> KHỞI CHẠY ARENA
                  </button>
                ) : (
-                 <button onClick={handleNextLiveQuestion} className="px-10 py-5 bg-amber-500 text-white rounded-2xl font-black uppercase italic shadow-xl hover:scale-105 transition-all flex items-center gap-3">
-                   <span>⏩</span> CÂU KẾ TIẾP
+                 <button onClick={handleNextLiveQuestion} className="px-12 py-5 bg-amber-500 text-white rounded-2xl font-black uppercase italic shadow-xl hover:scale-105 transition-all flex items-center gap-3">
+                   <span className="text-xl">⏩</span> CÂU KẾ TIẾP ({liveProblemIdx + 1})
                  </button>
                )}
             </div>
          </header>
 
-         <div className="flex-1 grid grid-cols-12 gap-6 min-h-0">
-            <div className="col-span-8 flex flex-col gap-6">
-               <div className="flex-1 bg-white rounded-[3.5rem] border-4 border-slate-50 shadow-2xl p-4 overflow-hidden relative">
+         {/* GRID CHÍNH: CHIỀU CAO ĐÃ ĐƯỢC TỐI ƯU */}
+         <div className="grid grid-cols-12 gap-6 items-start">
+            {/* CỘT TRÁI: BẢNG TRẮNG - CHIỀU CAO 700PX CỐ ĐỊNH */}
+            <div className="col-span-8">
+               <div className="bg-white rounded-[3rem] border-4 border-slate-50 shadow-2xl overflow-hidden relative h-[700px]">
                   {isWhiteboardActive ? (
                     <Whiteboard isTeacher={true} channel={controlChannelRef.current} roomCode="TEACHER_ROOM" />
                   ) : (
-                    <div className="h-full flex flex-col items-center justify-center text-center">
-                       <div className="text-[15rem] opacity-5 select-none absolute">📺</div>
-                       <div className="relative z-10">
-                          <p className="font-black uppercase italic tracking-[0.3em] text-2xl text-slate-300">Đấu trường đang sẵn sàng</p>
-                          <p className="text-slate-400 font-bold mt-4 italic">Bấm "Khởi chạy" để bắt đầu bài thi cho tất cả học sinh đang chờ</p>
+                    <div className="h-full flex flex-col items-center justify-center text-center bg-slate-50/50 rounded-[2.5rem]">
+                       <div className="text-[10rem] opacity-5 select-none absolute">📺</div>
+                       <div className="relative z-10 px-10">
+                          <p className="font-black uppercase italic tracking-[0.3em] text-2xl text-slate-300">Whiteboard Standby</p>
+                          <p className="text-slate-400 font-bold mt-4 italic text-xs max-w-sm mx-auto">Sử dụng bảng vẽ để minh họa bài giảng trực tiếp cho học sinh.</p>
                        </div>
                     </div>
                   )}
                </div>
             </div>
 
-            <div className="col-span-4 flex flex-col gap-6 overflow-hidden">
-               <div className="bg-white p-8 rounded-[3rem] border-4 border-slate-50 shadow-xl flex flex-col h-1/2 overflow-hidden">
-                  <h4 className="text-xl font-black text-slate-800 uppercase italic mb-6 flex items-center gap-3">
-                     <span className="w-8 h-8 bg-blue-100 text-blue-600 rounded-lg flex items-center justify-center text-sm">👥</span>
-                     HỌC SINH ({connectedStudents.length})
-                  </h4>
-                  <div className="flex-1 overflow-y-auto space-y-3 no-scrollbar">
+            {/* CỘT PHẢI: CHIỀU CAO ĐỘC LẬP VÀ TINH GỌN */}
+            <div className="col-span-4 flex flex-col gap-6">
+               {/* 1. DANH SÁCH HỌC SINH - DẠNG HÀNG (TABLE ROWS) */}
+               <div className="bg-white p-6 rounded-[2.5rem] border-4 border-slate-50 shadow-xl flex flex-col h-[450px]">
+                  <div className="flex justify-between items-center mb-6 shrink-0">
+                    <h4 className="text-lg font-black text-slate-800 uppercase italic flex items-center gap-3">
+                       <span className="w-8 h-8 bg-blue-100 text-blue-600 rounded-lg flex items-center justify-center text-sm shadow-sm">👥</span>
+                       HỌC SINH ({connectedStudents.length})
+                    </h4>
+                    <span className="text-[9px] font-black bg-slate-900 text-white px-3 py-1 rounded-full animate-pulse">LIVE</span>
+                  </div>
+                  
+                  <div className="flex-1 overflow-y-auto pr-1 custom-scrollbar no-scrollbar border-t border-slate-50">
                      {connectedStudents.length > 0 ? connectedStudents.map((s, i) => {
                        const res = studentResults[s];
                        return (
-                        <div key={i} className={`p-4 rounded-2xl border-2 flex items-center gap-4 transition-all ${res ? (res.isCorrect ? 'bg-emerald-50 border-emerald-100' : 'bg-red-50 border-red-100') : 'bg-slate-50 border-slate-100'}`}>
-                           <div className="w-10 h-10 bg-white rounded-full flex items-center justify-center text-lg border border-slate-200">👤</div>
-                           <div className="flex-1">
-                              <div className="font-black text-slate-700 uppercase italic text-sm">{s}</div>
-                              <div className={`text-[9px] font-black uppercase ${res ? (res.isCorrect ? 'text-emerald-500' : 'text-red-500') : 'text-slate-400'}`}>
-                                 {res ? (res.isCorrect ? 'ĐÃ LÀM: ĐÚNG ✅' : 'ĐÃ LÀM: SAI ❌') : 'ĐANG LÀM... ⏳'}
-                              </div>
+                        <div key={i} className={`flex items-center gap-4 py-3 px-4 border-b border-slate-50 transition-all hover:bg-slate-50/80 ${res ? (res.isCorrect ? 'bg-emerald-50/30' : 'bg-red-50/30') : ''}`}>
+                           <div className="w-8 h-8 bg-white border border-slate-200 rounded-full flex items-center justify-center text-xs shadow-sm shrink-0">👤</div>
+                           <div className="flex-1 min-w-0">
+                              <div className="font-bold text-slate-700 uppercase italic text-xs truncate">{s}</div>
                            </div>
-                           {res && (
-                             <div className={`w-3 h-3 rounded-full ${res.isCorrect ? 'bg-emerald-500' : 'bg-red-500'} animate-pulse`}></div>
-                           )}
+                           <div className="shrink-0 flex items-center gap-2">
+                             {res ? (
+                               <span className={`text-[9px] font-black uppercase px-2 py-0.5 rounded ${res.isCorrect ? 'bg-emerald-500 text-white' : 'bg-red-500 text-white'}`}>
+                                 {res.isCorrect ? 'ĐÚNG' : 'SAI'}
+                               </span>
+                             ) : (
+                               <span className="text-[8px] font-black text-slate-300 uppercase italic italic">Thinking...</span>
+                             )}
+                           </div>
                         </div>
                        );
                      }) : (
-                       <div className="h-full flex flex-col items-center justify-center text-slate-200 italic text-xs text-center px-10">Đang đợi học sinh nhập mã {teacherMaGV}...</div>
+                       <div className="h-full flex flex-col items-center justify-center text-slate-200 italic text-sm text-center px-6 gap-4 py-10 opacity-60">
+                          <div className="text-5xl">📡</div>
+                          Đang đợi kết nối...
+                       </div>
                      )}
                   </div>
                </div>
 
-               <div className="bg-white p-8 rounded-[3rem] border-4 border-slate-50 shadow-xl flex flex-col h-1/2 overflow-hidden">
-                  <h4 className="text-xl font-black text-slate-800 uppercase italic mb-6 flex items-center gap-3">
-                     <span className="w-8 h-8 bg-purple-100 text-purple-600 rounded-lg flex items-center justify-center text-sm">📄</span>
-                     BỘ ĐỀ ĐÃ NẠP
+               {/* 2. BỘ ĐỀ HIỆN TẠI - THANH TRẠNG THÁI CHUYÊN NGHIỆP */}
+               <div className="bg-white p-6 rounded-[2.5rem] border-4 border-slate-50 shadow-xl flex flex-col h-[225px]">
+                  <h4 className="text-lg font-black text-slate-800 uppercase italic mb-4 flex items-center gap-3 shrink-0">
+                     <span className="w-8 h-8 bg-purple-100 text-purple-600 rounded-lg flex items-center justify-center text-sm shadow-sm">📄</span>
+                     ARENA DATA
                   </h4>
                   {loadedSetId ? (
-                    <div className="bg-slate-950 p-6 rounded-[2.5rem] text-white flex-1 flex flex-col">
-                       <div className="text-[10px] font-black uppercase text-blue-400 mb-2 italic">CHỦ ĐỀ</div>
-                       <div className="text-xl font-black uppercase italic leading-tight mb-8 flex-1 line-clamp-3">{loadedSetTitle}</div>
-                       <div className="grid grid-cols-2 gap-4">
-                          <div className="bg-white/5 p-3 rounded-2xl text-center"><div className="text-[8px] font-black uppercase text-white/50">SỐ CÂU</div><div className="text-xl font-black text-blue-400">{rounds[activeRoundIdx]?.problems?.length || 0}</div></div>
-                          <div className="bg-white/5 p-3 rounded-2xl text-center"><div className="text-[8px] font-black uppercase text-white/50">VÒNG</div><div className="text-xl font-black text-purple-400">{rounds.length}</div></div>
+                    <div className="bg-slate-900 p-5 rounded-[1.8rem] text-white flex-1 flex flex-col justify-center text-left relative overflow-hidden">
+                       <div className="text-[9px] font-black uppercase text-blue-400 mb-1 italic">ĐANG NẠP</div>
+                       <div className="text-lg font-black uppercase italic leading-tight mb-4 truncate text-blue-100">{loadedSetTitle}</div>
+                       <div className="flex items-center gap-6">
+                          <div>
+                             <div className="text-[8px] font-black uppercase text-white/40 italic">CẤU TRÚC</div>
+                             <div className="text-xl font-black text-white leading-none">{rounds[activeRoundIdx]?.problems?.length || 0} <span className="text-[10px]">CÂU</span></div>
+                          </div>
+                          <div className="h-8 w-px bg-white/10" />
+                          <div>
+                             <div className="text-[8px] font-black uppercase text-white/40 italic">VÒNG THI</div>
+                             <div className="text-xl font-black text-white leading-none">{rounds.length} <span className="text-[10px]">VÒNG</span></div>
+                          </div>
                        </div>
+                       {/* Họa tiết trang trí nhỏ */}
+                       <div className="absolute top-0 right-0 w-20 h-20 bg-blue-500/10 rounded-full -mr-10 -mt-10" />
                     </div>
                   ) : (
-                    <div className="h-full flex flex-col items-center justify-center text-slate-200 italic text-xs text-center px-10">Vui lòng vào tab "Kho đề của tôi" và bấm Sửa để nạp đề vào đây.</div>
+                    <div className="h-full flex flex-col items-center justify-center text-slate-200 italic text-xs text-center px-6 gap-2 opacity-50">
+                       <div className="text-4xl">📁</div>
+                       Arena chưa có đề.
+                    </div>
                   )}
                </div>
             </div>
@@ -387,8 +410,8 @@ const AdminPanel: React.FC<AdminPanelProps> = (props) => {
         </div>
       </div>
 
-      {/* TOOLBAR THÊM CÂU HỎI (MỚI) */}
-      <div className="bg-white px-10 py-6 rounded-[2.5rem] shadow-md border-4 border-slate-100 flex items-center justify-around shrink-0 animate-in fade-in slide-in-from-top-2">
+      {/* TOOLBAR THÊM CÂU HỎI */}
+      <div className="bg-white px-10 py-6 rounded-[2.5rem] shadow-md border-4 border-slate-100 flex items-center justify-around shrink-0">
          {[
            { type: QuestionType.MULTIPLE_CHOICE, label: 'Trắc Nghiệm', color: 'blue' },
            { type: QuestionType.TRUE_FALSE, label: 'Đúng / Sai', color: 'emerald' },
