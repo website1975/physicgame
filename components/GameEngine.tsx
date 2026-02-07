@@ -56,8 +56,15 @@ const GameEngine: React.FC<GameEngineProps> = ({
         .on('presence', { event: 'sync' }, () => {
           // Sync presence if needed
         })
-        .on('broadcast', { event: 'teacher_next_question' }, () => {
-          handleNext();
+        .on('broadcast', { event: 'teacher_next_question' }, ({ payload }) => {
+          // SỬ DỤNG CHỈ SỐ CÂU HỎI TRỰC TIẾP TỪ GV
+          if (payload && typeof payload.nextIndex === 'number') {
+             setCurrentProblemIdx(payload.nextIndex);
+             startProblem();
+          } else {
+             // Fallback cho logic cũ nếu không có payload
+             handleNext();
+          }
         })
         .on('broadcast', { event: 'teacher_toggle_whiteboard' }, ({ payload }) => {
           setIsWhiteboardActive(payload.active);
@@ -100,18 +107,23 @@ const GameEngine: React.FC<GameEngineProps> = ({
   }, [isArenaA, isTeacherRoom, matchData.joinedRoom, playerName]);
 
   const startProblem = () => {
-    if (!currentProblem) return;
-    setBuzzerWinner(isArenaA || isTeacherRoom ? 'YOU' : null);
+    // Lưu ý: React cập nhật state bất đồng bộ, nên startProblem có thể vẫn thấy currentProblem cũ
+    // Tuy nhiên cơ chế countdown sẽ giúp bù đắp khoảng thời gian này
     setUserAnswer('');
     setFeedback(null);
     setGameState('STARTING_ROUND');
     setCountdown(3);
+    
+    // Đảm bảo lấy được problem mới nhất khi hết countdown
     const interval = setInterval(() => {
       setCountdown(prev => {
         if (prev && prev <= 1) {
           clearInterval(interval);
           setGameState(isArenaA || isTeacherRoom ? 'ANSWERING' : 'WAITING_FOR_BUZZER');
-          setTimeLeft(currentProblem?.timeLimit || DEFAULT_TIME);
+          // Lấy problem thực tế lúc này
+          const prob = rounds[currentRoundIdx]?.problems[currentProblemIdx];
+          setTimeLeft(prob?.timeLimit || DEFAULT_TIME);
+          setBuzzerWinner(isArenaA || isTeacherRoom ? 'YOU' : null);
           return null;
         }
         return prev ? prev - 1 : null;
@@ -158,7 +170,8 @@ const GameEngine: React.FC<GameEngineProps> = ({
   }, [gameState, timeLeft]);
 
   const submitAnswer = () => {
-    const correct = (currentProblem?.correctAnswer || "").trim().toUpperCase();
+    const prob = rounds[currentRoundIdx]?.problems[currentProblemIdx];
+    const correct = (prob?.correctAnswer || "").trim().toUpperCase();
     const user = userAnswer.trim().toUpperCase();
     const isPerfect = user === correct;
     const fb = { isCorrect: isPerfect, text: isPerfect ? "CHÍNH XÁC!" : `SAI RỒI! Đáp án đúng là: ${correct}`, winner: 'YOU' };
@@ -211,7 +224,6 @@ const GameEngine: React.FC<GameEngineProps> = ({
 
   return (
     <div className="min-h-screen bg-slate-100 flex flex-col p-4 overflow-hidden relative">
-      {/* WHITEBOARD HỌC SINH - Label đã được thu gọn vào đèn tín hiệu bên trong component Whiteboard */}
       {isWhiteboardActive && (
         <div className="fixed inset-0 z-[10000] p-4 md:p-8 bg-slate-950/98 backdrop-blur-3xl animate-in zoom-in flex flex-col items-center justify-center">
           <div className="w-full h-full max-w-[95vw] max-h-[90vh] relative shadow-[0_0_100px_rgba(0,0,0,0.5)]">
