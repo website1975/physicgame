@@ -23,7 +23,7 @@ interface GameEngineProps {
     rounds: Round[], 
     opponentName?: string, 
     joinedRoom?: any,
-    startIndex?: number // Nhận chỉ số bắt đầu từ props
+    startIndex?: number 
   };
   onExit: () => void;
 }
@@ -32,7 +32,7 @@ const GameEngine: React.FC<GameEngineProps> = ({
   gameState, setGameState, playerName, currentTeacher, matchData, onExit 
 }) => {
   const [currentRoundIdx, setCurrentRoundIdx] = useState(0);
-  const [currentProblemIdx, setCurrentProblemIdx] = useState(matchData.startIndex || 0); // Sử dụng startIndex
+  const [currentProblemIdx, setCurrentProblemIdx] = useState(matchData.startIndex || 0); 
   const [score, setScore] = useState(0);
   const [opponentScore, setOpponentScore] = useState(0);
   const [timeLeft, setTimeLeft] = useState(DEFAULT_TIME);
@@ -52,7 +52,6 @@ const GameEngine: React.FC<GameEngineProps> = ({
   const rounds = matchData.rounds;
   const currentProblem = rounds[currentRoundIdx]?.problems[currentProblemIdx];
 
-  // Khởi chạy câu hỏi đầu tiên khi component mount
   useEffect(() => {
     startProblem();
   }, []);
@@ -64,9 +63,7 @@ const GameEngine: React.FC<GameEngineProps> = ({
       });
 
       channel
-        .on('presence', { event: 'sync' }, () => {
-          // Sync presence
-        })
+        .on('presence', { event: 'sync' }, () => {})
         .on('broadcast', { event: 'teacher_next_question' }, ({ payload }) => {
           if (payload && typeof payload.nextIndex === 'number') {
              setCurrentProblemIdx(payload.nextIndex);
@@ -77,6 +74,10 @@ const GameEngine: React.FC<GameEngineProps> = ({
         })
         .on('broadcast', { event: 'teacher_toggle_whiteboard' }, ({ payload }) => {
           setIsWhiteboardActive(payload.active);
+        })
+        .on('broadcast', { event: 'teacher_reset_room' }, () => {
+          // Khi GV nạp đề khác (nhấn Live), học sinh tự động thoát về màn hình chuẩn bị của Arena
+          onExit();
         })
         .subscribe(async (status) => {
           if (status === 'SUBSCRIBED') {
@@ -126,7 +127,6 @@ const GameEngine: React.FC<GameEngineProps> = ({
         if (prev && prev <= 1) {
           clearInterval(interval);
           setGameState(isArenaA || isTeacherRoom ? 'ANSWERING' : 'WAITING_FOR_BUZZER');
-          // Update state logic might be delayed, but the next render will catch it
           setTimeLeft(DEFAULT_TIME); 
           setBuzzerWinner(isArenaA || isTeacherRoom ? 'YOU' : null);
           return null;
