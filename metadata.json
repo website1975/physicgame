@@ -1,5 +1,8 @@
+
 {
   "name": "PhysiQuest - Physics Formula Master",
   "description": "An interactive physics review game where students solve problems by selecting the correct physical quantities and formulas. Teachers can also generate custom problems using AI.",
-  "requestFramePermissions": []
+  "requestFramePermissions": [
+    "microphone"
+  ]
 }
