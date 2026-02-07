@@ -53,6 +53,9 @@ const GameEngine: React.FC<GameEngineProps> = ({
       });
 
       channel
+        .on('presence', { event: 'sync' }, () => {
+          // Sync presence if needed
+        })
         .on('broadcast', { event: 'teacher_next_question' }, () => {
           handleNext();
         })
@@ -165,7 +168,6 @@ const GameEngine: React.FC<GameEngineProps> = ({
     setGameState('FEEDBACK');
     setFeedbackTimer(FEEDBACK_TIME);
     
-    // Phát kết quả cho GV (nếu ở phòng GV)
     if (isTeacherRoom && controlChannelRef.current) {
         controlChannelRef.current.send({
             type: 'broadcast',
@@ -209,14 +211,16 @@ const GameEngine: React.FC<GameEngineProps> = ({
 
   return (
     <div className="min-h-screen bg-slate-100 flex flex-col p-4 overflow-hidden relative">
+      {/* WHITEBOARD HỌC SINH - Label đã được thu gọn vào đèn tín hiệu bên trong component Whiteboard */}
       {isWhiteboardActive && (
-        <div className="fixed inset-0 z-[10000] p-10 bg-slate-950/90 backdrop-blur-xl animate-in zoom-in">
-          <Whiteboard isTeacher={false} channel={controlChannelRef.current} roomCode="TEACHER_ROOM" />
-          <div className="absolute top-16 left-1/2 -translate-x-1/2 bg-blue-600 text-white px-10 py-3 rounded-full font-black uppercase italic shadow-2xl animate-pulse">👨‍🏫 THẦY/CÔ ĐANG GIẢNG BÀI...</div>
+        <div className="fixed inset-0 z-[10000] p-4 md:p-8 bg-slate-950/98 backdrop-blur-3xl animate-in zoom-in flex flex-col items-center justify-center">
+          <div className="w-full h-full max-w-[95vw] max-h-[90vh] relative shadow-[0_0_100px_rgba(0,0,0,0.5)]">
+             <Whiteboard isTeacher={false} channel={controlChannelRef.current} roomCode="TEACHER_ROOM" />
+          </div>
         </div>
       )}
 
-      <header className="flex justify-between items-center bg-white p-6 rounded-[2.5rem] shadow-lg mb-4">
+      <header className="flex justify-between items-center bg-white p-6 rounded-[2.5rem] shadow-lg mb-4 shrink-0">
         <div className="flex items-center gap-10">
            <div className="text-center"><div className="text-[10px] font-black text-blue-500 uppercase">ĐIỂM SỐ</div><div className="text-3xl font-black text-slate-800 italic">{score}đ</div></div>
         </div>
@@ -227,12 +231,14 @@ const GameEngine: React.FC<GameEngineProps> = ({
         </div>
       </header>
 
-      <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-6 min-h-0">
-        <div className="lg:col-span-7"><ProblemCard problem={currentProblem} isPaused={isWhiteboardActive} /></div>
-        <div className="lg:col-span-5 bg-white rounded-[3rem] p-8 shadow-xl flex flex-col relative">
+      <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-6 min-h-0 overflow-hidden">
+        <div className="lg:col-span-7 h-full overflow-hidden">
+           <ProblemCard problem={currentProblem} isPaused={isWhiteboardActive} />
+        </div>
+        <div className="lg:col-span-5 bg-white rounded-[3rem] p-8 shadow-xl flex flex-col relative h-full overflow-hidden">
           {gameState === 'FEEDBACK' ? (
-            <div className="h-full flex flex-col animate-in fade-in zoom-in">
-              <div className="flex justify-between items-center mb-6">
+            <div className="h-full flex flex-col animate-in fade-in zoom-in overflow-hidden">
+              <div className="flex justify-between items-center mb-6 shrink-0">
                  <div className={`text-4xl font-black uppercase italic ${feedback?.isCorrect ? 'text-emerald-500' : 'text-blue-500'}`}>{feedback?.isCorrect ? 'CHÍNH XÁC!' : 'SAI RỒI!'}</div>
                  {isTeacherRoom && <div className="bg-slate-900 text-white px-5 py-2 rounded-2xl font-black italic text-[10px] uppercase">Đang chờ GV chuyển câu...</div>}
               </div>
@@ -242,9 +248,11 @@ const GameEngine: React.FC<GameEngineProps> = ({
               </div>
             </div>
           ) : (
-            <div className="flex-1 flex flex-col">
-              <AnswerInput problem={currentProblem} value={userAnswer} onChange={setUserAnswer} onSubmit={submitAnswer} disabled={false} />
-              <button onClick={submitAnswer} className="w-full py-6 bg-slate-900 text-white rounded-[2rem] font-black italic text-xl mt-4">NỘP ĐÁP ÁN ✅</button>
+            <div className="flex-1 flex flex-col overflow-hidden">
+              <div className="flex-1 min-h-0">
+                 <AnswerInput problem={currentProblem} value={userAnswer} onChange={setUserAnswer} onSubmit={submitAnswer} disabled={false} />
+              </div>
+              <button onClick={submitAnswer} className="w-full py-6 bg-slate-900 text-white rounded-[2rem] font-black italic text-xl mt-4 shrink-0 shadow-lg active:scale-95 transition-all">NỘP ĐÁP ÁN ✅</button>
             </div>
           )}
         </div>
