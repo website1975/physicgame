@@ -31,13 +31,15 @@ interface AdminPanelProps {
   fullView?: boolean;
   onResetToNew: () => void;
   onLoadSet: (setId: string, title: string) => Promise<boolean>;
+  liveSessionKey?: number; // Nhận khóa phiên từ App
 }
 
 const AdminPanel: React.FC<AdminPanelProps> = (props) => {
   const { 
     rounds, setRounds, onSaveSet, loadedSetTitle, loadedSetId, 
     loadedSetTopic, teacherId, adminTab, setAdminTab, onStartGame,
-    onNextQuestion, currentProblemIdx, totalProblems, examSets
+    onNextQuestion, currentProblemIdx, totalProblems, examSets,
+    liveSessionKey
   } = props;
 
   const [activeRoundIdx, setActiveRoundIdx] = useState(0);
@@ -67,26 +69,28 @@ const AdminPanel: React.FC<AdminPanelProps> = (props) => {
   const [liveProblemIdx, setLiveProblemIdx] = useState(0); 
   const controlChannelRef = useRef<any>(null);
 
-  // LOGIC RESET KHI NẠP ĐỀ MỚI:
-  // Mỗi khi loadedSetId thay đổi, ta đưa mọi thứ về trạng thái ban đầu để tránh xung đột với đề cũ
+  // LOGIC RESET PHIÊN DẠY:
+  // Sử dụng liveSessionKey để đảm bảo reset ngay cả khi cùng một bộ đề được nhấn Live lần nữa
+  useEffect(() => {
+    if (adminTab === 'CONTROL') {
+      setIsLiveGameActive(false);
+      setLiveProblemIdx(0);
+      setStudentResults({});
+      setIsWhiteboardActive(false);
+      
+      if (controlChannelRef.current) {
+        controlChannelRef.current.send({
+          type: 'broadcast',
+          event: 'teacher_reset_room',
+          payload: { title: loadedSetTitle }
+        });
+      }
+    }
+  }, [liveSessionKey]); // Lắng nghe khóa phiên thay vì ID đề
+
   useEffect(() => {
     setCurrentTitle(loadedSetTitle || '');
     setCurrentTopic(loadedSetTopic || 'Khác');
-    
-    // Reset trạng thái Live
-    setIsLiveGameActive(false);
-    setLiveProblemIdx(0);
-    setStudentResults({});
-    setIsWhiteboardActive(false);
-    
-    // Thông báo cho học sinh trong phòng rằng GV đã nạp đề mới nhưng chưa bắt đầu
-    if (controlChannelRef.current) {
-      controlChannelRef.current.send({
-        type: 'broadcast',
-        event: 'teacher_reset_room',
-        payload: { title: loadedSetTitle }
-      });
-    }
   }, [loadedSetId]);
 
   useEffect(() => {
@@ -97,7 +101,6 @@ const AdminPanel: React.FC<AdminPanelProps> = (props) => {
     fetchGV();
   }, [teacherId]);
 
-  // LOGIC ĐỒNG BỘ: Khi có học sinh mới vào phòng khi trận đấu ĐANG DIỄN RA
   useEffect(() => {
     if (isLiveGameActive && connectedStudents.length > 0 && controlChannelRef.current) {
       controlChannelRef.current.send({
