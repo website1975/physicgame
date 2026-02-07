@@ -88,7 +88,7 @@ const GameEngine: React.FC<GameEngineProps> = ({
     setTimeout(() => { isTransitioning.current = false; }, 1000);
   }, [rounds]);
 
-  const startProblem = () => {
+  const startProblem = useCallback(() => {
     setUserAnswer('');
     setFeedback(null);
     setBuzzerWinner(null);
@@ -107,7 +107,7 @@ const GameEngine: React.FC<GameEngineProps> = ({
         return prev !== null ? prev - 1 : null;
       });
     }, 1000);
-  };
+  }, [isArenaA, isTeacherRoom, setGameState]);
 
   useEffect(() => {
     if (gameState === 'ANSWERING' || gameState === 'WAITING_FOR_BUZZER') {
@@ -124,6 +124,12 @@ const GameEngine: React.FC<GameEngineProps> = ({
       });
 
       channel
+        .on('presence', { event: 'sync' }, () => {
+          const state = channel.presenceState();
+          const players = Object.keys(state)
+            .filter(key => key !== 'teacher')
+            .map(key => key.split('_')[0]);
+        })
         .on('broadcast', { event: 'teacher_next_question' }, ({ payload }) => {
           if (payload && typeof payload.nextIndex === 'number') {
              setCurrentProblemIdx(payload.nextIndex);
@@ -147,7 +153,7 @@ const GameEngine: React.FC<GameEngineProps> = ({
       controlChannelRef.current = channel;
       return () => { supabase.removeChannel(channel); };
     }
-  }, [isTeacherRoom, currentTeacher.id, playerName, handleNext, onExit]);
+  }, [isTeacherRoom, currentTeacher.id, playerName, handleNext, startProblem, onExit]);
 
   // Kênh thi đấu cho Arena
   useEffect(() => {
@@ -185,6 +191,12 @@ const GameEngine: React.FC<GameEngineProps> = ({
         .on('broadcast', { event: 'match_next_question' }, () => {
           handleNext();
         })
+        .on('broadcast', { event: 'match_start_problem' }, () => {
+          // Sync transition from ROUND_INTRO to STARTING_ROUND
+          if (gameStateRef.current === 'ROUND_INTRO') {
+            startProblem();
+          }
+        })
         .subscribe(async (status) => {
           if (status === 'SUBSCRIBED') {
             await channel.track({ role: 'player', joined_at: new Date().toISOString() });
@@ -194,7 +206,7 @@ const GameEngine: React.FC<GameEngineProps> = ({
       channelRef.current = channel;
       return () => { supabase.removeChannel(channel); };
     }
-  }, [isArenaA, isTeacherRoom, matchData.joinedRoom, playerName, handleNext, buzzerWinner]);
+  }, [isArenaA, isTeacherRoom, matchData.joinedRoom, playerName, handleNext, startProblem, buzzerWinner]);
 
   // Logic đếm ngược Feedback
   useEffect(() => {
@@ -206,7 +218,7 @@ const GameEngine: React.FC<GameEngineProps> = ({
     }
   }, [gameState]);
 
-  // Logic CHUYỂN CÂU khi đếm ngược về 0
+  // Logic CHUYỂN CÂU khi đếm ngược về 0 (FEEDBACK -> NEXT)
   useEffect(() => {
     if (gameState === 'FEEDBACK' && feedbackTimer === 0) {
       if (!isTeacherRoom) {
@@ -234,13 +246,37 @@ const GameEngine: React.FC<GameEngineProps> = ({
     }
   }, [feedbackTimer, gameState, isArenaA, isMaster, isTeacherRoom, handleNext]);
 
-  // Intro vòng đấu
+  // Logic CHUYỂN CÂU khi đếm ngược ở ROUND_INTRO kết thúc
   useEffect(() => {
     if (gameState === 'ROUND_INTRO') {
-      const timer = setTimeout(startProblem, ROUND_INTRO_TIME * 1000);
-      return () => clearTimeout(timer);
+      if (isArenaA) {
+        const timer = setTimeout(startProblem, ROUND_INTRO_TIME * 1000);
+        return () => clearTimeout(timer);
+      } else if (!isTeacherRoom) {
+        if (isMaster) {
+          // Master manages the 5s intro timer for both
+          const timer = setTimeout(() => {
+            if (channelRef.current) {
+              channelRef.current.send({
+                type: 'broadcast',
+                event: 'match_start_problem'
+              });
+            }
+            startProblem();
+          }, ROUND_INTRO_TIME * 1000);
+          return () => clearTimeout(timer);
+        } else {
+          // Slave: Wait for signal or safety timeout
+          const safetyTimeout = setTimeout(() => {
+            if (gameStateRef.current === 'ROUND_INTRO') {
+              startProblem();
+            }
+          }, (ROUND_INTRO_TIME + 2) * 1000);
+          return () => clearTimeout(safetyTimeout);
+        }
+      }
     }
-  }, [gameState]);
+  }, [gameState, isArenaA, isMaster, isTeacherRoom, startProblem]);
 
   // Đếm ngược thời gian làm bài
   useEffect(() => {
@@ -316,6 +352,11 @@ const GameEngine: React.FC<GameEngineProps> = ({
           <h2 className="text-5xl font-black text-slate-800 uppercase italic mb-6">VÒNG {currentRoundIdx + 1}</h2>
           <p className="text-slate-500 font-bold text-xl italic mb-10">{rounds[currentRoundIdx]?.description}</p>
           <div className="text-blue-600 font-black animate-pulse uppercase tracking-widest">Sẵn sàng thi đấu...</div>
+          {!isArenaA && !isTeacherRoom && (
+            <div className="mt-8 text-[10px] font-black text-slate-500 uppercase italic tracking-widest opacity-50">
+              {isMaster ? "Đang chờ đồng bộ..." : "Đang chờ đối thủ..."}
+            </div>
+          )}
         </div>
       </div>
     );
@@ -344,6 +385,7 @@ const GameEngine: React.FC<GameEngineProps> = ({
     );
   }
 
+  /* Fixed returned JSX by removing escaped quotes */
   return (
     <div className="min-h-screen bg-slate-100 flex flex-col p-4 overflow-hidden relative">
       {isWhiteboardActive && (
