@@ -52,10 +52,11 @@ const GameEngine: React.FC<GameEngineProps> = ({
   const controlChannelRef = useRef<any>(null);
   const presenceKey = useRef(`${playerName}_${Math.random().toString(36).substring(7)}`);
   
-  // Sử dụng Refs để tránh stale closures trong các hàm callback của Supabase
+  // Refs để truy cập giá trị mới nhất trong các callback không đồng bộ
   const currentProblemIdxRef = useRef(currentProblemIdx);
   const currentRoundIdxRef = useRef(currentRoundIdx);
   const gameStateRef = useRef(gameState);
+  const isTransitioning = useRef(false);
 
   useEffect(() => { currentProblemIdxRef.current = currentProblemIdx; }, [currentProblemIdx]);
   useEffect(() => { currentRoundIdxRef.current = currentRoundIdx; }, [currentRoundIdx]);
@@ -65,6 +66,10 @@ const GameEngine: React.FC<GameEngineProps> = ({
   const currentProblem = rounds[currentRoundIdx]?.problems[currentProblemIdx];
 
   const handleNext = useCallback(() => {
+    // Ngăn chặn việc gọi handleNext nhiều lần cùng lúc
+    if (isTransitioning.current) return;
+    isTransitioning.current = true;
+
     const nextProb = currentProblemIdxRef.current + 1;
     const currentRound = rounds[currentRoundIdxRef.current];
 
@@ -78,6 +83,9 @@ const GameEngine: React.FC<GameEngineProps> = ({
     } else {
       setGameState('GAME_OVER');
     }
+
+    // Mở khóa sau khi đã thực hiện chuyển đổi
+    setTimeout(() => { isTransitioning.current = false; }, 1000);
   }, [rounds]);
 
   const startProblem = () => {
@@ -86,16 +94,17 @@ const GameEngine: React.FC<GameEngineProps> = ({
     setBuzzerWinner(null);
     setGameState('STARTING_ROUND');
     setCountdown(3);
+    setFeedbackTimer(FEEDBACK_TIME);
     
     const interval = setInterval(() => {
       setCountdown(prev => {
-        if (prev && prev <= 1) {
+        if (prev !== null && prev <= 1) {
           clearInterval(interval);
           const nextState = (isArenaA || isTeacherRoom) ? 'ANSWERING' : 'WAITING_FOR_BUZZER';
           setGameState(nextState);
           return null;
         }
-        return prev ? prev - 1 : null;
+        return prev !== null ? prev - 1 : null;
       });
     }, 1000);
   };
@@ -105,7 +114,7 @@ const GameEngine: React.FC<GameEngineProps> = ({
         setTimeLeft(currentProblem?.timeLimit || DEFAULT_TIME);
         if (isArenaA || isTeacherRoom) setBuzzerWinner('YOU');
     }
-  }, [gameState, currentProblem?.id]);
+  }, [gameState, currentProblem?.id, isArenaA, isTeacherRoom]);
 
   // Kênh điều khiển cho phòng Giáo Viên
   useEffect(() => {
@@ -138,7 +147,7 @@ const GameEngine: React.FC<GameEngineProps> = ({
       controlChannelRef.current = channel;
       return () => { supabase.removeChannel(channel); };
     }
-  }, [isTeacherRoom, currentTeacher.id, playerName, handleNext]);
+  }, [isTeacherRoom, currentTeacher.id, playerName, handleNext, onExit]);
 
   // Kênh thi đấu cho Arena
   useEffect(() => {
@@ -174,7 +183,6 @@ const GameEngine: React.FC<GameEngineProps> = ({
           }
         })
         .on('broadcast', { event: 'match_next_question' }, () => {
-          // Khi nhận lệnh từ Master, chuyển câu ngay lập tức
           handleNext();
         })
         .subscribe(async (status) => {
@@ -186,48 +194,53 @@ const GameEngine: React.FC<GameEngineProps> = ({
       channelRef.current = channel;
       return () => { supabase.removeChannel(channel); };
     }
-  }, [isArenaA, isTeacherRoom, matchData.joinedRoom, playerName, handleNext]);
+  }, [isArenaA, isTeacherRoom, matchData.joinedRoom, playerName, handleNext, buzzerWinner]);
 
-  // Logic đếm ngược Feedback và ĐỒNG BỘ
+  // Logic đếm ngược Feedback
+  useEffect(() => {
+    if (gameState === 'FEEDBACK') {
+      const timer = setInterval(() => {
+        setFeedbackTimer(p => (p > 0 ? p - 1 : 0));
+      }, 1000);
+      return () => clearInterval(timer);
+    }
+  }, [gameState]);
+
+  // Logic CHUYỂN CÂU khi đếm ngược về 0
+  useEffect(() => {
+    if (gameState === 'FEEDBACK' && feedbackTimer === 0) {
+      if (!isTeacherRoom) {
+        if (isArenaA) {
+          handleNext();
+        } else if (isMaster) {
+          // Master: Gửi lệnh và tự nhảy
+          if (channelRef.current) {
+            channelRef.current.send({
+              type: 'broadcast',
+              event: 'match_next_question'
+            });
+          }
+          handleNext();
+        } else {
+          // Slave: Đợi lệnh Master 2s, nếu không có thì tự nhảy (phòng hờ lag)
+          const safetyTimeout = setTimeout(() => {
+            if (gameStateRef.current === 'FEEDBACK') {
+              handleNext();
+            }
+          }, 2000);
+          return () => clearTimeout(safetyTimeout);
+        }
+      }
+    }
+  }, [feedbackTimer, gameState, isArenaA, isMaster, isTeacherRoom, handleNext]);
+
+  // Intro vòng đấu
   useEffect(() => {
     if (gameState === 'ROUND_INTRO') {
       const timer = setTimeout(startProblem, ROUND_INTRO_TIME * 1000);
       return () => clearTimeout(timer);
     }
-    
-    if (gameState === 'FEEDBACK') {
-      const countdownInterval = setInterval(() => {
-        setFeedbackTimer(p => {
-          if (p <= 1) {
-            clearInterval(countdownInterval);
-            
-            if (!isTeacherRoom) {
-               if (isArenaA) {
-                  handleNext();
-               } else if (isMaster) {
-                  // Master gửi lệnh cho cả phòng rồi tự nhảy
-                  if (channelRef.current) {
-                    channelRef.current.send({
-                       type: 'broadcast',
-                       event: 'match_next_question'
-                    });
-                  }
-                  setTimeout(handleNext, 100); 
-               } else {
-                  // Slave: Chờ lệnh Master 2 giây, nếu không thấy thì tự nhảy (phòng hờ Master lag)
-                  setTimeout(() => {
-                    if (gameStateRef.current === 'FEEDBACK') handleNext();
-                  }, 2000);
-               }
-            }
-            return 0;
-          }
-          return p - 1;
-        });
-      }, 1000);
-      return () => clearInterval(countdownInterval);
-    }
-  }, [gameState, isTeacherRoom, isMaster, isArenaA, handleNext]);
+  }, [gameState]);
 
   // Đếm ngược thời gian làm bài
   useEffect(() => {
@@ -247,7 +260,6 @@ const GameEngine: React.FC<GameEngineProps> = ({
     }
   }, [gameState, timeLeft, buzzerWinner, isWhiteboardActive]);
 
-  // handleBuzzerClick: Xử lý khi người chơi nhấn chuông giành quyền trả lời.
   const handleBuzzerClick = () => {
     if (gameState === 'WAITING_FOR_BUZZER' && !buzzerWinner) {
       if (channelRef.current) {
