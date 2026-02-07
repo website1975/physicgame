@@ -37,7 +37,10 @@ const App: React.FC = () => {
   const [settings, setSettings] = useState<GameSettings>({ autoNext: true, autoNextDelay: 20, maxPlayers: 2 });
   const [joinedRoom, setJoinedRoom] = useState<any>(null);
   const [availableSets, setAvailableSets] = useState<any[]>([]);
-  const [matchData, setMatchData] = useState<{ setId: string, title: string, rounds: Round[], opponentName?: string, joinedRoom?: any } | null>(null);
+  const [matchData, setMatchData] = useState<{ setId: string, title: string, rounds: Round[], opponentName?: string, joinedRoom?: any, startIndex?: number } | null>(null);
+
+  // liveSessionKey dùng để "cưỡng bức" AdminPanel reset trạng thái phiên dạy Live
+  const [liveSessionKey, setLiveSessionKey] = useState<number>(Date.now());
 
   const checkAI = async () => {
     setApiStatus('checking');
@@ -64,6 +67,23 @@ const App: React.FC = () => {
   useEffect(() => {
     if (gameState === 'ADMIN' && currentTeacher) refreshSets(currentTeacher.id);
   }, [gameState, currentTeacher?.id]);
+
+  const handleLiveNow = async (id: string, title: string) => {
+    try {
+      setIsLoading(true);
+      const data = await fetchSetData(id);
+      setRounds(data.rounds);
+      setLoadedSetId(id);
+      setLoadedSetTitle(title);
+      // Tạo mã phiên mới để cưỡng bức AdminPanel reset trạng thái Live
+      setLiveSessionKey(Date.now());
+      setAdminTab('CONTROL');
+    } catch (e) {
+      console.error("Lỗi nạp đề Live:", e);
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-900">
@@ -146,6 +166,8 @@ const App: React.FC = () => {
           loadedSetTitle={loadedSetTitle} loadedSetTopic={null} loadedSetId={loadedSetId}
           onResetToNew={() => { setRounds([{ number: 1, problems: [], description: '' }]); setLoadedSetId(null); setLoadedSetTitle(null); }}
           onRefreshSets={() => refreshSets(currentTeacher.id)} isLoadingSets={isLoading}
+          onLive={handleLiveNow}
+          liveSessionKey={liveSessionKey}
         />
       )}
 
