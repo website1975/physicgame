@@ -16,6 +16,12 @@ interface StudentArenaFlowProps {
   setAvailableSets: (sets: any[]) => void;
 }
 
+interface PlayerInfo {
+  name: string;
+  shortId: string;
+  fullKey: string;
+}
+
 const ARENA_ROOMS = [
   { id: '1', name: 'Phòng đơn', code: 'ARENA_A', emoji: '🛡️', color: 'bg-blue-600', capacity: 1, desc: 'Luyện tập cá nhân' },
   { id: '2', name: 'Phòng đôi', code: 'ARENA_B', emoji: '⚔️', color: 'bg-purple-600', capacity: 2, desc: 'Đấu 1 vs 1' },
@@ -30,12 +36,14 @@ const StudentArenaFlow: React.FC<StudentArenaFlowProps> = ({
 }) => {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
-  const [presentPlayers, setPresentPlayers] = useState<string[]>([]);
+  const [presentPlayers, setPresentPlayers] = useState<PlayerInfo[]>([]);
   const [roomCodeInput, setRoomCodeInput] = useState('');
   const [targetTeacher, setTargetTeacher] = useState<Teacher | null>(null);
   const [uniqueId] = useState(() => Math.random().toString(36).substring(7));
   const channelRef = useRef<any>(null);
   const matchStartedRef = useRef(false);
+
+  const shortId = uniqueId.slice(-3).toUpperCase();
 
   useEffect(() => {
     if (gameState === 'SET_SELECTION' && !joinedRoom) {
@@ -58,7 +66,21 @@ const StudentArenaFlow: React.FC<StudentArenaFlowProps> = ({
       for (const item of assignments) {
         const data = await fetchSetData(item.set_id);
         if (String(data.grade) === String(studentGrade)) {
-          fullSets.push({ id: item.set_id, assigned_at: item.assigned_at, ...data });
+          let qCount = 0;
+          const setRounds = data.rounds || [];
+          setRounds.forEach((r: any) => { qCount += (r.problems?.length || 0); });
+          
+          fullSets.push({ 
+            id: item.set_id, 
+            assigned_at: item.assigned_at, 
+            question_count: qCount,
+            round_count: setRounds.length,
+            title: data.title,
+            topic: data.topic,
+            grade: data.grade,
+            created_at: data.created_at,
+            rounds: data.rounds
+          });
         }
       }
       
@@ -72,7 +94,6 @@ const StudentArenaFlow: React.FC<StudentArenaFlowProps> = ({
           setError(`Thầy/Cô chưa gán đề Khối ${studentGrade} vào ${room.name}.`);
         }
       } else {
-        // Với các phòng multiplayer, đi thẳng vào sảnh chờ để bốc thăm tự động
         if (fullSets.length > 0) {
           setGameState('WAITING_FOR_PLAYERS');
         } else {
@@ -123,40 +144,49 @@ const StudentArenaFlow: React.FC<StudentArenaFlowProps> = ({
       channel
         .on('presence', { event: 'sync' }, () => {
           const state = channel.presenceState();
-          const playersKeys = Object.keys(state).sort(); // Sắp xếp để xác định Master cố định
-          const playerNames = playersKeys.filter(k => k !== 'teacher').map(k => k.split('_')[0]);
-          setPresentPlayers(playerNames);
+          const playersKeys = Object.keys(state).sort(); 
           
-          // LOGIC BỐC THĂM TỰ ĐỘNG CHO MULTIPLAYER
+          const playerInfos = playersKeys
+            .filter(k => k !== 'teacher')
+            .map(k => {
+              const parts = k.split('_');
+              return {
+                name: parts[0],
+                shortId: parts[1]?.slice(-3).toUpperCase() || '???',
+                fullKey: k
+              };
+            });
+          
+          setPresentPlayers(playerInfos);
+          
           if (!isTeacherRoom && playersKeys.length >= requiredCapacity && !matchStartedRef.current) {
             const isMaster = playersKeys[0] === presenceKey;
             
             if (isMaster && availableSets.length > 0) {
-              // Master thực hiện bốc thăm ngẫu nhiên
               const randomIndex = Math.floor(Math.random() * availableSets.length);
               const selectedSet = availableSets[randomIndex];
               
-              // Phát lệnh cho các đối thủ
               channel.send({
                 type: 'broadcast',
                 event: 'match_start_signal',
                 payload: {
                   setId: selectedSet.id,
                   masterName: playerName,
+                  masterId: uniqueId,
                   joinedRoom: joinedRoom,
                   rounds: selectedSet.rounds,
                   title: selectedSet.title
                 }
               });
 
-              // Master tự vào trận
               matchStartedRef.current = true;
               onStartMatch({
                 setId: selectedSet.id,
                 title: selectedSet.title,
                 rounds: selectedSet.rounds,
-                opponentName: playerNames.filter(n => n !== playerName).join(", "),
-                joinedRoom: joinedRoom
+                opponentName: playerInfos.filter(n => n.fullKey !== presenceKey).map(p => `${p.name} #${p.shortId}`).join(", "),
+                joinedRoom: joinedRoom,
+                myId: uniqueId
               });
             }
           }
@@ -169,8 +199,9 @@ const StudentArenaFlow: React.FC<StudentArenaFlowProps> = ({
             setId: payload.setId, 
             title: payload.title, 
             rounds: payload.rounds, 
-            opponentName: payload.masterName, 
-            joinedRoom: payload.joinedRoom 
+            opponentName: `${payload.masterName} #${payload.masterId.slice(-3).toUpperCase()}`, 
+            joinedRoom: payload.joinedRoom,
+            myId: uniqueId
           });
         })
         .on('broadcast', { event: 'teacher_start_game' }, ({ payload }) => {
@@ -182,7 +213,8 @@ const StudentArenaFlow: React.FC<StudentArenaFlowProps> = ({
             rounds: payload.rounds, 
             joinedRoom: joinedRoom, 
             opponentName: "Cả lớp",
-            startIndex: payload.currentQuestionIndex || 0 
+            startIndex: payload.currentQuestionIndex || 0,
+            myId: uniqueId
           });
         })
         .subscribe(async (status) => {
@@ -200,7 +232,7 @@ const StudentArenaFlow: React.FC<StudentArenaFlowProps> = ({
 
   if (gameState === 'ROOM_SELECTION') {
     return (
-      <div className="min-h-screen p-8 flex flex-col items-center justify-center relative">
+      <div className="min-h-screen p-8 flex flex-col items-center justify-center relative bg-slate-950">
         <div className="absolute top-8 right-8 z-50">
            <button onClick={() => setGameState('LOBBY')} className="group flex items-center gap-3 bg-red-500/10 hover:bg-red-500 text-red-500 hover:text-white px-8 py-4 rounded-2xl border-2 border-red-500/20 hover:border-red-500 transition-all font-black uppercase italic text-sm shadow-xl">
              <span>🚪</span> <span>Thoát ra</span>
@@ -208,7 +240,7 @@ const StudentArenaFlow: React.FC<StudentArenaFlowProps> = ({
         </div>
         <div className="text-center mb-12">
           <h2 className="text-6xl font-black text-white italic uppercase tracking-tighter">Hệ thống Đấu Trường</h2>
-          <p className="text-blue-400 font-bold uppercase text-[10px] mt-2 tracking-[0.3em]">Mã Arena: {currentTeacher.magv} – Chiến binh: {playerName}</p>
+          <p className="text-blue-400 font-bold uppercase text-[10px] mt-2 tracking-[0.3em]">Mã Arena: {currentTeacher.magv} – Chiến binh: {playerName} <span className="opacity-40">#{shortId}</span></p>
         </div>
         {error && <div className="mb-8 p-6 bg-red-500/20 text-red-400 rounded-[2rem] border-2 border-red-500/30 font-black uppercase italic text-xs">⚠️ {error}</div>}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-6 w-full max-w-7xl">
@@ -226,7 +258,7 @@ const StudentArenaFlow: React.FC<StudentArenaFlowProps> = ({
 
   if (gameState === 'ENTER_CODE') {
     return (
-      <div className="min-h-screen p-8 flex flex-col items-center justify-center">
+      <div className="min-h-screen p-8 flex flex-col items-center justify-center bg-slate-950">
         <div className="bg-white rounded-[4rem] p-12 shadow-2xl max-w-md w-full text-center border-b-[12px] border-slate-900 animate-in zoom-in duration-300">
            <div className="text-6xl mb-6">🔑</div>
            <h2 className="text-3xl font-black text-slate-800 uppercase italic mb-4">MÃ PHÒNG GIÁO VIÊN</h2>
@@ -267,12 +299,44 @@ const StudentArenaFlow: React.FC<StudentArenaFlowProps> = ({
             </div>
             <button onClick={() => { setJoinedRoom(null); setGameState('ROOM_SELECTION'); }} className="px-10 py-4 bg-white/10 text-white rounded-2xl font-black uppercase italic border-2 border-white/20 hover:bg-white hover:text-slate-900 transition-all">QUAY LẠI ✕</button>
           </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-8 mb-20">
+          
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-8 mb-20">
             {availableSets.map((set, i) => (
-              <div key={set.id} className="bg-white rounded-[3.5rem] p-10 border-4 border-slate-50 shadow-2xl flex flex-col min-h-[400px]">
-                <div className="flex justify-between items-center mb-6"><span className="text-[10px] font-black text-blue-600 uppercase tracking-widest italic">BỘ ĐỀ {i+1}</span><span className="text-2xl">📚</span></div>
-                <div className="mb-8 flex-1"><h4 className="text-[10px] font-black text-slate-400 uppercase mb-1">TOPIC:</h4><div className="text-2xl font-black text-slate-800 uppercase italic leading-tight line-clamp-2">{set.title}</div></div>
-                <button onClick={() => onStartMatch({ setId: set.id, title: set.title, rounds: set.rounds, joinedRoom })} className="w-full py-5 bg-blue-600 text-white rounded-[2rem] font-black uppercase italic shadow-xl hover:scale-105 active:scale-95 transition-all">BẮT ĐẦU LUYỆN ⚡</button>
+              <div key={set.id} className="bg-white p-8 rounded-[3.5rem] border-4 border-slate-50 shadow-2xl hover:border-blue-100 transition-all flex flex-col group relative overflow-hidden animate-in zoom-in duration-300">
+                 <div className="flex items-center gap-2 mb-4">
+                    <span className="px-3 py-1 bg-blue-600 text-white text-[9px] font-black uppercase rounded-lg shadow-sm">
+                      {set.topic || 'BÀI TẬP'}
+                    </span>
+                    <span className="text-[10px] font-black text-slate-300 uppercase tracking-widest">
+                      K{set.grade || '10'} • {set.created_at ? new Date(set.created_at).toLocaleDateString('vi-VN') : 'Mới'}
+                    </span>
+                 </div>
+
+                 <h4 className="text-2xl font-black text-slate-800 uppercase italic mb-6 line-clamp-2 leading-tight group-hover:text-blue-600 transition-colors">
+                   {set.title}
+                 </h4>
+                 
+                 <div className="grid grid-cols-2 gap-3 mb-10">
+                    <div className="bg-slate-50 p-4 rounded-3xl border border-slate-100 flex flex-col items-center">
+                      <div className="text-[9px] font-black text-slate-400 uppercase mb-1">Cấu trúc</div>
+                      <div className="text-xl font-black text-slate-700 italic leading-none">
+                        {set.round_count || 1} <span className="text-[10px] uppercase">vòng</span>
+                      </div>
+                    </div>
+                    <div className="bg-slate-50 p-4 rounded-3xl border border-slate-100 flex flex-col items-center">
+                      <div className="text-[9px] font-black text-slate-400 uppercase mb-1">Tổng số</div>
+                      <div className="text-xl font-black text-slate-700 italic leading-none">
+                        {set.question_count || 0} <span className="text-[10px] uppercase">câu</span>
+                      </div>
+                    </div>
+                 </div>
+
+                 <button 
+                  onClick={() => onStartMatch({ setId: set.id, title: set.title, rounds: set.rounds, joinedRoom, myId: uniqueId })} 
+                  className="mt-auto w-full py-5 bg-blue-600 text-white hover:bg-blue-700 border-b-6 border-blue-800 rounded-2xl font-black uppercase italic transition-all text-sm flex items-center justify-center gap-3 shadow-lg hover:scale-[1.02] active:scale-95"
+                 >
+                   <span className="text-xl">⚡</span> BẮT ĐẦU LUYỆN
+                 </button>
               </div>
             ))}
           </div>
@@ -281,12 +345,11 @@ const StudentArenaFlow: React.FC<StudentArenaFlowProps> = ({
     );
   }
 
-  /* Added null check for joinedRoom to fix potential crash and ensured requiredCapacity is defined within scope */
   if (gameState === 'WAITING_FOR_PLAYERS' && joinedRoom) {
     const isTeacherRoom = joinedRoom.code === 'TEACHER_ROOM';
     const requiredCapacity = joinedRoom.capacity || 2;
     return (
-      <div className="min-h-screen flex items-center justify-center p-6">
+      <div className="min-h-screen flex items-center justify-center p-6 bg-slate-950">
         <div className="bg-white rounded-[4rem] p-12 shadow-2xl max-w-6xl w-full border-b-[12px] border-purple-600 animate-in zoom-in duration-500 flex flex-col lg:flex-row gap-10">
           <div className="flex-1">
              <h2 className="text-3xl font-black text-slate-800 uppercase italic mb-4">SẢNH CHỜ THI ĐẤU</h2>
@@ -298,7 +361,10 @@ const StudentArenaFlow: React.FC<StudentArenaFlowProps> = ({
                    {presentPlayers.map((p, i) => (
                      <div key={i} className="flex flex-col items-center gap-3">
                         <div className="w-16 h-16 rounded-full bg-blue-600 border-4 border-white shadow-lg flex items-center justify-center text-2xl">👤</div>
-                        <div className="text-[8px] font-black uppercase italic text-white truncate max-w-full">{p}</div>
+                        <div className="text-[8px] font-black uppercase italic text-white truncate max-w-full text-center">
+                           {p.name}<br/>
+                           <span className="opacity-40 text-[7px]">#{p.shortId}</span>
+                        </div>
                      </div>
                    ))}
                    {Array.from({ length: Math.max(0, requiredCapacity - presentPlayers.length) }).map((_, i) => (
@@ -323,9 +389,9 @@ const StudentArenaFlow: React.FC<StudentArenaFlowProps> = ({
           <div className="flex-1 bg-slate-50 rounded-[3rem] p-8 text-left">
              <h3 className="text-2xl font-black text-slate-800 uppercase italic mb-6">📜 LUẬT CHƠI ĐỐI KHÁNG</h3>
              <ul className="space-y-4">
-                <li className="flex gap-4"><span className="w-6 h-6 bg-slate-900 text-white rounded-full flex items-center justify-center text-[10px] font-black shrink-0">1</span><p className="text-xs font-bold text-slate-500 italic">Máy tính sẽ chọn ngẫu nhiên một bộ đề từ kho đề Thầy/Cô đã gán cho phòng này.</p></li>
-                <li className="flex gap-4"><span className="w-6 h-6 bg-slate-900 text-white rounded-full flex items-center justify-center text-[10px] font-black shrink-0">2</span><p className="text-xs font-bold text-slate-500 italic">Tốc độ là chìa khóa! Ai trả lời đúng và nhanh hơn sẽ giành được ưu thế điểm số.</p></li>
-                <li className="flex gap-4"><span className="w-6 h-6 bg-slate-900 text-white rounded-full flex items-center justify-center text-[10px] font-black shrink-0">3</span><p className="text-xs font-bold text-slate-500 italic">Đừng rời khỏi sảnh chờ, trận đấu sẽ bắt đầu ngay khi có đủ người kết nối.</p></li>
+                <li className="flex gap-4"><span className="w-6 h-6 bg-slate-900 text-white rounded-full flex items-center justify-center text-[10px] font-black shrink-0">1</span><p className="text-xs font-bold text-slate-500 italic">Mỗi học sinh sẽ có một mã ID đi kèm tên để phân biệt nếu trùng tên nhau.</p></li>
+                <li className="flex gap-4"><span className="w-6 h-6 bg-slate-900 text-white rounded-full flex items-center justify-center text-[10px] font-black shrink-0">2</span><p className="text-xs font-bold text-slate-500 italic">Máy tính sẽ chọn ngẫu nhiên một bộ đề từ kho đề Thầy/Cô đã gán cho phòng này.</p></li>
+                <li className="flex gap-4"><span className="w-6 h-6 bg-slate-900 text-white rounded-full flex items-center justify-center text-[10px] font-black shrink-0">3</span><p className="text-xs font-bold text-slate-500 italic">Tốc độ là chìa khóa! Ai trả lời đúng và nhanh hơn sẽ giành được ưu thế điểm số.</p></li>
              </ul>
           </div>
         </div>
