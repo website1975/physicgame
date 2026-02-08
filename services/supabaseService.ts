@@ -128,13 +128,14 @@ export const deleteExamSet = async (setId: string) => {
   return true;
 };
 
-export const fetchSetData = async (setId: string): Promise<{ rounds: Round[], topic: string, grade: string, created_at: string }> => {
-  const { data, error } = await supabase.from('exam_sets').select('data, topic, grade, created_at').eq('id', setId).single();
+export const fetchSetData = async (setId: string): Promise<{ rounds: Round[], topic: string, grade: string, created_at: string, title: string }> => {
+  const { data, error } = await supabase.from('exam_sets').select('data, topic, grade, created_at, title').eq('id', setId).single();
   if (error) throw error;
   return { 
     rounds: data?.data || [], 
     topic: data?.topic || 'Khác', 
     grade: data?.grade || '10',
+    title: data?.title || 'Bộ đề không tên',
     created_at: data?.created_at || new Date().toISOString()
   };
 };
