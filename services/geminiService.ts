@@ -2,49 +2,42 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { PhysicsProblem, Difficulty, QuestionType, InteractiveMechanic, DisplayChallenge } from "../types";
 
-// Đoạn code bạn yêu cầu để Vercel nhận diện key chính xác
+// Hàm lấy API Key an toàn trên mọi môi trường
 export const getSafeEnv = (key: string): string | undefined => {
   try {
     const fromProcess = (process.env as any)[key] || (process.env as any)[`VITE_${key}`];
     if (fromProcess) return fromProcess;
-    const fromMeta = (import.meta as any).env[key] || (import.meta as any).env[`VITE_${key}`];
-    if (fromMeta) return fromMeta;
+    const meta = (import.meta as any).env;
+    if (meta) {
+      const fromMeta = meta[key] || meta[`VITE_${key}`];
+      if (fromMeta) return fromMeta;
+    }
   } catch (e) {}
   return undefined;
 };
 
 const getSafeApiKey = (): string => getSafeEnv('API_KEY') || "";
 
-const SYSTEM_PROMPT = `Bạn là chuyên gia soạn đề Vật lý theo chương trình GDPT 2018. 
-Nhiệm vụ: Phân tích văn bản thô và trích xuất thành danh sách câu hỏi chuẩn format JSON.
+const SYSTEM_PROMPT = `Bạn là chuyên gia soạn đề Vật lý. Nhiệm vụ: Trích xuất văn bản thành JSON mảng đối tượng.
+QUY TẮC:
+1. TN: 4 options, correctAnswer là 'A', 'B', 'C' hoặc 'D'.
+2. DS: 4 options, correctAnswer là chuỗi 4 ký tự 'Đ' hoặc 'S' (VD: 'ĐSĐS').
+3. TL: correctAnswer là đáp án ngắn.
+4. Lời giải: Dùng $ $ cho công thức LaTeX.
+KHÔNG trả về bất kỳ văn bản nào ngoài JSON.`;
 
-QUY TẮC TRÍCH XUẤT:
-1. Loại Trắc nghiệm (type: 'TN'): 
-   - 'options' chứa 4 chuỗi A, B, C, D.
-   - 'correctAnswer' CHỈ là 1 ký tự: 'A', 'B', 'C' hoặc 'D'.
-
-2. Loại Đúng/Sai (type: 'DS'): 
-   - 'options' chứa đúng 4 chuỗi ý a, b, c, d.
-   - 'correctAnswer' là chuỗi 4 ký tự 'Đ' hoặc 'S'. Ví dụ: 'ĐSĐS'.
-
-3. Loại Trả lời ngắn (type: 'TL'): 
-   - 'correctAnswer' là giá trị số hoặc cụm từ.
-
-4. Lời giải (explanation): BẮT BUỘC có lời giải chi tiết, dùng $ ... $ cho LaTeX.`;
-
-/**
- * Hàm hỗ trợ parse JSON an toàn, loại bỏ các ký tự Markdown nếu AI trả về nhầm
- */
 const safeParseJSON = (text: string) => {
   try {
     let cleanText = text.trim();
-    if (cleanText.includes('```')) {
-      cleanText = cleanText.replace(/```json|```/g, '').trim();
-    }
+    // Loại bỏ markdown code blocks nếu có
+    cleanText = cleanText.replace(/^```json\s*/i, '').replace(/\s*```$/i, '');
     return JSON.parse(cleanText);
   } catch (e) {
-    console.error("Lỗi parse JSON từ AI:", text);
-    throw new Error("Định dạng dữ liệu từ AI không hợp lệ.");
+    console.error("Dữ liệu AI trả về không phải JSON hợp lệ:", text);
+    // Thử tìm mảng JSON trong chuỗi nếu AI trả về kèm văn bản giải thích
+    const match = text.match(/\[\s*\{.*\}\s*\]/s);
+    if (match) return JSON.parse(match[0]);
+    throw new Error("Lỗi định dạng dữ liệu từ AI.");
   }
 };
 
@@ -52,13 +45,12 @@ export const generateQuestionSet = async (topic: string, count: number): Promise
   const apiKey = getSafeApiKey();
   const ai = new GoogleGenAI({ apiKey });
   const response = await ai.models.generateContent({
-    model: 'gemini-3-pro-preview',
-    contents: `Hãy tạo một bộ gồm ${count} câu hỏi đa dạng về chủ đề: ${topic}. 
-    ${SYSTEM_PROMPT}
-    Trả về JSON mảng đối tượng.`,
+    // Dùng model Flash để tốc độ nhanh nhất, tránh Timeout Web
+    model: 'gemini-3-flash-preview', 
+    contents: `Tạo ${count} câu hỏi chủ đề: ${topic}. ${SYSTEM_PROMPT}`,
     config: {
       responseMimeType: "application/json",
-      thinkingConfig: { thinkingBudget: 10000 },
+      // Không dùng thinkingConfig ở đây để tối ưu tốc độ phản hồi trên Web
       responseSchema: {
         type: Type.ARRAY,
         items: {
@@ -93,12 +85,11 @@ export const parseQuestionsFromText = async (rawText: string): Promise<PhysicsPr
   const apiKey = getSafeApiKey();
   const ai = new GoogleGenAI({ apiKey });
   const response = await ai.models.generateContent({
-    model: 'gemini-3-pro-preview',
-    contents: `Trích xuất câu hỏi từ văn bản: "${rawText}"
-    ${SYSTEM_PROMPT}`,
+    // Chuyển sang Flash để xử lý tức thì, tránh lỗi Timeout 10s của Vercel
+    model: 'gemini-3-flash-preview',
+    contents: `Trích xuất các câu hỏi từ văn bản này sang JSON: "${rawText}". ${SYSTEM_PROMPT}`,
     config: {
       responseMimeType: "application/json",
-      thinkingConfig: { thinkingBudget: 15000 },
       responseSchema: {
         type: Type.ARRAY,
         items: {
