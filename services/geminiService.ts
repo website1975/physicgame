@@ -2,17 +2,50 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { PhysicsProblem, Difficulty, QuestionType, InteractiveMechanic, DisplayChallenge } from "../types";
 
+// Helper logic for cross-environment variable support (Vercel/Vite/Browser)
+const getSafeApiKey = (): string => {
+  try {
+    const key = process.env.API_KEY || (process.env as any).VITE_API_KEY;
+    if (key) return key;
+    
+    // Check import.meta for Vite-based environments if process.env fails
+    const metaEnv = (import.meta as any).env;
+    if (metaEnv) {
+      return metaEnv.VITE_API_KEY || metaEnv.API_KEY;
+    }
+  } catch (e) {}
+  return "";
+};
+
 const SYSTEM_PROMPT = `Bạn là chuyên gia soạn đề Vật lý theo chương trình GDPT 2018. 
-Quy tắc định dạng đáp án (correctAnswer) BẮT BUỘC:
-1. Loại Trắc nghiệm (type: 'TN'): correctAnswer chỉ là 1 ký tự viết hoa 'A', 'B', 'C' hoặc 'D'.
-2. Loại Đúng/Sai (type: 'DS'): correctAnswer PHẢI là chuỗi đúng 4 ký tự viết tắt của Đúng (Đ) và Sai (S). Ví dụ: 'ĐSĐĐ', 'SSSS', 'ĐĐSS'.
-3. Loại Tr trả lời ngắn (type: 'TL'): correctAnswer là số hoặc cụm từ ngắn gọn.`;
+Nhiệm vụ: Phân tích văn bản thô và trích xuất thành danh sách câu hỏi chuẩn format.
+
+QUY TẮC TRÍCH XUẤT:
+1. Loại Trắc nghiệm (type: 'TN'): 
+   - Nhận diện câu hỏi có 4 lựa chọn A, B, C, D.
+   - 'options' phải chứa 4 chuỗi văn bản tương ứng A, B, C, D (không kèm chữ cái đầu).
+   - 'correctAnswer' CHỈ là 1 ký tự: 'A', 'B', 'C' hoặc 'D'.
+
+2. Loại Đúng/Sai (type: 'DS'): 
+   - Nhận diện câu hỏi có 4 ý mệnh đề a), b), c), d).
+   - 'options' phải chứa đúng 4 chuỗi văn bản của 4 ý a, b, c, d.
+   - 'correctAnswer' PHẢI là chuỗi 4 ký tự 'Đ' hoặc 'S'. Ví dụ: 'ĐSĐS'. 
+   - Nếu văn bản không ghi rõ Đúng/Sai, hãy dùng kiến thức Vật lý để xác định đáp án chính xác.
+
+3. Loại Trả lời ngắn (type: 'TL'): 
+   - Trích xuất nội dung câu hỏi yêu cầu tính toán số hoặc điền từ.
+   - 'correctAnswer' là giá trị số hoặc cụm từ đáp án.
+
+4. Lời giải chi tiết (explanation): 
+   - BẮT BUỘC trích xuất hoặc tự soạn lời giải chi tiết cho từng bước giải. 
+   - Sử dụng ký hiệu $ ... $ cho công thức LaTeX.
+
+5. Hình ảnh: Nếu câu hỏi có nhắc đến "Hình vẽ", "Đồ thị", hãy ghi chú vào 'content'.`;
 
 export const generateQuestionSet = async (topic: string, count: number): Promise<PhysicsProblem[]> => {
-  // Always use new GoogleGenAI({ apiKey: process.env.API_KEY })
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  const apiKey = getSafeApiKey();
+  const ai = new GoogleGenAI({ apiKey });
   const response = await ai.models.generateContent({
-    // Use gemini-3-pro-preview for complex STEM tasks like Physics question generation.
     model: 'gemini-3-pro-preview',
     contents: `Hãy tạo một bộ gồm ${count} câu hỏi đa dạng về chủ đề: ${topic}. 
     ${SYSTEM_PROMPT}
@@ -50,12 +83,14 @@ export const generateQuestionSet = async (topic: string, count: number): Promise
 };
 
 export const parseQuestionsFromText = async (rawText: string): Promise<PhysicsProblem[]> => {
-  // Always use new GoogleGenAI({ apiKey: process.env.API_KEY })
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  const apiKey = getSafeApiKey();
+  const ai = new GoogleGenAI({ apiKey });
   const response = await ai.models.generateContent({
-    // Use gemini-3-pro-preview for STEM tasks.
     model: 'gemini-3-pro-preview',
-    contents: `Phân tích văn bản và trích xuất câu hỏi: "${rawText}". ${SYSTEM_PROMPT}`,
+    contents: `Yêu cầu: Trích xuất chính xác các câu hỏi từ văn bản sau, phân loại rõ TN (A,B,C,D), DS (a,b,c,d) và TL.
+    Văn bản: "${rawText}"
+    
+    ${SYSTEM_PROMPT}`,
     config: {
       responseMimeType: "application/json",
       responseSchema: {
@@ -84,6 +119,6 @@ export const parseQuestionsFromText = async (rawText: string): Promise<PhysicsPr
   return data.map((item: any) => ({
     ...item,
     id: Math.random().toString(36).substring(7),
-    topic: "Nhập từ văn bản"
+    topic: "Trích xuất AI"
   }));
 };
