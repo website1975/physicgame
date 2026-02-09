@@ -2,6 +2,14 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { PhysicsProblem } from "../types";
 
+// Polyfill for environment variables to ensure compatibility with Vercel/Vite
+if (typeof (window as any).process === 'undefined') {
+  (window as any).process = { env: {} };
+}
+if (!process.env.API_KEY) {
+  process.env.API_KEY = (import.meta as any).env?.VITE_API_KEY || (import.meta as any).env?.API_KEY;
+}
+
 const SYSTEM_PROMPT = `Bạn là chuyên gia soạn đề Vật lý. Nhiệm vụ: Trích xuất văn bản thành JSON mảng đối tượng.
 QUY TẮC:
 1. TN: 4 options, correctAnswer là 'A', 'B', 'C' hoặc 'D'.
@@ -24,9 +32,8 @@ const safeParseJSON = (text: string) => {
 };
 
 export const generateQuestionSet = async (topic: string, count: number): Promise<PhysicsProblem[]> => {
-  // Đảm bảo sử dụng process.env.API_KEY trực tiếp
-  if (!process.env.API_KEY) throw new Error("Missing API Key");
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  // Using process.env.API_KEY directly as per guidelines, assuming polyfill/injection handled it
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || "" });
   const response = await ai.models.generateContent({
     model: 'gemini-3-flash-preview', 
     contents: `Tạo ${count} câu hỏi chủ đề: ${topic}.`,
@@ -64,8 +71,7 @@ export const generateQuestionSet = async (topic: string, count: number): Promise
 };
 
 export const parseQuestionsFromText = async (rawText: string): Promise<PhysicsProblem[]> => {
-  if (!process.env.API_KEY) throw new Error("Missing API Key");
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || "" });
   const response = await ai.models.generateContent({
     model: 'gemini-3-flash-preview',
     contents: `Trích xuất các câu hỏi từ văn bản này sang JSON: "${rawText}".`,
