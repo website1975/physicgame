@@ -41,6 +41,7 @@ const App: React.FC = () => {
     }
     try {
       const ai = new GoogleGenAI({ apiKey });
+      // Thử ping nhẹ với model flash
       await ai.models.generateContent({ 
         model: 'gemini-3-flash-preview', 
         contents: 'ping', 
