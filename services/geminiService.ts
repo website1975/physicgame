@@ -2,20 +2,27 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { PhysicsProblem, Difficulty, QuestionType, InteractiveMechanic, DisplayChallenge } from "../types";
 
-// Helper logic for cross-environment variable support (Vercel/Vite/Browser)
-const getSafeApiKey = (): string => {
+// Hàm hỗ trợ lấy biến môi trường đa nền tảng (Vercel, Vite, v.v.)
+export const getSafeEnv = (key: string): string | undefined => {
   try {
-    const key = process.env.API_KEY || (process.env as any).VITE_API_KEY;
-    if (key) return key;
-    
-    // Check import.meta for Vite-based environments if process.env fails
-    const metaEnv = (import.meta as any).env;
-    if (metaEnv) {
-      return metaEnv.VITE_API_KEY || metaEnv.API_KEY;
+    // Thử lấy từ process.env (Vercel/Node)
+    const p = typeof process !== 'undefined' ? process.env : {};
+    const fromProcess = (p as any)[key] || (p as any)[`VITE_${key}`];
+    if (fromProcess) return fromProcess;
+
+    // Thử lấy từ import.meta.env (Vite/ESM)
+    const meta = (import.meta as any).env;
+    if (meta) {
+      const fromMeta = meta[key] || meta[`VITE_${key}`];
+      if (fromMeta) return fromMeta;
     }
-  } catch (e) {}
-  return "";
+  } catch (e) {
+    console.warn("Lỗi khi truy cập biến môi trường:", e);
+  }
+  return undefined;
 };
+
+const getSafeApiKey = (): string => getSafeEnv('API_KEY') || "";
 
 const SYSTEM_PROMPT = `Bạn là chuyên gia soạn đề Vật lý theo chương trình GDPT 2018. 
 Nhiệm vụ: Phân tích văn bản thô và trích xuất thành danh sách câu hỏi chuẩn format.
@@ -38,9 +45,7 @@ QUY TẮC TRÍCH XUẤT:
 
 4. Lời giải chi tiết (explanation): 
    - BẮT BUỘC trích xuất hoặc tự soạn lời giải chi tiết cho từng bước giải. 
-   - Sử dụng ký hiệu $ ... $ cho công thức LaTeX.
-
-5. Hình ảnh: Nếu câu hỏi có nhắc đến "Hình vẽ", "Đồ thị", hãy ghi chú vào 'content'.`;
+   - Sử dụng ký hiệu $ ... $ cho công thức LaTeX.`;
 
 export const generateQuestionSet = async (topic: string, count: number): Promise<PhysicsProblem[]> => {
   const apiKey = getSafeApiKey();
