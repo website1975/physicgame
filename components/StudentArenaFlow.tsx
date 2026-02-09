@@ -2,6 +2,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { GameState, Teacher, QuestionType, Round } from '../types';
 import { getRoomAssignments, fetchSetData, supabase, fetchTeacherByMaGV } from '../services/supabaseService';
+import KeywordSelector from './KeywordSelector';
 
 interface StudentArenaFlowProps {
   gameState: GameState;
@@ -40,9 +41,14 @@ const StudentArenaFlow: React.FC<StudentArenaFlowProps> = ({
   const [roomCodeInput, setRoomCodeInput] = useState('');
   const [targetTeacher, setTargetTeacher] = useState<Teacher | null>(null);
   const [uniqueId] = useState(() => Math.random().toString(36).substring(7));
+  
+  // States for keyword selection
+  const [selectedSet, setSelectedSet] = useState<any>(null);
+  const [selectedQuantities, setSelectedQuantities] = useState<string[]>([]);
+  const [selectedFormulas, setSelectedFormulas] = useState<string[]>([]);
+
   const channelRef = useRef<any>(null);
   const matchStartedRef = useRef(false);
-
   const shortId = uniqueId.slice(-3).toUpperCase();
 
   useEffect(() => {
@@ -230,6 +236,21 @@ const StudentArenaFlow: React.FC<StudentArenaFlowProps> = ({
     }
   }, [gameState, joinedRoom, targetTeacher, playerName, uniqueId, availableSets]);
 
+  const handleSelectSetForKeywords = (set: any) => {
+    setSelectedSet(set);
+    setGameState('KEYWORD_SELECTION');
+  };
+
+  const handleFinalStart = () => {
+    onStartMatch({ 
+      setId: selectedSet.id, 
+      title: selectedSet.title, 
+      rounds: selectedSet.rounds, 
+      joinedRoom, 
+      myId: uniqueId 
+    });
+  };
+
   if (gameState === 'ROOM_SELECTION') {
     return (
       <div className="min-h-screen p-8 flex flex-col items-center justify-center relative bg-slate-950">
@@ -332,7 +353,7 @@ const StudentArenaFlow: React.FC<StudentArenaFlowProps> = ({
                  </div>
 
                  <button 
-                  onClick={() => onStartMatch({ setId: set.id, title: set.title, rounds: set.rounds, joinedRoom, myId: uniqueId })} 
+                  onClick={() => handleSelectSetForKeywords(set)} 
                   className="mt-auto w-full py-5 bg-blue-600 text-white hover:bg-blue-700 border-b-6 border-blue-800 rounded-2xl font-black uppercase italic transition-all text-sm flex items-center justify-center gap-3 shadow-lg hover:scale-[1.02] active:scale-95"
                  >
                    <span className="text-xl">⚡</span> BẮT ĐẦU LUYỆN
@@ -341,6 +362,35 @@ const StudentArenaFlow: React.FC<StudentArenaFlowProps> = ({
             ))}
           </div>
         </div>
+      </div>
+    );
+  }
+
+  if (gameState === 'KEYWORD_SELECTION' && selectedSet) {
+    return (
+      <div className="min-h-screen p-8 flex flex-col items-center justify-center bg-slate-950 overflow-y-auto no-scrollbar">
+         <div className="max-w-4xl w-full bg-white rounded-[4rem] p-12 shadow-2xl border-b-[12px] border-blue-600 animate-in zoom-in duration-500">
+            <header className="mb-10 text-center">
+               <h2 className="text-4xl font-black text-slate-800 uppercase italic mb-2">KHỞI ĐỘNG TƯ DUY</h2>
+               <p className="text-slate-400 font-bold text-xs uppercase italic tracking-widest">Chọn các đại lượng & công thức bạn sẽ gặp trong bộ đề này</p>
+            </header>
+
+            <div className="bg-slate-50 p-8 rounded-[3rem] border-2 border-slate-100 mb-10">
+               <KeywordSelector 
+                 selectedQuantities={selectedQuantities}
+                 selectedFormulas={selectedFormulas}
+                 onToggleQuantity={(s) => setSelectedQuantities(prev => prev.includes(s) ? prev.filter(x => x !== s) : [...prev, s])}
+                 onToggleFormula={(id) => setSelectedFormulas(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id])}
+               />
+            </div>
+
+            <div className="flex gap-4">
+               <button onClick={() => setGameState('SET_SELECTION')} className="flex-1 py-6 bg-slate-100 text-slate-400 rounded-3xl font-black uppercase italic hover:bg-slate-200 transition-all">Quay lại</button>
+               <button onClick={handleFinalStart} className="flex-[2] py-6 bg-blue-600 text-white rounded-3xl font-black uppercase italic text-xl shadow-xl hover:scale-105 active:scale-95 transition-all flex items-center justify-center gap-3 border-b-8 border-blue-800">
+                  <span className="text-2xl">⚡</span> SẴN SÀNG CHIẾN ĐẤU
+               </button>
+            </div>
+         </div>
       </div>
     );
   }
