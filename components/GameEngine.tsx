@@ -23,9 +23,16 @@ interface GameEngineProps {
     rounds: Round[], 
     opponentName?: string, 
     joinedRoom?: any,
-    startIndex?: number 
+    startIndex?: number,
+    myId?: string
   };
   onExit: () => void;
+}
+
+interface OpponentData {
+  name: string;
+  shortId: string;
+  score: number;
 }
 
 const GameEngine: React.FC<GameEngineProps> = ({ 
@@ -34,7 +41,7 @@ const GameEngine: React.FC<GameEngineProps> = ({
   const [currentRoundIdx, setCurrentRoundIdx] = useState(0);
   const [currentProblemIdx, setCurrentProblemIdx] = useState(matchData.startIndex || 0); 
   const [score, setScore] = useState(0);
-  const [opponentScores, setOpponentScores] = useState<Record<string, number>>({});
+  const [opponentScores, setOpponentScores] = useState<Record<string, OpponentData>>({});
   const [timeLeft, setTimeLeft] = useState(DEFAULT_TIME);
   const [feedbackTimer, setFeedbackTimer] = useState(FEEDBACK_TIME);
   const [userAnswer, setUserAnswer] = useState('');
@@ -43,16 +50,21 @@ const GameEngine: React.FC<GameEngineProps> = ({
   const [countdown, setCountdown] = useState<number | null>(null);
   const [showExitConfirm, setShowExitConfirm] = useState(false);
   const [isMaster, setIsMaster] = useState(false);
+  const [isPresenceSynced, setIsPresenceSynced] = useState(false);
   
   const [isWhiteboardActive, setIsWhiteboardActive] = useState(false);
-  const isTeacherRoom = matchData.joinedRoom?.code === 'TEACHER_ROOM';
-  const isArenaA = matchData.joinedRoom?.code === 'ARENA_A';
+  
+  const roomCode = matchData.joinedRoom?.code || '';
+  const isTeacherRoom = roomCode === 'TEACHER_ROOM';
+  const isArenaA = roomCode === 'ARENA_A';
+
+  const myUniqueId = matchData.myId || 'temp_id';
+  const myPresenceKey = `${playerName}_${myUniqueId}`;
 
   const channelRef = useRef<any>(null);
   const controlChannelRef = useRef<any>(null);
-  const presenceKey = useRef(`${playerName}_${Math.random().toString(36).substring(7)}`);
+  const presenceKey = useRef(myPresenceKey);
   
-  // Refs để truy cập giá trị mới nhất trong các callback không đồng bộ
   const currentProblemIdxRef = useRef(currentProblemIdx);
   const currentRoundIdxRef = useRef(currentRoundIdx);
   const gameStateRef = useRef(gameState);
@@ -66,7 +78,6 @@ const GameEngine: React.FC<GameEngineProps> = ({
   const currentProblem = rounds[currentRoundIdx]?.problems[currentProblemIdx];
 
   const handleNext = useCallback(() => {
-    // Ngăn chặn việc gọi handleNext nhiều lần cùng lúc
     if (isTransitioning.current) return;
     isTransitioning.current = true;
 
@@ -84,7 +95,6 @@ const GameEngine: React.FC<GameEngineProps> = ({
       setGameState('GAME_OVER');
     }
 
-    // Mở khóa sau khi đã thực hiện chuyển đổi
     setTimeout(() => { isTransitioning.current = false; }, 1000);
   }, [rounds]);
 
@@ -116,46 +126,6 @@ const GameEngine: React.FC<GameEngineProps> = ({
     }
   }, [gameState, currentProblem?.id, isArenaA, isTeacherRoom]);
 
-  // Kênh điều khiển cho phòng Giáo Viên
-  useEffect(() => {
-    if (isTeacherRoom) {
-      const channel = supabase.channel(`control_TEACHER_ROOM_${currentTeacher.id}`, {
-        config: { presence: { key: presenceKey.current } }
-      });
-
-      channel
-        .on('presence', { event: 'sync' }, () => {
-          const state = channel.presenceState();
-          const players = Object.keys(state)
-            .filter(key => key !== 'teacher')
-            .map(key => key.split('_')[0]);
-        })
-        .on('broadcast', { event: 'teacher_next_question' }, ({ payload }) => {
-          if (payload && typeof payload.nextIndex === 'number') {
-             setCurrentProblemIdx(payload.nextIndex);
-             startProblem();
-          } else {
-             handleNext();
-          }
-        })
-        .on('broadcast', { event: 'teacher_toggle_whiteboard' }, ({ payload }) => {
-          setIsWhiteboardActive(payload.active);
-        })
-        .on('broadcast', { event: 'teacher_reset_room' }, () => {
-          onExit();
-        })
-        .subscribe(async (status) => {
-          if (status === 'SUBSCRIBED') {
-            await channel.track({ role: 'student', online_at: new Date().toISOString() });
-          }
-        });
-
-      controlChannelRef.current = channel;
-      return () => { supabase.removeChannel(channel); };
-    }
-  }, [isTeacherRoom, currentTeacher.id, playerName, handleNext, startProblem, onExit]);
-
-  // Kênh thi đấu cho Arena
   useEffect(() => {
     if (!isArenaA && matchData.joinedRoom && !isTeacherRoom) {
       const channel = supabase.channel(`match_${matchData.joinedRoom.code}_${currentTeacher.id}`, {
@@ -167,34 +137,42 @@ const GameEngine: React.FC<GameEngineProps> = ({
           const state = channel.presenceState();
           const keys = Object.keys(state).sort();
           setIsMaster(keys[0] === presenceKey.current);
+          setIsPresenceSynced(true);
+        })
+        .on('broadcast', { event: 'match_start_problem' }, () => {
+          if (gameStateRef.current === 'ROUND_INTRO') startProblem();
+        })
+        .on('broadcast', { event: 'match_next_question' }, () => {
+          handleNext();
         })
         .on('broadcast', { event: 'buzzer_signal' }, ({ payload }) => {
-          if (payload.player !== playerName && !buzzerWinner && (gameStateRef.current === 'WAITING_FOR_BUZZER' || gameStateRef.current === 'ANSWERING')) {
+          if (payload.playerId !== myUniqueId && !buzzerWinner && (gameStateRef.current === 'WAITING_FOR_BUZZER' || gameStateRef.current === 'ANSWERING')) {
             setBuzzerWinner('OPPONENT');
             setGameState('ANSWERING');
             setTimeLeft(20);
           }
         })
         .on('broadcast', { event: 'match_result' }, ({ payload }) => {
-          if (payload.player !== playerName) {
-            setOpponentScores(prev => ({
-               ...prev,
-               [payload.player]: (prev[payload.player] || 0) + (payload.points || 0)
-            }));
+          if (payload.playerId !== myUniqueId) {
+            setOpponentScores(prev => {
+              const currentData = prev[payload.playerId] || { name: payload.player, shortId: payload.playerId.slice(-3).toUpperCase(), score: 0 };
+              return {
+                ...prev,
+                [payload.playerId]: {
+                  ...currentData,
+                  score: currentData.score + (payload.points || 0)
+                }
+              };
+            });
             if (gameStateRef.current !== 'FEEDBACK') {
-              setFeedback({ ...payload.feedback, winner: 'OPPONENT', winnerName: payload.player });
+              setFeedback({ 
+                ...payload.feedback, 
+                winner: 'OPPONENT', 
+                winnerName: `${payload.player} #${payload.playerId.slice(-3).toUpperCase()}` 
+              });
               setGameState('FEEDBACK');
               setFeedbackTimer(FEEDBACK_TIME);
             }
-          }
-        })
-        .on('broadcast', { event: 'match_next_question' }, () => {
-          handleNext();
-        })
-        .on('broadcast', { event: 'match_start_problem' }, () => {
-          // Sync transition from ROUND_INTRO to STARTING_ROUND
-          if (gameStateRef.current === 'ROUND_INTRO') {
-            startProblem();
           }
         })
         .subscribe(async (status) => {
@@ -206,85 +184,82 @@ const GameEngine: React.FC<GameEngineProps> = ({
       channelRef.current = channel;
       return () => { supabase.removeChannel(channel); };
     }
-  }, [isArenaA, isTeacherRoom, matchData.joinedRoom, playerName, handleNext, startProblem, buzzerWinner]);
+  }, [isArenaA, isTeacherRoom, matchData.joinedRoom, playerName, myUniqueId, handleNext, startProblem]);
 
-  // Logic đếm ngược Feedback
+  useEffect(() => {
+    if (isTeacherRoom) {
+      const channel = supabase.channel(`control_TEACHER_ROOM_${currentTeacher.id}`, {
+        config: { presence: { key: presenceKey.current } }
+      });
+      channel
+        .on('broadcast', { event: 'teacher_next_question' }, ({ payload }) => {
+          if (payload && typeof payload.nextIndex === 'number') {
+             setCurrentProblemIdx(payload.nextIndex);
+             startProblem();
+          } else {
+             handleNext();
+          }
+        })
+        .on('broadcast', { event: 'teacher_toggle_whiteboard' }, ({ payload }) => setIsWhiteboardActive(payload.active))
+        .on('broadcast', { event: 'teacher_reset_room' }, () => onExit())
+        .subscribe(async (status) => {
+          if (status === 'SUBSCRIBED') await channel.track({ role: 'student', online_at: new Date().toISOString() });
+        });
+      controlChannelRef.current = channel;
+      return () => { supabase.removeChannel(channel); };
+    }
+  }, [isTeacherRoom, currentTeacher.id, handleNext, startProblem, onExit]);
+
   useEffect(() => {
     if (gameState === 'FEEDBACK') {
-      const timer = setInterval(() => {
-        setFeedbackTimer(p => (p > 0 ? p - 1 : 0));
-      }, 1000);
+      const timer = setInterval(() => setFeedbackTimer(p => (p > 0 ? p - 1 : 0)), 1000);
       return () => clearInterval(timer);
     }
   }, [gameState]);
 
-  // Logic CHUYỂN CÂU khi đếm ngược về 0 (FEEDBACK -> NEXT)
   useEffect(() => {
     if (gameState === 'FEEDBACK' && feedbackTimer === 0) {
-      if (!isTeacherRoom) {
-        if (isArenaA) {
-          handleNext();
-        } else if (isMaster) {
-          // Master: Gửi lệnh và tự nhảy
-          if (channelRef.current) {
-            channelRef.current.send({
-              type: 'broadcast',
-              event: 'match_next_question'
-            });
-          }
+      if (isArenaA) {
+        handleNext();
+      } else if (!isTeacherRoom) {
+        if (isMaster) {
+          channelRef.current?.send({ type: 'broadcast', event: 'match_next_question' });
           handleNext();
         } else {
-          // Slave: Đợi lệnh Master 2s, nếu không có thì tự nhảy (phòng hờ lag)
-          const safetyTimeout = setTimeout(() => {
-            if (gameStateRef.current === 'FEEDBACK') {
-              handleNext();
-            }
-          }, 2000);
-          return () => clearTimeout(safetyTimeout);
+          const safety = setTimeout(() => { if (gameStateRef.current === 'FEEDBACK') handleNext(); }, 2500);
+          return () => clearTimeout(safety);
         }
       }
     }
   }, [feedbackTimer, gameState, isArenaA, isMaster, isTeacherRoom, handleNext]);
 
-  // Logic CHUYỂN CÂU khi đếm ngược ở ROUND_INTRO kết thúc
   useEffect(() => {
     if (gameState === 'ROUND_INTRO') {
       if (isArenaA) {
-        const timer = setTimeout(startProblem, ROUND_INTRO_TIME * 1000);
-        return () => clearTimeout(timer);
-      } else if (!isTeacherRoom) {
+        const t = setTimeout(startProblem, ROUND_INTRO_TIME * 1000);
+        return () => clearTimeout(t);
+      } else if (!isTeacherRoom && isPresenceSynced) {
         if (isMaster) {
-          // Master manages the 5s intro timer for both
-          const timer = setTimeout(() => {
-            if (channelRef.current) {
-              channelRef.current.send({
-                type: 'broadcast',
-                event: 'match_start_problem'
-              });
-            }
+          const t = setTimeout(() => {
+            channelRef.current?.send({ type: 'broadcast', event: 'match_start_problem' });
             startProblem();
           }, ROUND_INTRO_TIME * 1000);
-          return () => clearTimeout(timer);
+          return () => clearTimeout(t);
         } else {
-          // Slave: Wait for signal or safety timeout
-          const safetyTimeout = setTimeout(() => {
-            if (gameStateRef.current === 'ROUND_INTRO') {
-              startProblem();
-            }
+          const safety = setTimeout(() => {
+            if (gameStateRef.current === 'ROUND_INTRO') startProblem();
           }, (ROUND_INTRO_TIME + 2) * 1000);
-          return () => clearTimeout(safetyTimeout);
+          return () => clearTimeout(safety);
         }
       }
     }
-  }, [gameState, isArenaA, isMaster, isTeacherRoom, startProblem]);
+  }, [gameState, isArenaA, isMaster, isTeacherRoom, isPresenceSynced, startProblem]);
 
-  // Đếm ngược thời gian làm bài
   useEffect(() => {
     if ((gameState === 'WAITING_FOR_BUZZER' || gameState === 'ANSWERING') && timeLeft > 0 && !isWhiteboardActive) {
       const t = setInterval(() => setTimeLeft(p => p - 1), 1000);
       return () => clearInterval(t);
     }
-    
     if (timeLeft === 0 && !isWhiteboardActive) {
       if (gameState === 'ANSWERING' && buzzerWinner === 'YOU') {
         submitAnswer();
@@ -298,13 +273,7 @@ const GameEngine: React.FC<GameEngineProps> = ({
 
   const handleBuzzerClick = () => {
     if (gameState === 'WAITING_FOR_BUZZER' && !buzzerWinner) {
-      if (channelRef.current) {
-        channelRef.current.send({
-          type: 'broadcast',
-          event: 'buzzer_signal',
-          payload: { player: playerName }
-        });
-      }
+      channelRef.current?.send({ type: 'broadcast', event: 'buzzer_signal', payload: { player: playerName, playerId: myUniqueId } });
       setBuzzerWinner('YOU');
       setGameState('ANSWERING');
       setTimeLeft(20);
@@ -316,45 +285,30 @@ const GameEngine: React.FC<GameEngineProps> = ({
     const correct = (prob?.correctAnswer || "").trim().toUpperCase();
     const user = userAnswer.trim().toUpperCase();
     const isPerfect = user === correct;
-    
-    const fb = { 
-      isCorrect: isPerfect, 
-      text: isPerfect ? "CHÍNH XÁC! BẠN GIÀNH ĐƯỢC ĐIỂM." : `SAI RỒI! Đáp án đúng là: ${correct}`, 
-      winner: 'YOU' 
-    };
+    const fb = { isCorrect: isPerfect, text: isPerfect ? "CHÍNH XÁC! BẠN GIÀNH ĐƯỢC ĐIỂM." : `SAI RỒI! Đáp án đúng là: ${correct}`, winner: 'YOU' };
     
     if (isPerfect) setScore(s => s + 100);
     setFeedback(fb);
     setGameState('FEEDBACK');
     setFeedbackTimer(FEEDBACK_TIME);
     
-    if (isTeacherRoom && controlChannelRef.current) {
-        controlChannelRef.current.send({
-            type: 'broadcast',
-            event: 'student_answer',
-            payload: { playerName, isCorrect: isPerfect }
-        });
-    }
-
-    if (channelRef.current && !isTeacherRoom) {
-      channelRef.current.send({ 
-        type: 'broadcast', 
-        event: 'match_result', 
-        payload: { player: playerName, points: isPerfect ? 100 : 0, feedback: fb } 
-      });
+    if (isTeacherRoom) {
+        controlChannelRef.current?.send({ type: 'broadcast', event: 'student_answer', payload: { playerName, playerId: myUniqueId, isCorrect: isPerfect } });
+    } else {
+        channelRef.current?.send({ type: 'broadcast', event: 'match_result', payload: { player: playerName, playerId: myUniqueId, points: isPerfect ? 100 : 0, feedback: fb } });
     }
   };
 
   if (gameState === 'ROUND_INTRO') {
     return (
       <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center text-center p-6">
-        <div className="bg-white rounded-[4rem] p-16 shadow-2xl max-w-3xl w-full border-b-[12px] border-blue-600">
+        <div className="bg-white rounded-[4rem] p-16 shadow-2xl max-w-3xl w-full border-b-[12px] border-blue-600 animate-in zoom-in duration-500">
           <h2 className="text-5xl font-black text-slate-800 uppercase italic mb-6">VÒNG {currentRoundIdx + 1}</h2>
           <p className="text-slate-500 font-bold text-xl italic mb-10">{rounds[currentRoundIdx]?.description}</p>
-          <div className="text-blue-600 font-black animate-pulse uppercase tracking-widest">Sẵn sàng thi đấu...</div>
+          <div className="text-blue-600 font-black animate-pulse uppercase tracking-widest text-2xl">Sẵn sàng thi đấu...</div>
           {!isArenaA && !isTeacherRoom && (
             <div className="mt-8 text-[10px] font-black text-slate-500 uppercase italic tracking-widest opacity-50">
-              {isMaster ? "Đang chờ đồng bộ..." : "Đang chờ đối thủ..."}
+              {isMaster ? "Bạn là chủ phòng - Đang đồng bộ..." : "Đang đợi máy chủ đồng bộ..."}
             </div>
           )}
         </div>
@@ -385,7 +339,6 @@ const GameEngine: React.FC<GameEngineProps> = ({
     );
   }
 
-  /* Fixed returned JSX by removing escaped quotes */
   return (
     <div className="min-h-screen bg-slate-100 flex flex-col p-4 overflow-hidden relative">
       {isWhiteboardActive && (
@@ -396,39 +349,46 @@ const GameEngine: React.FC<GameEngineProps> = ({
         </div>
       )}
 
-      <header className="flex justify-between items-center bg-white p-6 rounded-[2.5rem] shadow-lg mb-4 shrink-0">
-        <div className="flex items-center gap-10">
-           <div className="text-center">
-              <div className="text-[10px] font-black text-blue-500 uppercase italic">BẠN</div>
-              <div className="text-3xl font-black text-slate-800 italic leading-none">{score}đ</div>
+      {/* Header Nâng Cấp: Hiển thị điểm số cho nhiều người chơi */}
+      <header className="bg-white px-8 py-4 rounded-[2.5rem] shadow-lg mb-4 shrink-0 flex items-center gap-4 overflow-x-auto no-scrollbar">
+        <div className="flex items-center gap-3 shrink-0">
+           <div className="bg-blue-600 text-white px-5 py-2.5 rounded-[1.5rem] shadow-md border-b-4 border-blue-800 flex flex-col items-center min-w-[100px]">
+              <div className="text-[8px] font-black uppercase tracking-tighter italic opacity-80 leading-none mb-1">BẠN</div>
+              <div className="text-2xl font-black leading-none">{score}đ</div>
            </div>
-           {!isArenaA && !isTeacherRoom && (
-              <div className="text-center border-l-4 border-slate-100 pl-10 flex gap-6">
-                 {Object.entries(opponentScores).length > 0 ? (
-                    Object.entries(opponentScores).map(([name, s]) => (
-                       <div key={name} className="text-center">
-                          <div className="text-[10px] font-black text-red-500 uppercase italic truncate max-w-[60px]">{name}</div>
-                          <div className="text-2xl font-black text-slate-800 italic leading-none">{s}đ</div>
-                       </div>
-                    ))
-                 ) : (
-                    <div className="text-center">
-                       <div className="text-[10px] font-black text-red-500 uppercase italic">ĐỐI THỦ</div>
-                       <div className="text-2xl font-black text-slate-800 italic leading-none">0đ</div>
+        </div>
+
+        {!isArenaA && !isTeacherRoom && (
+           <div className="flex items-center gap-2 border-l-2 border-slate-100 pl-4 shrink-0">
+              {(Object.entries(opponentScores) as [string, OpponentData][]).length > 0 ? (
+                 (Object.entries(opponentScores) as [string, OpponentData][]).map(([id, data], index) => (
+                    <div key={id} className="bg-slate-900 text-white px-4 py-2.5 rounded-[1.5rem] shadow-md border-b-4 border-slate-800 flex flex-col items-center min-w-[90px] animate-in slide-in-from-left">
+                       <div className="text-[7px] font-black uppercase tracking-tighter italic opacity-60 leading-none mb-1">Đ.THỦ {index + 1}</div>
+                       <div className="text-xl font-black leading-none">{data.score}đ</div>
+                       <div className="text-[6px] font-bold opacity-30 mt-1 uppercase truncate max-w-[60px]">{data.name}</div>
                     </div>
-                 )}
-              </div>
-           )}
-        </div>
-        <div className="flex items-center gap-6">
-           <div className="text-6xl font-black italic text-slate-900 w-24 text-center">{timeLeft}s</div>
-           {isMaster && !isTeacherRoom && !isArenaA && (
-              <div className="bg-blue-600 text-white px-3 py-1 rounded-lg text-[8px] font-black uppercase italic shadow-lg animate-pulse">Master</div>
-           )}
-        </div>
-        <div className="flex gap-4">
-           {isTeacherRoom && <div className="bg-amber-100 text-amber-600 px-6 py-4 rounded-2xl font-black text-[10px] uppercase italic border border-amber-200">PHÒNG LIVE</div>}
-           <button onClick={() => setShowExitConfirm(true)} className="w-14 h-14 bg-red-50 text-red-500 rounded-2xl flex items-center justify-center font-black hover:bg-red-500 hover:text-white transition-all shadow-sm">✕</button>
+                 ))
+              ) : (
+                <div className="bg-slate-100 text-slate-300 px-4 py-2.5 rounded-[1.5rem] border-2 border-dashed border-slate-200 flex flex-col items-center min-w-[90px]">
+                   <div className="text-[7px] font-black uppercase leading-none mb-1">ĐỐI THỦ</div>
+                   <div className="text-xl font-black leading-none">0đ</div>
+                </div>
+              )}
+           </div>
+        )}
+
+        <div className="flex-1"></div>
+
+        <div className="flex items-center gap-4 shrink-0">
+           <div className="flex flex-col items-center">
+             <div className="text-[8px] font-black text-slate-400 uppercase italic mb-0.5">THỜI GIAN</div>
+             <div className={`text-4xl font-black italic tabular-nums leading-none ${timeLeft <= 5 ? 'text-red-500 animate-pulse' : 'text-slate-900'}`}>{timeLeft}s</div>
+           </div>
+           
+           <div className="flex gap-2">
+             {isTeacherRoom && <div className="bg-amber-500 text-white px-4 py-2 rounded-xl font-black text-[9px] uppercase italic border-b-4 border-amber-700 shadow-md flex items-center">LIVE</div>}
+             <button onClick={() => setShowExitConfirm(true)} className="w-12 h-12 bg-red-50 text-red-500 rounded-2xl flex items-center justify-center font-black hover:bg-red-500 hover:text-white transition-all shadow-sm">✕</button>
+           </div>
         </div>
       </header>
 
