@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { GameState, Teacher, Round, QuestionType } from '../types';
+import { GameState, Teacher, Round, QuestionType, DisplayChallenge } from '../types';
 import ProblemCard from './ProblemCard';
 import AnswerInput from './AnswerInput';
 import Whiteboard from './Whiteboard';
@@ -49,8 +49,10 @@ const GameEngine: React.FC<GameEngineProps> = ({
   const [buzzerWinner, setBuzzerWinner] = useState<'YOU' | 'OPPONENT' | null>(null);
   const [countdown, setCountdown] = useState<number | null>(null);
   const [showExitConfirm, setShowExitConfirm] = useState(false);
+  const [showHelpConfirm, setShowHelpConfirm] = useState(false); // Modal xác nhận trợ giúp
   const [isMaster, setIsMaster] = useState(false);
   const [isPresenceSynced, setIsPresenceSynced] = useState(false);
+  const [isHelpUsed, setIsHelpUsed] = useState(false); 
   
   const [isWhiteboardActive, setIsWhiteboardActive] = useState(false);
   
@@ -102,6 +104,7 @@ const GameEngine: React.FC<GameEngineProps> = ({
     setUserAnswer('');
     setFeedback(null);
     setBuzzerWinner(null);
+    setIsHelpUsed(false); 
     setGameState('STARTING_ROUND');
     setCountdown(3);
     setFeedbackTimer(FEEDBACK_TIME);
@@ -280,67 +283,61 @@ const GameEngine: React.FC<GameEngineProps> = ({
     }
   };
 
+  const handleUseHelp = () => {
+    if (isHelpUsed || (gameState !== 'ANSWERING' && gameState !== 'WAITING_FOR_BUZZER')) return;
+    setShowHelpConfirm(true); // Hiển thị Modal xác nhận thay vì window.confirm
+  };
+
+  const confirmUseHelp = () => {
+    setIsHelpUsed(true);
+    setShowHelpConfirm(false);
+  };
+
   const submitAnswer = () => {
     const prob = rounds[currentRoundIdxRef.current]?.problems[currentProblemIdxRef.current];
     const correct = (prob?.correctAnswer || "").trim().toUpperCase();
     const user = userAnswer.trim().toUpperCase();
     const isPerfect = user === correct;
-    const fb = { isCorrect: isPerfect, text: isPerfect ? "CHÍNH XÁC! BẠN GIÀNH ĐƯỢC ĐIỂM." : `SAI RỒI! Đáp án đúng là: ${correct}`, winner: 'YOU' };
     
-    if (isPerfect) setScore(s => s + 100);
+    const basePoints = isPerfect ? 100 : 0;
+    const finalPoints = isHelpUsed ? Math.round(basePoints * 0.6) : basePoints;
+
+    const fb = { 
+      isCorrect: isPerfect, 
+      text: isPerfect 
+        ? (isHelpUsed ? `CHÍNH XÁC! (Sử dụng trợ giúp: +${finalPoints}đ)` : `CHÍNH XÁC! (+${finalPoints}đ)`)
+        : `SAI RỒI! Đáp án đúng là: ${correct}`, 
+      winner: 'YOU' 
+    };
+    
+    if (isPerfect) setScore(s => s + finalPoints);
     setFeedback(fb);
     setGameState('FEEDBACK');
     setFeedbackTimer(FEEDBACK_TIME);
     
     if (isTeacherRoom) {
-        controlChannelRef.current?.send({ type: 'broadcast', event: 'student_answer', payload: { playerName, playerId: myUniqueId, isCorrect: isPerfect } });
+        controlChannelRef.current?.send({ type: 'broadcast', event: 'student_answer', payload: { playerName, playerId: myUniqueId, isCorrect: isPerfect, points: finalPoints } });
     } else {
-        channelRef.current?.send({ type: 'broadcast', event: 'match_result', payload: { player: playerName, playerId: myUniqueId, points: isPerfect ? 100 : 0, feedback: fb } });
+        channelRef.current?.send({ type: 'broadcast', event: 'match_result', payload: { player: playerName, playerId: myUniqueId, points: finalPoints, feedback: fb } });
     }
   };
 
-  if (gameState === 'ROUND_INTRO') {
-    return (
-      <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center text-center p-6">
-        <div className="bg-white rounded-[4rem] p-16 shadow-2xl max-w-3xl w-full border-b-[12px] border-blue-600 animate-in zoom-in duration-500">
-          <h2 className="text-5xl font-black text-slate-800 uppercase italic mb-6">VÒNG {currentRoundIdx + 1}</h2>
-          <p className="text-slate-500 font-bold text-xl italic mb-10">{rounds[currentRoundIdx]?.description}</p>
-          <div className="text-blue-600 font-black animate-pulse uppercase tracking-widest text-2xl">Sẵn sàng thi đấu...</div>
-          {!isArenaA && !isTeacherRoom && (
-            <div className="mt-8 text-[10px] font-black text-slate-500 uppercase italic tracking-widest opacity-50">
-              {isMaster ? "Bạn là chủ phòng - Đang đồng bộ..." : "Đang đợi máy chủ đồng bộ..."}
-            </div>
-          )}
-        </div>
-      </div>
-    );
-  }
-
-  if (gameState === 'STARTING_ROUND') {
-    return (
-      <div className="fixed inset-0 bg-slate-950 flex items-center justify-center z-[9999]">
-        <div className="text-[15rem] font-black text-white animate-ping drop-shadow-[0_0_50px_rgba(255,255,255,0.3)]">{countdown}</div>
-      </div>
-    );
-  }
-
-  if (gameState === 'GAME_OVER') {
-    return (
-      <div className="min-h-screen flex items-center justify-center p-4">
-         <div className="bg-white rounded-[4rem] p-16 shadow-2xl max-w-2xl w-full text-center border-b-[12px] border-emerald-500">
-            <h2 className="text-6xl font-black text-slate-800 uppercase italic mb-10">HOÀN THÀNH!</h2>
-            <div className="bg-slate-50 p-10 rounded-[3rem] mb-10">
-               <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">TỔNG ĐIỂM CHIẾN BINH</div>
-               <div className="text-8xl font-black text-slate-900">{score}đ</div>
-            </div>
-            <button onClick={onExit} className="w-full py-6 bg-slate-900 text-white font-black rounded-[2rem] uppercase italic text-2xl shadow-xl hover:scale-105 active:scale-95 transition-all">THOÁT RA SẢNH</button>
-         </div>
-      </div>
-    );
-  }
+  const hasChallenge = currentProblem?.challenge !== DisplayChallenge.NORMAL;
 
   return (
     <div className="min-h-screen bg-slate-100 flex flex-col p-4 overflow-hidden relative">
+      {/* Modal Xác nhận Trợ giúp Tùy chỉnh */}
+      <ConfirmModal 
+        isOpen={showHelpConfirm} 
+        title="Dùng trợ giúp?" 
+        message="Hệ thống sẽ làm rõ đề bài ngay lập tức, nhưng bạn chỉ nhận được tối đa 60% số điểm cho câu hỏi này!" 
+        confirmText="Đồng ý, dùng ngay!"
+        cancelText="Để mình tự cố gắng"
+        onConfirm={confirmUseHelp} 
+        onCancel={() => setShowHelpConfirm(false)} 
+        isDestructive={false}
+      />
+
       {isWhiteboardActive && (
         <div className="fixed inset-0 z-[10000] p-4 md:p-8 bg-slate-950/98 backdrop-blur-3xl animate-in zoom-in flex flex-col items-center justify-center">
           <div className="w-full h-full max-w-[95vw] max-h-[90vh] relative shadow-[0_0_100px_rgba(0,0,0,0.5)]">
@@ -349,28 +346,28 @@ const GameEngine: React.FC<GameEngineProps> = ({
         </div>
       )}
 
-      {/* Header Nâng Cấp: Hiển thị điểm số cho nhiều người chơi */}
-      <header className="bg-white px-8 py-4 rounded-[2.5rem] shadow-lg mb-4 shrink-0 flex items-center gap-4 overflow-x-auto no-scrollbar">
+      {/* Header */}
+      <header className="bg-white px-8 py-4 rounded-[2.5rem] shadow-lg mb-4 shrink-0 flex items-center gap-4 relative z-50">
         <div className="flex items-center gap-3 shrink-0">
-           <div className="bg-blue-600 text-white px-5 py-2.5 rounded-[1.5rem] shadow-md border-b-4 border-blue-800 flex flex-col items-center min-w-[100px]">
-              <div className="text-[8px] font-black uppercase tracking-tighter italic opacity-80 leading-none mb-1">BẠN</div>
+           <div className="bg-blue-600 text-white px-6 py-2.5 rounded-[1.8rem] shadow-md border-b-4 border-blue-800 flex flex-col items-center min-w-[120px]">
+              <div className="text-[9px] font-black uppercase tracking-tighter italic opacity-80 leading-none mb-1">BẠN</div>
               <div className="text-2xl font-black leading-none">{score}đ</div>
            </div>
         </div>
 
         {!isArenaA && !isTeacherRoom && (
-           <div className="flex items-center gap-2 border-l-2 border-slate-100 pl-4 shrink-0">
+           <div className="flex items-center gap-3 border-l-2 border-slate-100 pl-4 shrink-0 overflow-x-auto no-scrollbar max-w-[200px] md:max-w-none">
               {(Object.entries(opponentScores) as [string, OpponentData][]).length > 0 ? (
                  (Object.entries(opponentScores) as [string, OpponentData][]).map(([id, data], index) => (
-                    <div key={id} className="bg-slate-900 text-white px-4 py-2.5 rounded-[1.5rem] shadow-md border-b-4 border-slate-800 flex flex-col items-center min-w-[90px] animate-in slide-in-from-left">
-                       <div className="text-[7px] font-black uppercase tracking-tighter italic opacity-60 leading-none mb-1">Đ.THỦ {index + 1}</div>
+                    <div key={id} className="bg-slate-900 text-white px-5 py-2.5 rounded-[1.8rem] shadow-md border-b-4 border-slate-800 flex flex-col items-center min-w-[110px] animate-in slide-in-from-left">
+                       <div className="text-[8px] font-black uppercase tracking-tighter italic opacity-60 leading-none mb-1">ĐỐI THỦ {index + 1}</div>
                        <div className="text-xl font-black leading-none">{data.score}đ</div>
-                       <div className="text-[6px] font-bold opacity-30 mt-1 uppercase truncate max-w-[60px]">{data.name}</div>
+                       <div className="text-[7px] font-bold opacity-30 mt-1 uppercase truncate max-w-[80px]">{data.name}</div>
                     </div>
                  ))
               ) : (
-                <div className="bg-slate-100 text-slate-300 px-4 py-2.5 rounded-[1.5rem] border-2 border-dashed border-slate-200 flex flex-col items-center min-w-[90px]">
-                   <div className="text-[7px] font-black uppercase leading-none mb-1">ĐỐI THỦ</div>
+                <div className="bg-slate-100 text-slate-300 px-5 py-2.5 rounded-[1.8rem] border-2 border-dashed border-slate-200 flex flex-col items-center min-w-[110px]">
+                   <div className="text-[8px] font-black uppercase leading-none mb-1">ĐỐI THỦ</div>
                    <div className="text-xl font-black leading-none">0đ</div>
                 </div>
               )}
@@ -380,8 +377,26 @@ const GameEngine: React.FC<GameEngineProps> = ({
         <div className="flex-1"></div>
 
         <div className="flex items-center gap-4 shrink-0">
+           {/* Nút trợ giúp được tăng cường khả năng phản hồi */}
+           {hasChallenge && (gameState === 'ANSWERING' || gameState === 'WAITING_FOR_BUZZER') && (
+             <button 
+              onClick={handleUseHelp}
+              disabled={isHelpUsed}
+              className={`relative z-[60] flex items-center gap-2 px-6 py-3 rounded-2xl font-black text-[10px] uppercase italic transition-all shadow-md border-b-4 pointer-events-auto active:scale-95
+                ${isHelpUsed 
+                  ? 'bg-slate-100 text-slate-300 border-slate-200 cursor-not-allowed' 
+                  : 'bg-emerald-100 text-emerald-600 border-emerald-300 hover:bg-emerald-500 hover:text-white hover:border-emerald-700'}`}
+             >
+               <span className="text-lg">💡</span>
+               <div className="flex flex-col items-start leading-none pointer-events-none">
+                  <span>Trợ giúp</span>
+                  <span className="text-[7px] opacity-60 mt-1">(-40% ĐIỂM)</span>
+               </div>
+             </button>
+           )}
+
            <div className="flex flex-col items-center">
-             <div className="text-[8px] font-black text-slate-400 uppercase italic mb-0.5">THỜI GIAN</div>
+             <div className="text-[9px] font-black text-slate-400 uppercase italic mb-0.5 tracking-widest">THỜI GIAN</div>
              <div className={`text-4xl font-black italic tabular-nums leading-none ${timeLeft <= 5 ? 'text-red-500 animate-pulse' : 'text-slate-900'}`}>{timeLeft}s</div>
            </div>
            
@@ -394,7 +409,7 @@ const GameEngine: React.FC<GameEngineProps> = ({
 
       <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-6 min-h-0 overflow-hidden">
         <div className="lg:col-span-7 h-full overflow-hidden">
-           <ProblemCard problem={currentProblem} isPaused={isWhiteboardActive} />
+           <ProblemCard problem={currentProblem} isPaused={isWhiteboardActive} isHelpUsed={isHelpUsed} />
         </div>
         <div className="lg:col-span-5 bg-white rounded-[3rem] p-8 shadow-xl flex flex-col relative h-full overflow-hidden">
           
