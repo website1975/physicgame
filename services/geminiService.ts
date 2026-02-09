@@ -2,13 +2,23 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { PhysicsProblem } from "../types";
 
-// Polyfill for environment variables to ensure compatibility with Vercel/Vite
-if (typeof (window as any).process === 'undefined') {
-  (window as any).process = { env: {} };
-}
-if (!process.env.API_KEY) {
-  process.env.API_KEY = (import.meta as any).env?.VITE_API_KEY || (import.meta as any).env?.API_KEY;
-}
+// Polyfill and Key extraction to ensure API_KEY is available in process.env for the SDK
+(function() {
+  const getSafeEnv = (key: string): string | undefined => {
+    try {
+      const p = (typeof process !== 'undefined' ? process.env : undefined) as any;
+      const m = (typeof import.meta !== 'undefined' ? (import.meta as any).env : undefined) as any;
+      return (p?.[key] || p?.[`VITE_${key}`] || m?.[key] || m?.[`VITE_${key}`]);
+    } catch (e) { return undefined; }
+  };
+
+  if (typeof (window as any).process === 'undefined') {
+    (window as any).process = { env: {} };
+  }
+  if (!process.env.API_KEY) {
+    process.env.API_KEY = getSafeEnv('API_KEY');
+  }
+})();
 
 const SYSTEM_PROMPT = `Bạn là chuyên gia soạn đề Vật lý. Nhiệm vụ: Trích xuất văn bản thành JSON mảng đối tượng.
 QUY TẮC:
@@ -32,8 +42,8 @@ const safeParseJSON = (text: string) => {
 };
 
 export const generateQuestionSet = async (topic: string, count: number): Promise<PhysicsProblem[]> => {
-  // Using process.env.API_KEY directly as per guidelines, assuming polyfill/injection handled it
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || "" });
+  const apiKey = process.env.API_KEY || "";
+  const ai = new GoogleGenAI({ apiKey });
   const response = await ai.models.generateContent({
     model: 'gemini-3-flash-preview', 
     contents: `Tạo ${count} câu hỏi chủ đề: ${topic}.`,
@@ -71,7 +81,8 @@ export const generateQuestionSet = async (topic: string, count: number): Promise
 };
 
 export const parseQuestionsFromText = async (rawText: string): Promise<PhysicsProblem[]> => {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || "" });
+  const apiKey = process.env.API_KEY || "";
+  const ai = new GoogleGenAI({ apiKey });
   const response = await ai.models.generateContent({
     model: 'gemini-3-flash-preview',
     contents: `Trích xuất các câu hỏi từ văn bản này sang JSON: "${rawText}".`,
