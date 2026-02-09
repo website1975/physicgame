@@ -2,50 +2,51 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { PhysicsProblem, Difficulty, QuestionType, InteractiveMechanic, DisplayChallenge } from "../types";
 
-// Hàm hỗ trợ lấy biến môi trường đa nền tảng (Vercel, Vite, v.v.)
+// Đoạn code bạn yêu cầu để Vercel nhận diện key chính xác
 export const getSafeEnv = (key: string): string | undefined => {
   try {
-    // Thử lấy từ process.env (Vercel/Node)
-    const p = typeof process !== 'undefined' ? process.env : {};
-    const fromProcess = (p as any)[key] || (p as any)[`VITE_${key}`];
+    const fromProcess = (process.env as any)[key] || (process.env as any)[`VITE_${key}`];
     if (fromProcess) return fromProcess;
-
-    // Thử lấy từ import.meta.env (Vite/ESM)
-    const meta = (import.meta as any).env;
-    if (meta) {
-      const fromMeta = meta[key] || meta[`VITE_${key}`];
-      if (fromMeta) return fromMeta;
-    }
-  } catch (e) {
-    console.warn("Lỗi khi truy cập biến môi trường:", e);
-  }
+    const fromMeta = (import.meta as any).env[key] || (import.meta as any).env[`VITE_${key}`];
+    if (fromMeta) return fromMeta;
+  } catch (e) {}
   return undefined;
 };
 
 const getSafeApiKey = (): string => getSafeEnv('API_KEY') || "";
 
 const SYSTEM_PROMPT = `Bạn là chuyên gia soạn đề Vật lý theo chương trình GDPT 2018. 
-Nhiệm vụ: Phân tích văn bản thô và trích xuất thành danh sách câu hỏi chuẩn format.
+Nhiệm vụ: Phân tích văn bản thô và trích xuất thành danh sách câu hỏi chuẩn format JSON.
 
 QUY TẮC TRÍCH XUẤT:
 1. Loại Trắc nghiệm (type: 'TN'): 
-   - Nhận diện câu hỏi có 4 lựa chọn A, B, C, D.
-   - 'options' phải chứa 4 chuỗi văn bản tương ứng A, B, C, D (không kèm chữ cái đầu).
+   - 'options' chứa 4 chuỗi A, B, C, D.
    - 'correctAnswer' CHỈ là 1 ký tự: 'A', 'B', 'C' hoặc 'D'.
 
 2. Loại Đúng/Sai (type: 'DS'): 
-   - Nhận diện câu hỏi có 4 ý mệnh đề a), b), c), d).
-   - 'options' phải chứa đúng 4 chuỗi văn bản của 4 ý a, b, c, d.
-   - 'correctAnswer' PHẢI là chuỗi 4 ký tự 'Đ' hoặc 'S'. Ví dụ: 'ĐSĐS'. 
-   - Nếu văn bản không ghi rõ Đúng/Sai, hãy dùng kiến thức Vật lý để xác định đáp án chính xác.
+   - 'options' chứa đúng 4 chuỗi ý a, b, c, d.
+   - 'correctAnswer' là chuỗi 4 ký tự 'Đ' hoặc 'S'. Ví dụ: 'ĐSĐS'.
 
 3. Loại Trả lời ngắn (type: 'TL'): 
-   - Trích xuất nội dung câu hỏi yêu cầu tính toán số hoặc điền từ.
-   - 'correctAnswer' là giá trị số hoặc cụm từ đáp án.
+   - 'correctAnswer' là giá trị số hoặc cụm từ.
 
-4. Lời giải chi tiết (explanation): 
-   - BẮT BUỘC trích xuất hoặc tự soạn lời giải chi tiết cho từng bước giải. 
-   - Sử dụng ký hiệu $ ... $ cho công thức LaTeX.`;
+4. Lời giải (explanation): BẮT BUỘC có lời giải chi tiết, dùng $ ... $ cho LaTeX.`;
+
+/**
+ * Hàm hỗ trợ parse JSON an toàn, loại bỏ các ký tự Markdown nếu AI trả về nhầm
+ */
+const safeParseJSON = (text: string) => {
+  try {
+    let cleanText = text.trim();
+    if (cleanText.includes('```')) {
+      cleanText = cleanText.replace(/```json|```/g, '').trim();
+    }
+    return JSON.parse(cleanText);
+  } catch (e) {
+    console.error("Lỗi parse JSON từ AI:", text);
+    throw new Error("Định dạng dữ liệu từ AI không hợp lệ.");
+  }
+};
 
 export const generateQuestionSet = async (topic: string, count: number): Promise<PhysicsProblem[]> => {
   const apiKey = getSafeApiKey();
@@ -57,6 +58,7 @@ export const generateQuestionSet = async (topic: string, count: number): Promise
     Trả về JSON mảng đối tượng.`,
     config: {
       responseMimeType: "application/json",
+      thinkingConfig: { thinkingBudget: 10000 },
       responseSchema: {
         type: Type.ARRAY,
         items: {
@@ -79,7 +81,7 @@ export const generateQuestionSet = async (topic: string, count: number): Promise
     }
   });
 
-  const data = JSON.parse(response.text || '[]');
+  const data = safeParseJSON(response.text || '[]');
   return data.map((item: any) => ({
     ...item,
     id: Math.random().toString(36).substring(7),
@@ -92,12 +94,11 @@ export const parseQuestionsFromText = async (rawText: string): Promise<PhysicsPr
   const ai = new GoogleGenAI({ apiKey });
   const response = await ai.models.generateContent({
     model: 'gemini-3-pro-preview',
-    contents: `Yêu cầu: Trích xuất chính xác các câu hỏi từ văn bản sau, phân loại rõ TN (A,B,C,D), DS (a,b,c,d) và TL.
-    Văn bản: "${rawText}"
-    
+    contents: `Trích xuất câu hỏi từ văn bản: "${rawText}"
     ${SYSTEM_PROMPT}`,
     config: {
       responseMimeType: "application/json",
+      thinkingConfig: { thinkingBudget: 15000 },
       responseSchema: {
         type: Type.ARRAY,
         items: {
@@ -120,7 +121,7 @@ export const parseQuestionsFromText = async (rawText: string): Promise<PhysicsPr
     }
   });
 
-  const data = JSON.parse(response.text || '[]');
+  const data = safeParseJSON(response.text || '[]');
   return data.map((item: any) => ({
     ...item,
     id: Math.random().toString(36).substring(7),
