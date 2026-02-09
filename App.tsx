@@ -34,13 +34,19 @@ const App: React.FC = () => {
 
   const checkAI = async () => {
     setApiStatus('checking');
-    // Guidelines: Use process.env.API_KEY directly.
     if (!process.env.API_KEY) { setApiStatus('offline'); return; }
     try {
       const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-      await ai.models.generateContent({ model: 'gemini-3-flash-preview', contents: 'ping', config: { maxOutputTokens: 1 } });
+      await ai.models.generateContent({ 
+        model: 'gemini-3-flash-preview', 
+        contents: 'ping', 
+        config: { maxOutputTokens: 1 } 
+      });
       setApiStatus('online');
-    } catch (e) { setApiStatus('offline'); }
+    } catch (e) { 
+      console.error("AI Check failed:", e);
+      setApiStatus('offline'); 
+    }
   };
 
   useEffect(() => { checkAI(); }, []);
@@ -79,7 +85,27 @@ const App: React.FC = () => {
     <div className="min-h-screen bg-slate-950 text-slate-900">
       {gameState === 'LOBBY' && (
         <div className="min-h-screen flex items-center justify-center p-4">
-          <div className="bg-white rounded-[4rem] p-12 shadow-2xl max-w-2xl w-full text-center border-b-[12px] border-blue-600 animate-in zoom-in duration-500">
+          <div className="bg-white rounded-[4rem] p-12 shadow-2xl max-w-2xl w-full text-center border-b-[12px] border-blue-600 animate-in zoom-in duration-500 relative overflow-hidden">
+            {/* AI Status Indicator */}
+            <div className="absolute top-8 right-10 flex items-center gap-2">
+               {apiStatus === 'online' ? (
+                 <div className="flex items-center gap-2 bg-emerald-50 px-3 py-1.5 rounded-full border border-emerald-100 shadow-sm animate-in fade-in slide-in-from-right-4">
+                    <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse shadow-[0_0_8px_#10b981]"></div>
+                    <span className="text-[9px] font-black text-emerald-600 uppercase italic tracking-wider">AI READY ✨</span>
+                 </div>
+               ) : apiStatus === 'offline' ? (
+                 <div className="flex items-center gap-2 bg-red-50 px-3 py-1.5 rounded-full border border-red-100 shadow-sm animate-in fade-in slide-in-from-right-4">
+                    <div className="w-2 h-2 bg-red-500 rounded-full"></div>
+                    <span className="text-[9px] font-black text-red-600 uppercase italic tracking-wider">AI OFFLINE ⚠️</span>
+                 </div>
+               ) : (
+                 <div className="flex items-center gap-2 bg-amber-50 px-3 py-1.5 rounded-full border border-amber-100 shadow-sm">
+                    <div className="w-2 h-2 border-2 border-amber-500 border-t-transparent rounded-full animate-spin"></div>
+                    <span className="text-[9px] font-black text-amber-600 uppercase italic tracking-wider">CHECKING AI...</span>
+                 </div>
+               )}
+            </div>
+
             <h1 className="text-7xl font-black text-slate-800 mb-2 uppercase italic tracking-tighter text-left ml-4">PhysiQuest</h1>
             <p className="text-slate-400 font-bold uppercase text-[10px] mb-8 tracking-[0.3em] text-left ml-6">Hệ Thống Đấu Trường Vật Lý</p>
             
