@@ -7,13 +7,23 @@ import TeacherPortal from './components/TeacherPortal';
 import StudentArenaFlow from './components/StudentArenaFlow';
 import GameEngine from './components/GameEngine';
 
-// Polyfill for environment variables to ensure compatibility with Vercel/Vite
-if (typeof (window as any).process === 'undefined') {
-  (window as any).process = { env: {} };
-}
-if (!process.env.API_KEY) {
-  process.env.API_KEY = (import.meta as any).env?.VITE_API_KEY || (import.meta as any).env?.API_KEY;
-}
+// Polyfill and Key extraction to ensure API_KEY is available in process.env for the SDK
+(function() {
+  const getSafeEnv = (key: string): string | undefined => {
+    try {
+      const p = (typeof process !== 'undefined' ? process.env : undefined) as any;
+      const m = (typeof import.meta !== 'undefined' ? (import.meta as any).env : undefined) as any;
+      return (p?.[key] || p?.[`VITE_${key}`] || m?.[key] || m?.[`VITE_${key}`]);
+    } catch (e) { return undefined; }
+  };
+
+  if (typeof (window as any).process === 'undefined') {
+    (window as any).process = { env: {} };
+  }
+  if (!process.env.API_KEY) {
+    process.env.API_KEY = getSafeEnv('API_KEY');
+  }
+})();
 
 const App: React.FC = () => {
   const [gameState, setGameState] = useState<GameState>('LOBBY');
@@ -159,7 +169,7 @@ const App: React.FC = () => {
                </div>
             </div>
 
-            {/* Smaller title and shifted left */}
+            {/* Smaller title and shifted left to avoid overlap */}
             <div className="text-left ml-2 md:ml-4">
               <h1 className="text-2xl md:text-3xl lg:text-4xl font-black text-slate-800 mb-1 uppercase italic tracking-tighter">PhysiQuest</h1>
               <p className="text-slate-400 font-bold uppercase text-[6px] md:text-[8px] mb-8 tracking-[0.2em] ml-0.5">Hệ Thống Đấu Trường Vật Lý</p>
