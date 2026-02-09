@@ -7,6 +7,14 @@ import TeacherPortal from './components/TeacherPortal';
 import StudentArenaFlow from './components/StudentArenaFlow';
 import GameEngine from './components/GameEngine';
 
+// Polyfill for environment variables to ensure compatibility with Vercel/Vite
+if (typeof (window as any).process === 'undefined') {
+  (window as any).process = { env: {} };
+}
+if (!process.env.API_KEY) {
+  process.env.API_KEY = (import.meta as any).env?.VITE_API_KEY || (import.meta as any).env?.API_KEY;
+}
+
 const App: React.FC = () => {
   const [gameState, setGameState] = useState<GameState>('LOBBY');
   const [playerName, setPlayerName] = useState('');
@@ -36,7 +44,6 @@ const App: React.FC = () => {
   const checkAI = async () => {
     setApiStatus('checking');
     try {
-      // Sử dụng process.env.API_KEY trực tiếp theo hướng dẫn Gemini SDK
       const apiKey = process.env.API_KEY;
       if (!apiKey) {
         setApiStatus('offline');
@@ -152,10 +159,10 @@ const App: React.FC = () => {
                </div>
             </div>
 
-            {/* Chỉnh sửa tiêu đề nhỏ lại và dịch sang trái một chút */}
+            {/* Smaller title and shifted left */}
             <div className="text-left ml-2 md:ml-4">
-              <h1 className="text-3xl md:text-4xl lg:text-5xl font-black text-slate-800 mb-1 uppercase italic tracking-tighter">PhysiQuest</h1>
-              <p className="text-slate-400 font-bold uppercase text-[7px] md:text-[8px] mb-8 tracking-[0.2em] ml-1">Hệ Thống Đấu Trường Vật Lý</p>
+              <h1 className="text-2xl md:text-3xl lg:text-4xl font-black text-slate-800 mb-1 uppercase italic tracking-tighter">PhysiQuest</h1>
+              <p className="text-slate-400 font-bold uppercase text-[6px] md:text-[8px] mb-8 tracking-[0.2em] ml-0.5">Hệ Thống Đấu Trường Vật Lý</p>
             </div>
             
             <input type="text" placeholder="Tên thi đấu..." className="w-full p-6 bg-slate-50 border-4 border-slate-100 rounded-3xl font-black text-center text-2xl mb-8 outline-none focus:border-blue-500 transition-all" value={playerName} onChange={e => setPlayerName(e.target.value)} />
