@@ -38,11 +38,11 @@ const StudentArenaFlow: React.FC<StudentArenaFlowProps> = ({
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
   const [presentPlayers, setPresentPlayers] = useState<PlayerInfo[]>([]);
+  const [roomOccupancy, setRoomOccupancy] = useState<Record<string, number>>({});
   const [roomCodeInput, setRoomCodeInput] = useState('');
   const [targetTeacher, setTargetTeacher] = useState<Teacher | null>(null);
   const [uniqueId] = useState(() => Math.random().toString(36).substring(7));
   
-  // States for keyword selection
   const [selectedSet, setSelectedSet] = useState<any>(null);
   const [selectedQuantities, setSelectedQuantities] = useState<string[]>([]);
   const [selectedFormulas, setSelectedFormulas] = useState<string[]>([]);
@@ -50,6 +50,31 @@ const StudentArenaFlow: React.FC<StudentArenaFlowProps> = ({
   const channelRef = useRef<any>(null);
   const matchStartedRef = useRef(false);
   const shortId = uniqueId.slice(-3).toUpperCase();
+
+  // Theo dõi sĩ số toàn bộ các phòng Arena của giáo viên này để hiển thị UI
+  useEffect(() => {
+    if (gameState === 'ROOM_SELECTION') {
+      const channels = ARENA_ROOMS.map(room => {
+        if (room.code === 'TEACHER_ROOM') return null;
+        const channelName = `arena_${room.code}_${currentTeacher.id}`;
+        const chan = supabase.channel(channelName);
+        
+        chan.on('presence', { event: 'sync' }, () => {
+          const state = chan.presenceState();
+          setRoomOccupancy(prev => ({
+            ...prev,
+            [room.code]: Object.keys(state).length
+          }));
+        }).subscribe();
+        
+        return chan;
+      }).filter(Boolean);
+
+      return () => {
+        channels.forEach(ch => supabase.removeChannel(ch!));
+      };
+    }
+  }, [gameState, currentTeacher.id]);
 
   useEffect(() => {
     if (gameState === 'SET_SELECTION' && !joinedRoom) {
@@ -61,6 +86,12 @@ const StudentArenaFlow: React.FC<StudentArenaFlowProps> = ({
     if (room.code === 'TEACHER_ROOM') {
       setJoinedRoom(room);
       setGameState('ENTER_CODE');
+      return;
+    }
+
+    // Kiểm tra nhanh sĩ số qua cache trước khi nhấn (Optional nhưng tốt cho UX)
+    if (roomOccupancy[room.code] >= room.capacity) {
+      setError(`Phòng ${room.name} đã đầy (${roomOccupancy[room.code]}/${room.capacity}). Vui lòng chọn phòng khác!`);
       return;
     }
 
@@ -135,13 +166,13 @@ const StudentArenaFlow: React.FC<StudentArenaFlowProps> = ({
   useEffect(() => {
     if (gameState === 'WAITING_FOR_PLAYERS' && joinedRoom) {
       const isTeacherRoom = joinedRoom.code === 'TEACHER_ROOM';
-      const presenceKey = `${playerName}_${uniqueId}`;
+      const myPresenceKey = `${playerName}_${uniqueId}`;
       const channelName = isTeacherRoom 
         ? `control_TEACHER_ROOM_${targetTeacher?.id}` 
         : `arena_${joinedRoom.code}_${currentTeacher.id}`;
       
       const channel = supabase.channel(channelName, {
-        config: { presence: { key: presenceKey } }
+        config: { presence: { key: myPresenceKey } }
       });
 
       matchStartedRef.current = false;
@@ -150,8 +181,21 @@ const StudentArenaFlow: React.FC<StudentArenaFlowProps> = ({
       channel
         .on('presence', { event: 'sync' }, () => {
           const state = channel.presenceState();
-          const playersKeys = Object.keys(state).sort(); 
+          const playersKeys = Object.keys(state).sort(); // Sắp xếp để xác định thứ tự vào phòng
           
+          // logic KIỂM TRA OVERFLOW (Người thừa)
+          if (!isTeacherRoom) {
+             const myIndex = playersKeys.indexOf(myPresenceKey);
+             // Nếu mình không nằm trong danh sách được phép (theo capacity)
+             if (myIndex >= requiredCapacity) {
+                setError(`Rất tiếc! Phòng đã vừa đủ người. Hãy chọn phòng khác nhé!`);
+                setJoinedRoom(null);
+                setGameState('ROOM_SELECTION');
+                supabase.removeChannel(channel);
+                return;
+             }
+          }
+
           const playerInfos = playersKeys
             .filter(k => k !== 'teacher')
             .map(k => {
@@ -166,7 +210,7 @@ const StudentArenaFlow: React.FC<StudentArenaFlowProps> = ({
           setPresentPlayers(playerInfos);
           
           if (!isTeacherRoom && playersKeys.length >= requiredCapacity && !matchStartedRef.current) {
-            const isMaster = playersKeys[0] === presenceKey;
+            const isMaster = playersKeys[0] === myPresenceKey;
             
             if (isMaster && availableSets.length > 0) {
               const randomIndex = Math.floor(Math.random() * availableSets.length);
@@ -190,7 +234,7 @@ const StudentArenaFlow: React.FC<StudentArenaFlowProps> = ({
                 setId: selectedSet.id,
                 title: selectedSet.title,
                 rounds: selectedSet.rounds,
-                opponentName: playerInfos.filter(n => n.fullKey !== presenceKey).map(p => `${p.name} #${p.shortId}`).join(", "),
+                opponentName: playerInfos.filter(n => n.fullKey !== myPresenceKey).map(p => `${p.name} #${p.shortId}`).join(", "),
                 joinedRoom: joinedRoom,
                 myId: uniqueId
               });
@@ -234,7 +278,7 @@ const StudentArenaFlow: React.FC<StudentArenaFlowProps> = ({
         supabase.removeChannel(channel); 
       };
     }
-  }, [gameState, joinedRoom, targetTeacher, playerName, uniqueId, availableSets]);
+  }, [gameState, joinedRoom, targetTeacher, playerName, uniqueId, availableSets, currentTeacher.id, setGameState, setJoinedRoom, onStartMatch]);
 
   const handleSelectSetForKeywords = (set: any) => {
     setSelectedSet(set);
@@ -263,15 +307,32 @@ const StudentArenaFlow: React.FC<StudentArenaFlowProps> = ({
           <h2 className="text-6xl font-black text-white italic uppercase tracking-tighter">Hệ thống Đấu Trường</h2>
           <p className="text-blue-400 font-bold uppercase text-[10px] mt-2 tracking-[0.3em]">Mã Arena: {currentTeacher.magv} – Chiến binh: {playerName} <span className="opacity-40">#{shortId}</span></p>
         </div>
-        {error && <div className="mb-8 p-6 bg-red-500/20 text-red-400 rounded-[2rem] border-2 border-red-500/30 font-black uppercase italic text-xs">⚠️ {error}</div>}
+        {error && <div className="mb-8 p-6 bg-red-500/20 text-red-400 rounded-[2rem] border-2 border-red-500/30 font-black uppercase italic text-xs animate-bounce">⚠️ {error}</div>}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-6 w-full max-w-7xl">
-          {ARENA_ROOMS.map(room => (
-            <button key={room.code} onClick={() => handleRoomJoin(room)} disabled={isLoading} className={`bg-white p-8 rounded-[4rem] flex flex-col items-center gap-6 hover:scale-105 transition-all shadow-2xl group ${isLoading ? 'opacity-50 cursor-not-allowed' : ''}`}>
-              <div className={`text-5xl p-6 rounded-[2rem] ${room.color} text-white shadow-lg group-hover:rotate-12 transition-transform`}>{room.emoji}</div>
-              <div className="font-black text-slate-800 uppercase italic text-lg leading-none">{room.name}</div>
-              <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest text-center px-4">{room.desc}</div>
-            </button>
-          ))}
+          {ARENA_ROOMS.map(room => {
+            const currentCount = roomOccupancy[room.code] || 0;
+            const isFull = room.code !== 'TEACHER_ROOM' && currentCount >= room.capacity;
+            
+            return (
+              <button 
+                key={room.code} 
+                onClick={() => handleRoomJoin(room)} 
+                disabled={isLoading} 
+                className={`bg-white p-8 rounded-[4rem] flex flex-col items-center gap-6 hover:scale-105 transition-all shadow-2xl group relative ${isLoading ? 'opacity-50 cursor-not-allowed' : ''} ${isFull ? 'grayscale-[0.5] opacity-80' : ''}`}
+              >
+                {/* Badge sĩ số */}
+                {room.code !== 'TEACHER_ROOM' && (
+                  <div className={`absolute top-6 right-6 px-3 py-1 rounded-full font-black text-[10px] shadow-sm border-2 ${isFull ? 'bg-red-500 text-white border-red-400' : 'bg-emerald-500 text-white border-emerald-400'}`}>
+                    {currentCount}/{room.capacity}
+                  </div>
+                )}
+                
+                <div className={`text-5xl p-6 rounded-[2rem] ${room.color} text-white shadow-lg group-hover:rotate-12 transition-transform`}>{room.emoji}</div>
+                <div className="font-black text-slate-800 uppercase italic text-lg leading-none">{room.name}</div>
+                <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest text-center px-4">{isFull ? 'PHÒNG ĐÃ ĐẦY' : room.desc}</div>
+              </button>
+            );
+          })}
         </div>
       </div>
     );
@@ -434,7 +495,7 @@ const StudentArenaFlow: React.FC<StudentArenaFlowProps> = ({
                    {!isTeacherRoom && <div className="text-[9px] font-black text-blue-400 uppercase tracking-widest">Hệ thống sẽ tự bốc đề khi đủ người!</div>}
                 </div>
              </div>
-             <button onClick={() => setGameState('ROOM_SELECTION')} className="mt-8 px-10 py-4 bg-slate-100 text-slate-400 rounded-2xl font-black uppercase text-xs italic hover:bg-red-500 hover:text-white transition-all">Rời phòng</button>
+             <button onClick={() => { setJoinedRoom(null); setGameState('ROOM_SELECTION'); }} className="mt-8 px-10 py-4 bg-slate-100 text-slate-400 rounded-2xl font-black uppercase text-xs italic hover:bg-red-500 hover:text-white transition-all">Rời phòng</button>
           </div>
           <div className="flex-1 bg-slate-50 rounded-[3rem] p-8 text-left">
              <h3 className="text-2xl font-black text-slate-800 uppercase italic mb-6">📜 LUẬT CHƠI ĐỐI KHÁNG</h3>
