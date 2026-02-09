@@ -2,8 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { GoogleGenAI } from "@google/genai";
 import { GameState, Round, Teacher, GameSettings, AdminTab } from './types';
-import { loginTeacher, fetchTeacherByMaGV, supabase, fetchAllExamSets, fetchSetData, saveExamSet, updateExamSet, deleteExamSet, assignSetToRoom } from './services/supabaseService';
-import { getSafeEnv } from './services/geminiService';
+import { loginTeacher, fetchTeacherByMaGV, supabase, fetchAllExamSets, fetchSetData, saveExamSet, updateExamSet, deleteExamSet, assignSetToRoom, getVisitorCount, incrementVisitorCount } from './services/supabaseService';
 import TeacherPortal from './components/TeacherPortal';
 import StudentArenaFlow from './components/StudentArenaFlow';
 import GameEngine from './components/GameEngine';
@@ -18,6 +17,8 @@ const App: React.FC = () => {
   const [errorMsg, setErrorMsg] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [apiStatus, setApiStatus] = useState<'checking' | 'online' | 'offline'>('checking');
+  const [totalQuests, setTotalQuests] = useState<number>(0);
+  const [visitorCount, setVisitorCount] = useState<number>(0);
   
   const [activeCategory, setActiveCategory] = useState('Tất cả');
   const [adminTab, setAdminTab] = useState<AdminTab>('EDITOR');
@@ -34,33 +35,63 @@ const App: React.FC = () => {
 
   const checkAI = async () => {
     setApiStatus('checking');
-    const apiKey = getSafeEnv('API_KEY');
+    // Using process.env.API_KEY directly as mandated by guidelines
+    const apiKey = process.env.API_KEY;
     if (!apiKey) { 
       setApiStatus('offline'); 
       return; 
     }
     try {
+      // Corrected initialization with named parameter and direct process.env.API_KEY usage
       const ai = new GoogleGenAI({ apiKey });
-      // Thử ping nhẹ với model flash
-      await ai.models.generateContent({ 
+      const response = await ai.models.generateContent({ 
         model: 'gemini-3-flash-preview', 
         contents: 'ping', 
         config: { maxOutputTokens: 1 } 
       });
-      setApiStatus('online');
+      // Accessing response.text property directly as it is not a method
+      if (response.text) {
+        setApiStatus('online');
+      }
     } catch (e) { 
       console.error("AI Check failed:", e);
       setApiStatus('offline'); 
     }
   };
 
-  useEffect(() => { checkAI(); }, []);
+  const handleVisitorTracking = async () => {
+    const isNewSession = !sessionStorage.getItem('visitor_tracked');
+    if (isNewSession) {
+      const newCount = await incrementVisitorCount();
+      setVisitorCount(newCount);
+      sessionStorage.setItem('visitor_tracked', 'true');
+    } else {
+      const count = await getVisitorCount();
+      setVisitorCount(count);
+    }
+  };
+
+  const fetchGlobalStats = async () => {
+    try {
+      const { count } = await supabase.from('exam_sets').select('*', { count: 'exact', head: true });
+      if (count !== null) setTotalQuests(count);
+    } catch (e) {
+      console.error("Lỗi lấy thống kê:", e);
+    }
+  };
+
+  useEffect(() => { 
+    checkAI(); 
+    fetchGlobalStats();
+    handleVisitorTracking();
+  }, []);
 
   const refreshSets = async (tId: string) => {
     setIsLoading(true);
     try {
       const sets = await fetchAllExamSets(tId);
       setExamSets(sets);
+      fetchGlobalStats();
     } catch (e) { console.error(e); }
     finally { setIsLoading(false); }
   };
@@ -90,27 +121,44 @@ const App: React.FC = () => {
       {gameState === 'LOBBY' && (
         <div className="min-h-screen flex items-center justify-center p-4">
           <div className="bg-white rounded-[4rem] p-12 shadow-2xl max-w-2xl w-full text-center border-b-[12px] border-blue-600 animate-in zoom-in duration-500 relative overflow-hidden">
-            <div className="absolute top-8 right-10 flex items-center gap-2">
-               {apiStatus === 'online' ? (
-                 <div className="flex items-center gap-2 bg-emerald-50 px-3 py-1.5 rounded-full border border-emerald-100 shadow-sm animate-in fade-in slide-in-from-right-4">
-                    <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse shadow-[0_0_8px_#10b981]"></div>
-                    <span className="text-[9px] font-black text-emerald-600 uppercase italic tracking-wider">AI READY ✨</span>
-                 </div>
-               ) : apiStatus === 'offline' ? (
-                 <div className="flex items-center gap-2 bg-red-50 px-3 py-1.5 rounded-full border border-red-100 shadow-sm animate-in fade-in slide-in-from-right-4">
-                    <div className="w-2 h-2 bg-red-500 rounded-full"></div>
-                    <span className="text-[9px] font-black text-red-600 uppercase italic tracking-wider">AI OFFLINE ⚠️</span>
-                 </div>
-               ) : (
-                 <div className="flex items-center gap-2 bg-amber-50 px-3 py-1.5 rounded-full border border-amber-100 shadow-sm">
-                    <div className="w-2 h-2 border-2 border-amber-500 border-t-transparent rounded-full animate-spin"></div>
-                    <span className="text-[9px] font-black text-amber-600 uppercase italic tracking-wider">CHECKING AI...</span>
-                 </div>
-               )}
+            <div className="absolute top-8 right-10 flex flex-col items-end gap-2">
+               <div className="flex items-center gap-3">
+                  {/* Visitor Counter */}
+                  <div className="flex items-center gap-2 bg-slate-50 px-3 py-1.5 rounded-full border border-slate-100 shadow-sm">
+                     <span className="text-sm">👤 :</span>
+                     <span className="text-[10px] font-black text-slate-600 uppercase italic tracking-wider whitespace-nowrap">
+                       {visitorCount}
+                     </span>
+                  </div>
+
+                  {/* AI Status */}
+                  {apiStatus === 'online' ? (
+                    <div className="flex items-center gap-2 bg-emerald-50 px-3 py-1.5 rounded-full border border-emerald-100 shadow-sm">
+                       <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse shadow-[0_0_8px_#10b981]"></div>
+                       <span className="text-[9px] font-black text-emerald-600 uppercase italic tracking-wider">AI READY ✨</span>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-2 bg-red-50 px-3 py-1.5 rounded-full border border-red-100 shadow-sm">
+                       <div className="w-2 h-2 bg-red-500 rounded-full"></div>
+                       <span className="text-[9px] font-black text-red-600 uppercase italic tracking-wider">AI OFFLINE</span>
+                    </div>
+                  )}
+               </div>
+               
+               {/* Quest Counter */}
+               <div className="flex items-center gap-2 bg-blue-50 px-3 py-1 rounded-full border border-blue-100 shadow-sm">
+                  <span className="text-sm">📚</span>
+                  <span className="text-[9px] font-black text-blue-600 uppercase italic tracking-wider">
+                    Hệ thống : {totalQuests} Đề
+                  </span>
+               </div>
             </div>
 
-            <h1 className="text-7xl font-black text-slate-800 mb-2 uppercase italic tracking-tighter text-left ml-4">PhysiQuest</h1>
-            <p className="text-slate-400 font-bold uppercase text-[10px] mb-8 tracking-[0.3em] text-left ml-6">Hệ Thống Đấu Trường Vật Lý</p>
+            {/* Chỉnh sửa kích thước và lề trái của tiêu đề để tránh che khuất */}
+            <div className="text-left md:ml-2">
+              <h1 className="text-5xl md:text-6xl font-black text-slate-800 mb-1 uppercase italic tracking-tighter">PhysiQuest</h1>
+              <p className="text-slate-400 font-bold uppercase text-[9px] mb-8 tracking-[0.2em] ml-1">Hệ Thống Đấu Trường Vật Lý</p>
+            </div>
             
             <input type="text" placeholder="Tên thi đấu..." className="w-full p-6 bg-slate-50 border-4 border-slate-100 rounded-3xl font-black text-center text-2xl mb-8 outline-none focus:border-blue-500 transition-all" value={playerName} onChange={e => setPlayerName(e.target.value)} />
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -178,6 +226,7 @@ const App: React.FC = () => {
           onStartGame={() => setGameState('ROOM_SELECTION')} rounds={rounds} setRounds={setRounds} settings={settings} setSettings={setSettings}
           currentGameState={gameState} onNextQuestion={() => {}} players={[]} myPlayerId={playerName}
           onSaveSet={async (title, asNew, topic, grade) => {
+            // Fix: Changed monDay to monday to match the Teacher interface
             if (asNew) await saveExamSet(currentTeacher.id, title, rounds, topic, grade, currentTeacher.monday);
             else await updateExamSet(loadedSetId!, title, rounds, topic, grade, currentTeacher.id);
             refreshSets(currentTeacher.id);
