@@ -430,6 +430,25 @@ const AdminPanel: React.FC<AdminPanelProps> = (props) => {
              ))}
              <button onClick={addNewRound} className="px-6 py-3 rounded-2xl text-[11px] font-black text-blue-600 border-2 border-dashed border-blue-200 uppercase">+ VÒNG</button>
           </div>
+
+          {/* Ô nhập Mô tả/Lời giới thiệu vòng đấu */}
+          <div className="bg-white p-4 rounded-[1.5rem] border-4 border-slate-50 shadow-sm shrink-0">
+             <label className="text-[9px] font-black text-slate-400 uppercase mb-2 block italic">Mô tả vòng {rounds[activeRoundIdx]?.number}</label>
+             <textarea 
+               className="w-full p-3 bg-slate-50 border border-slate-100 rounded-xl text-[11px] font-bold text-slate-600 outline-none focus:border-blue-200 resize-none no-scrollbar"
+               rows={2}
+               placeholder="Nhập lời chào hoặc giới thiệu vòng đấu..."
+               value={rounds[activeRoundIdx]?.description || ''}
+               onChange={(e) => {
+                 const updated = [...rounds];
+                 if (updated[activeRoundIdx]) {
+                   updated[activeRoundIdx].description = e.target.value;
+                   setRounds(updated);
+                 }
+               }}
+             />
+          </div>
+
           <div className="bg-white rounded-[2rem] p-5 shadow-md border-2 border-slate-50 flex-1 overflow-y-auto no-scrollbar flex flex-col gap-4">
             <div className="space-y-2">
               {rounds[activeRoundIdx]?.problems.map((p, i) => (
