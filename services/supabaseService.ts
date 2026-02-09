@@ -7,6 +7,29 @@ const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS
 
 export const supabase = createClient(supabaseUrl, supabaseKey);
 
+// --- VISITOR TRACKING ---
+export const getVisitorCount = async (): Promise<number> => {
+  try {
+    const { data, error } = await supabase.from('app_stats').select('value').eq('key', 'visitor_count').maybeSingle();
+    if (error) return 0;
+    return data?.value || 0;
+  } catch (e) { return 0; }
+};
+
+export const incrementVisitorCount = async (): Promise<number> => {
+  try {
+    const current = await getVisitorCount();
+    const newValue = current + 1;
+    const { error } = await supabase.from('app_stats').update({ value: newValue }).eq('key', 'visitor_count');
+    if (error) {
+      // Nếu chưa có row thì insert mới
+      await supabase.from('app_stats').insert([{ key: 'visitor_count', value: 1 }]);
+      return 1;
+    }
+    return newValue;
+  } catch (e) { return 0; }
+};
+
 export const loginTeacher = async (maGV: string, pass: string): Promise<{ teacher: Teacher | null, error: string | null }> => {
   const cleanMaGV = maGV.trim();
   const cleanPass = pass.trim();
@@ -23,7 +46,7 @@ export const loginTeacher = async (maGV: string, pass: string): Promise<{ teache
         id: data.id, 
         magv: data.magv || data.maGV || cleanMaGV, 
         tengv: data.tengv || data.TenGV, 
-        monday: data.monday || data.MonDay, 
+        monday: data.monday || data.MonDay || "Vật lý", 
         pass: dbPass,
         role: (data.role || 'TEACHER').toUpperCase() as 'ADMIN' | 'TEACHER'
       }, 
@@ -44,8 +67,6 @@ export const fetchTeacherByMaGV = async (maGV: string): Promise<Teacher | null> 
     role: (data.role || 'TEACHER').toUpperCase() as 'ADMIN' | 'TEACHER'
   } as Teacher;
 };
-
-/* --- QUẢN LÝ GIÁO VIÊN (DÀNH CHO ADMIN) --- */
 
 export const getAllTeachers = async (): Promise<Teacher[]> => {
   const { data, error } = await supabase.from('giaovien').select('*').order('tengv', { ascending: true });
@@ -83,8 +104,6 @@ export const deleteTeacher = async (id: string) => {
   if (error) throw error;
   return true;
 };
-
-/* --- KHO ĐỀ --- */
 
 export const fetchAllExamSets = async (teacherId: string) => {
   const { data, error } = await supabase
