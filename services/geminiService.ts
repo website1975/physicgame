@@ -1,22 +1,9 @@
 
 import { GoogleGenAI, Type } from "@google/genai";
-import { PhysicsProblem, Difficulty, QuestionType, InteractiveMechanic, DisplayChallenge } from "../types";
+import { PhysicsProblem } from "../types";
 
-// Hàm lấy API Key an toàn trên mọi môi trường
-export const getSafeEnv = (key: string): string | undefined => {
-  try {
-    const fromProcess = (process.env as any)[key] || (process.env as any)[`VITE_${key}`];
-    if (fromProcess) return fromProcess;
-    const meta = (import.meta as any).env;
-    if (meta) {
-      const fromMeta = meta[key] || meta[`VITE_${key}`];
-      if (fromMeta) return fromMeta;
-    }
-  } catch (e) {}
-  return undefined;
-};
-
-const getSafeApiKey = (): string => getSafeEnv('API_KEY') || "";
+// The API key is obtained directly from process.env.API_KEY per SDK guidelines.
+// Removed local getSafeApiKey and getSafeEnv functions to adhere to strict environment variable requirements.
 
 const SYSTEM_PROMPT = `Bạn là chuyên gia soạn đề Vật lý. Nhiệm vụ: Trích xuất văn bản thành JSON mảng đối tượng.
 QUY TẮC:
@@ -42,15 +29,15 @@ const safeParseJSON = (text: string) => {
 };
 
 export const generateQuestionSet = async (topic: string, count: number): Promise<PhysicsProblem[]> => {
-  const apiKey = getSafeApiKey();
-  const ai = new GoogleGenAI({ apiKey });
+  // Initialize directly with process.env.API_KEY as mandated.
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || "" });
   const response = await ai.models.generateContent({
-    // Dùng model Flash để tốc độ nhanh nhất, tránh Timeout Web
     model: 'gemini-3-flash-preview', 
-    contents: `Tạo ${count} câu hỏi chủ đề: ${topic}. ${SYSTEM_PROMPT}`,
+    contents: `Tạo ${count} câu hỏi chủ đề: ${topic}.`,
     config: {
+      // Use systemInstruction for system-level prompting as per guidelines.
+      systemInstruction: SYSTEM_PROMPT,
       responseMimeType: "application/json",
-      // Không dùng thinkingConfig ở đây để tối ưu tốc độ phản hồi trên Web
       responseSchema: {
         type: Type.ARRAY,
         items: {
@@ -73,6 +60,7 @@ export const generateQuestionSet = async (topic: string, count: number): Promise
     }
   });
 
+  // Directly access .text property from GenerateContentResponse.
   const data = safeParseJSON(response.text || '[]');
   return data.map((item: any) => ({
     ...item,
@@ -82,13 +70,14 @@ export const generateQuestionSet = async (topic: string, count: number): Promise
 };
 
 export const parseQuestionsFromText = async (rawText: string): Promise<PhysicsProblem[]> => {
-  const apiKey = getSafeApiKey();
-  const ai = new GoogleGenAI({ apiKey });
+  // Initialize directly with process.env.API_KEY as mandated.
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || "" });
   const response = await ai.models.generateContent({
-    // Chuyển sang Flash để xử lý tức thì, tránh lỗi Timeout 10s của Vercel
     model: 'gemini-3-flash-preview',
-    contents: `Trích xuất các câu hỏi từ văn bản này sang JSON: "${rawText}". ${SYSTEM_PROMPT}`,
+    contents: `Trích xuất các câu hỏi từ văn bản này sang JSON: "${rawText}".`,
     config: {
+      // Use systemInstruction for system-level prompting as per guidelines.
+      systemInstruction: SYSTEM_PROMPT,
       responseMimeType: "application/json",
       responseSchema: {
         type: Type.ARRAY,
@@ -112,6 +101,7 @@ export const parseQuestionsFromText = async (rawText: string): Promise<PhysicsPr
     }
   });
 
+  // Directly access .text property from GenerateContentResponse.
   const data = safeParseJSON(response.text || '[]');
   return data.map((item: any) => ({
     ...item,
