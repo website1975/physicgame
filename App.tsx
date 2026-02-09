@@ -7,23 +7,27 @@ import TeacherPortal from './components/TeacherPortal';
 import StudentArenaFlow from './components/StudentArenaFlow';
 import GameEngine from './components/GameEngine';
 
-// Polyfill and Key extraction to ensure API_KEY is available in process.env for the SDK
-(function() {
-  const getSafeEnv = (key: string): string | undefined => {
-    try {
-      const p = (typeof process !== 'undefined' ? process.env : undefined) as any;
-      const m = (typeof import.meta !== 'undefined' ? (import.meta as any).env : undefined) as any;
-      return (p?.[key] || p?.[`VITE_${key}`] || m?.[key] || m?.[`VITE_${key}`]);
-    } catch (e) { return undefined; }
-  };
+// Polyfill process nếu chưa tồn tại
+if (typeof (window as any).process === 'undefined') {
+  (window as any).process = { env: {} };
+}
 
-  if (typeof (window as any).process === 'undefined') {
-    (window as any).process = { env: {} };
-  }
-  if (!process.env.API_KEY) {
-    process.env.API_KEY = getSafeEnv('API_KEY');
-  }
-})();
+// Logic getSafeEnv tối ưu cho Vercel/Vite do người dùng cung cấp
+const getSafeEnv = (key: string): string | undefined => {
+  try {
+    const fromProcess = (process.env as any)[key] || (process.env as any)[`VITE_${key}`];
+    if (fromProcess) return fromProcess;
+    const fromMeta = (import.meta as any).env[key] || (import.meta as any).env[`VITE_${key}`];
+    if (fromMeta) return fromMeta;
+  } catch (e) {}
+  return undefined;
+};
+
+// Thiết lập API_KEY cho toàn bộ ứng dụng
+const apiKeyFromEnv = getSafeEnv('API_KEY');
+if (apiKeyFromEnv) {
+  (process.env as any).API_KEY = apiKeyFromEnv;
+}
 
 const App: React.FC = () => {
   const [gameState, setGameState] = useState<GameState>('LOBBY');
@@ -169,7 +173,7 @@ const App: React.FC = () => {
                </div>
             </div>
 
-            {/* Smaller title and shifted left to avoid overlap */}
+            {/* Tiêu đề gọn gàng lệch trái để không vướng bộ đếm */}
             <div className="text-left ml-2 md:ml-4">
               <h1 className="text-2xl md:text-3xl lg:text-4xl font-black text-slate-800 mb-1 uppercase italic tracking-tighter">PhysiQuest</h1>
               <p className="text-slate-400 font-bold uppercase text-[6px] md:text-[8px] mb-8 tracking-[0.2em] ml-0.5">Hệ Thống Đấu Trường Vật Lý</p>
