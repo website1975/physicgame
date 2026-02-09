@@ -28,7 +28,7 @@ const App: React.FC = () => {
   const [settings, setSettings] = useState<GameSettings>({ autoNext: true, autoNextDelay: 20, maxPlayers: 2 });
   const [joinedRoom, setJoinedRoom] = useState<any>(null);
   const [availableSets, setAvailableSets] = useState<any[]>([]);
-  const [matchData, setMatchData] = useState<{ setId: string, title: string, rounds: Round[], opponentName?: string, joinedRoom?: any, startIndex?: number } | null>(null);
+  const [matchData, setMatchData] = useState<{ setId: string, title: string, rounds: Round[], opponentName?: string, joinedRoom?: any, startIndex?: number, myId?: string } | null>(null);
 
   const [liveSessionKey, setLiveSessionKey] = useState<number>(Date.now());
 
