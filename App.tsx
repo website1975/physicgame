@@ -35,21 +35,18 @@ const App: React.FC = () => {
 
   const checkAI = async () => {
     setApiStatus('checking');
-    // Using process.env.API_KEY directly as mandated by guidelines
-    const apiKey = process.env.API_KEY;
-    if (!apiKey) { 
-      setApiStatus('offline'); 
-      return; 
-    }
     try {
-      // Corrected initialization with named parameter and direct process.env.API_KEY usage
-      const ai = new GoogleGenAI({ apiKey });
+      // Truy cập trực tiếp process.env.API_KEY theo quy định của SDK
+      if (!process.env.API_KEY) {
+        setApiStatus('offline');
+        return;
+      }
+      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
       const response = await ai.models.generateContent({ 
         model: 'gemini-3-flash-preview', 
         contents: 'ping', 
         config: { maxOutputTokens: 1 } 
       });
-      // Accessing response.text property directly as it is not a method
       if (response.text) {
         setApiStatus('online');
       }
@@ -154,10 +151,10 @@ const App: React.FC = () => {
                </div>
             </div>
 
-            {/* Chỉnh sửa kích thước và lề trái của tiêu đề để tránh che khuất */}
+            {/* Chỉnh sửa kích thước nhỏ hơn và dịch trái để tránh đè counter */}
             <div className="text-left md:ml-2">
-              <h1 className="text-5xl md:text-6xl font-black text-slate-800 mb-1 uppercase italic tracking-tighter">PhysiQuest</h1>
-              <p className="text-slate-400 font-bold uppercase text-[9px] mb-8 tracking-[0.2em] ml-1">Hệ Thống Đấu Trường Vật Lý</p>
+              <h1 className="text-3xl md:text-4xl font-black text-slate-800 mb-1 uppercase italic tracking-tighter">PhysiQuest</h1>
+              <p className="text-slate-400 font-bold uppercase text-[7px] mb-8 tracking-[0.2em] ml-1">Hệ Thống Đấu Trường Vật Lý</p>
             </div>
             
             <input type="text" placeholder="Tên thi đấu..." className="w-full p-6 bg-slate-50 border-4 border-slate-100 rounded-3xl font-black text-center text-2xl mb-8 outline-none focus:border-blue-500 transition-all" value={playerName} onChange={e => setPlayerName(e.target.value)} />
@@ -226,7 +223,6 @@ const App: React.FC = () => {
           onStartGame={() => setGameState('ROOM_SELECTION')} rounds={rounds} setRounds={setRounds} settings={settings} setSettings={setSettings}
           currentGameState={gameState} onNextQuestion={() => {}} players={[]} myPlayerId={playerName}
           onSaveSet={async (title, asNew, topic, grade) => {
-            // Fix: Changed monDay to monday to match the Teacher interface
             if (asNew) await saveExamSet(currentTeacher.id, title, rounds, topic, grade, currentTeacher.monday);
             else await updateExamSet(loadedSetId!, title, rounds, topic, grade, currentTeacher.id);
             refreshSets(currentTeacher.id);
