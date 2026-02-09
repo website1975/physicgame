@@ -2,9 +2,6 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { PhysicsProblem } from "../types";
 
-// The API key is obtained directly from process.env.API_KEY per SDK guidelines.
-// Removed local getSafeApiKey and getSafeEnv functions to adhere to strict environment variable requirements.
-
 const SYSTEM_PROMPT = `Bạn là chuyên gia soạn đề Vật lý. Nhiệm vụ: Trích xuất văn bản thành JSON mảng đối tượng.
 QUY TẮC:
 1. TN: 4 options, correctAnswer là 'A', 'B', 'C' hoặc 'D'.
@@ -16,12 +13,10 @@ KHÔNG trả về bất kỳ văn bản nào ngoài JSON.`;
 const safeParseJSON = (text: string) => {
   try {
     let cleanText = text.trim();
-    // Loại bỏ markdown code blocks nếu có
     cleanText = cleanText.replace(/^```json\s*/i, '').replace(/\s*```$/i, '');
     return JSON.parse(cleanText);
   } catch (e) {
     console.error("Dữ liệu AI trả về không phải JSON hợp lệ:", text);
-    // Thử tìm mảng JSON trong chuỗi nếu AI trả về kèm văn bản giải thích
     const match = text.match(/\[\s*\{.*\}\s*\]/s);
     if (match) return JSON.parse(match[0]);
     throw new Error("Lỗi định dạng dữ liệu từ AI.");
@@ -29,13 +24,13 @@ const safeParseJSON = (text: string) => {
 };
 
 export const generateQuestionSet = async (topic: string, count: number): Promise<PhysicsProblem[]> => {
-  // Initialize directly with process.env.API_KEY as mandated.
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || "" });
+  // Đảm bảo sử dụng process.env.API_KEY trực tiếp
+  if (!process.env.API_KEY) throw new Error("Missing API Key");
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   const response = await ai.models.generateContent({
     model: 'gemini-3-flash-preview', 
     contents: `Tạo ${count} câu hỏi chủ đề: ${topic}.`,
     config: {
-      // Use systemInstruction for system-level prompting as per guidelines.
       systemInstruction: SYSTEM_PROMPT,
       responseMimeType: "application/json",
       responseSchema: {
@@ -60,7 +55,6 @@ export const generateQuestionSet = async (topic: string, count: number): Promise
     }
   });
 
-  // Directly access .text property from GenerateContentResponse.
   const data = safeParseJSON(response.text || '[]');
   return data.map((item: any) => ({
     ...item,
@@ -70,13 +64,12 @@ export const generateQuestionSet = async (topic: string, count: number): Promise
 };
 
 export const parseQuestionsFromText = async (rawText: string): Promise<PhysicsProblem[]> => {
-  // Initialize directly with process.env.API_KEY as mandated.
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || "" });
+  if (!process.env.API_KEY) throw new Error("Missing API Key");
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   const response = await ai.models.generateContent({
     model: 'gemini-3-flash-preview',
     contents: `Trích xuất các câu hỏi từ văn bản này sang JSON: "${rawText}".`,
     config: {
-      // Use systemInstruction for system-level prompting as per guidelines.
       systemInstruction: SYSTEM_PROMPT,
       responseMimeType: "application/json",
       responseSchema: {
@@ -101,7 +94,6 @@ export const parseQuestionsFromText = async (rawText: string): Promise<PhysicsPr
     }
   });
 
-  // Directly access .text property from GenerateContentResponse.
   const data = safeParseJSON(response.text || '[]');
   return data.map((item: any) => ({
     ...item,
