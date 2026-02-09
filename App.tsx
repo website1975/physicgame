@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { GoogleGenAI } from "@google/genai";
 import { GameState, Round, Teacher, GameSettings, AdminTab } from './types';
 import { loginTeacher, fetchTeacherByMaGV, supabase, fetchAllExamSets, fetchSetData, saveExamSet, updateExamSet, deleteExamSet, assignSetToRoom, getVisitorCount, incrementVisitorCount } from './services/supabaseService';
@@ -7,26 +7,26 @@ import TeacherPortal from './components/TeacherPortal';
 import StudentArenaFlow from './components/StudentArenaFlow';
 import GameEngine from './components/GameEngine';
 
-// Polyfill process nếu chưa tồn tại
-if (typeof (window as any).process === 'undefined') {
-  (window as any).process = { env: {} };
-}
-
-// Logic getSafeEnv tối ưu cho Vercel/Vite do người dùng cung cấp
+// Hàm getSafeEnv tối ưu để đọc Key từ mọi môi trường (Vercel, Vite, Local)
 const getSafeEnv = (key: string): string | undefined => {
   try {
     const fromProcess = (process.env as any)[key] || (process.env as any)[`VITE_${key}`];
     if (fromProcess) return fromProcess;
-    const fromMeta = (import.meta as any).env[key] || (import.meta as any).env[`VITE_${key}`];
+    const fromMeta = (import.meta as any).env?.[key] || (import.meta as any).env?.[`VITE_${key}`];
     if (fromMeta) return fromMeta;
   } catch (e) {}
   return undefined;
 };
 
-// Thiết lập API_KEY cho toàn bộ ứng dụng
-const apiKeyFromEnv = getSafeEnv('API_KEY');
-if (apiKeyFromEnv) {
-  (process.env as any).API_KEY = apiKeyFromEnv;
+// Khởi tạo process.env giả lập nếu chưa có
+if (typeof (window as any).process === 'undefined') {
+  (window as any).process = { env: {} };
+}
+
+// Thiết lập Key toàn cục ngay lập tức
+const globalKey = getSafeEnv('API_KEY');
+if (globalKey) {
+  (process.env as any).API_KEY = globalKey;
 }
 
 const App: React.FC = () => {
@@ -55,10 +55,11 @@ const App: React.FC = () => {
 
   const [liveSessionKey, setLiveSessionKey] = useState<number>(Date.now());
 
-  const checkAI = async () => {
+  const checkAI = useCallback(async () => {
     setApiStatus('checking');
     try {
-      const apiKey = process.env.API_KEY;
+      // Thử lấy lại key một lần nữa nếu biến process.env chưa kịp nạp
+      const apiKey = process.env.API_KEY || getSafeEnv('API_KEY');
       if (!apiKey) {
         setApiStatus('offline');
         return;
@@ -76,7 +77,7 @@ const App: React.FC = () => {
       console.error("AI Check failed:", e);
       setApiStatus('offline'); 
     }
-  };
+  }, []);
 
   const handleVisitorTracking = async () => {
     const isNewSession = !sessionStorage.getItem('visitor_tracked');
@@ -103,7 +104,7 @@ const App: React.FC = () => {
     checkAI(); 
     fetchGlobalStats();
     handleVisitorTracking();
-  }, []);
+  }, [checkAI]);
 
   const refreshSets = async (tId: string) => {
     setIsLoading(true);
@@ -157,9 +158,11 @@ const App: React.FC = () => {
                        <span className="text-[9px] font-black text-emerald-600 uppercase italic tracking-wider">AI READY ✨</span>
                     </div>
                   ) : (
-                    <div className="flex items-center gap-2 bg-red-50 px-3 py-1.5 rounded-full border border-red-100 shadow-sm">
-                       <div className="w-2 h-2 bg-red-500 rounded-full"></div>
-                       <span className="text-[9px] font-black text-red-600 uppercase italic tracking-wider">AI OFFLINE</span>
+                    <div onClick={checkAI} className="flex items-center gap-2 bg-red-50 px-3 py-1.5 rounded-full border border-red-100 shadow-sm cursor-pointer hover:bg-red-100 transition-colors">
+                       <div className={`w-2 h-2 bg-red-500 rounded-full ${apiStatus === 'checking' ? 'animate-spin' : ''}`}></div>
+                       <span className="text-[9px] font-black text-red-600 uppercase italic tracking-wider">
+                         {apiStatus === 'checking' ? 'CHECKING...' : 'AI OFFLINE'}
+                       </span>
                     </div>
                   )}
                </div>
@@ -173,7 +176,6 @@ const App: React.FC = () => {
                </div>
             </div>
 
-            {/* Tiêu đề gọn gàng lệch trái để không vướng bộ đếm */}
             <div className="text-left ml-2 md:ml-4">
               <h1 className="text-2xl md:text-3xl lg:text-4xl font-black text-slate-800 mb-1 uppercase italic tracking-tighter">PhysiQuest</h1>
               <p className="text-slate-400 font-bold uppercase text-[6px] md:text-[8px] mb-8 tracking-[0.2em] ml-0.5">Hệ Thống Đấu Trường Vật Lý</p>
