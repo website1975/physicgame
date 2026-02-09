@@ -36,12 +36,13 @@ const App: React.FC = () => {
   const checkAI = async () => {
     setApiStatus('checking');
     try {
-      // Truy cập trực tiếp process.env.API_KEY theo quy định của SDK
-      if (!process.env.API_KEY) {
+      // Sử dụng process.env.API_KEY trực tiếp theo hướng dẫn Gemini SDK
+      const apiKey = process.env.API_KEY;
+      if (!apiKey) {
         setApiStatus('offline');
         return;
       }
-      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+      const ai = new GoogleGenAI({ apiKey });
       const response = await ai.models.generateContent({ 
         model: 'gemini-3-flash-preview', 
         contents: 'ping', 
@@ -151,10 +152,10 @@ const App: React.FC = () => {
                </div>
             </div>
 
-            {/* Chỉnh sửa kích thước nhỏ hơn và dịch trái để tránh đè counter */}
-            <div className="text-left md:ml-2">
-              <h1 className="text-3xl md:text-4xl font-black text-slate-800 mb-1 uppercase italic tracking-tighter">PhysiQuest</h1>
-              <p className="text-slate-400 font-bold uppercase text-[7px] mb-8 tracking-[0.2em] ml-1">Hệ Thống Đấu Trường Vật Lý</p>
+            {/* Chỉnh sửa tiêu đề nhỏ lại và dịch sang trái một chút */}
+            <div className="text-left ml-2 md:ml-4">
+              <h1 className="text-3xl md:text-4xl lg:text-5xl font-black text-slate-800 mb-1 uppercase italic tracking-tighter">PhysiQuest</h1>
+              <p className="text-slate-400 font-bold uppercase text-[7px] md:text-[8px] mb-8 tracking-[0.2em] ml-1">Hệ Thống Đấu Trường Vật Lý</p>
             </div>
             
             <input type="text" placeholder="Tên thi đấu..." className="w-full p-6 bg-slate-50 border-4 border-slate-100 rounded-3xl font-black text-center text-2xl mb-8 outline-none focus:border-blue-500 transition-all" value={playerName} onChange={e => setPlayerName(e.target.value)} />
