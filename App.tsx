@@ -3,6 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { GoogleGenAI } from "@google/genai";
 import { GameState, Round, Teacher, GameSettings, AdminTab } from './types';
 import { loginTeacher, fetchTeacherByMaGV, supabase, fetchAllExamSets, fetchSetData, saveExamSet, updateExamSet, deleteExamSet, assignSetToRoom } from './services/supabaseService';
+import { getSafeEnv } from './services/geminiService';
 import TeacherPortal from './components/TeacherPortal';
 import StudentArenaFlow from './components/StudentArenaFlow';
 import GameEngine from './components/GameEngine';
@@ -29,14 +30,17 @@ const App: React.FC = () => {
   const [availableSets, setAvailableSets] = useState<any[]>([]);
   const [matchData, setMatchData] = useState<{ setId: string, title: string, rounds: Round[], opponentName?: string, joinedRoom?: any, startIndex?: number } | null>(null);
 
-  // liveSessionKey dùng để "cưỡng bức" AdminPanel reset trạng thái phiên dạy Live
   const [liveSessionKey, setLiveSessionKey] = useState<number>(Date.now());
 
   const checkAI = async () => {
     setApiStatus('checking');
-    if (!process.env.API_KEY) { setApiStatus('offline'); return; }
+    const apiKey = getSafeEnv('API_KEY');
+    if (!apiKey) { 
+      setApiStatus('offline'); 
+      return; 
+    }
     try {
-      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+      const ai = new GoogleGenAI({ apiKey });
       await ai.models.generateContent({ 
         model: 'gemini-3-flash-preview', 
         contents: 'ping', 
@@ -71,7 +75,6 @@ const App: React.FC = () => {
       setRounds(data.rounds);
       setLoadedSetId(id);
       setLoadedSetTitle(title);
-      // Tạo mã phiên mới để cưỡng bức AdminPanel reset trạng thái Live
       setLiveSessionKey(Date.now());
       setAdminTab('CONTROL');
     } catch (e) {
@@ -86,7 +89,6 @@ const App: React.FC = () => {
       {gameState === 'LOBBY' && (
         <div className="min-h-screen flex items-center justify-center p-4">
           <div className="bg-white rounded-[4rem] p-12 shadow-2xl max-w-2xl w-full text-center border-b-[12px] border-blue-600 animate-in zoom-in duration-500 relative overflow-hidden">
-            {/* AI Status Indicator */}
             <div className="absolute top-8 right-10 flex items-center gap-2">
                {apiStatus === 'online' ? (
                  <div className="flex items-center gap-2 bg-emerald-50 px-3 py-1.5 rounded-full border border-emerald-100 shadow-sm animate-in fade-in slide-in-from-right-4">
