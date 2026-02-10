@@ -1,5 +1,5 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import ExamLibrary from './ExamLibrary';
 import AdminPanel from './AdminPanel';
 import AnswerInput from './AnswerInput';
@@ -46,7 +46,7 @@ interface TeacherPortalProps {
   onResetToNew: () => void;
   onRefreshSets: () => void;
   isLoadingSets?: boolean;
-  onLive: (setId: string, title: string) => void; // Prop mới nhận từ App
+  onLive: (setId: string, title: string) => void; 
   liveSessionKey?: number;
 }
 
@@ -57,18 +57,26 @@ const TeacherPortal: React.FC<TeacherPortalProps> = (props) => {
   const [testValue, setTestValue] = useState('');
   const [statusMsg, setStatusMsg] = useState<{ text: string, type: 'success' | 'error' } | null>(null);
 
+  // Reset lab state when switching away or back to lab
+  useEffect(() => {
+    if (adminTab !== 'LAB') {
+      setTestMechanic(null);
+      setTestValue('');
+    }
+  }, [adminTab]);
+
   const labGames = [
     { id: InteractiveMechanic.CANNON, name: 'Pháo xạ kích', icon: '🛸', color: 'bg-slate-900', desc: 'Sử dụng pháo để bắn vào đáp án trôi nổi.' },
     { id: InteractiveMechanic.RISING_WATER, name: 'Nước dâng cao', icon: '🚢', color: 'bg-blue-600', desc: 'Thử thách tốc độ khi nước dâng dần lên.' },
-    { id: InteractiveMechanic.SPACE_DASH, name: 'Vũ trụ phiêu lưu', icon: '🌌', color: 'bg-indigo-900', desc: 'Di chuyển phi thuyền trong không gian.' },
+    { id: InteractiveMechanic.SPACE_DASH, name: 'Vũ trụ phiêu lưu', icon: '🌌', color: 'bg-indigo-900', desc: 'Di chuyển phi thuyền và bắn hạ đáp án.' },
     { id: InteractiveMechanic.MARIO, name: 'Nấm lùn phiêu lưu', icon: '🍄', color: 'bg-orange-500', desc: 'Di chuyển để chạm vào các khối số đáp án.' },
-    { id: InteractiveMechanic.HIDDEN_TILES, name: 'Lật ô bí mật', icon: '🃏', color: 'bg-emerald-600', desc: 'Ghi nhớ vị trí các con số dưới ô vuông.' },
+    { id: InteractiveMechanic.HIDDEN_TILES, name: 'Lật ô bí mật', icon: '🃏', color: 'bg-emerald-600', desc: 'Ghi nhớ và chạm trực tiếp để lật các ô số.' },
   ];
 
   const dummyProblem = (mechanic: InteractiveMechanic) => ({
     id: 'test',
     title: 'Chế độ chạy thử',
-    content: 'Hãy thử di chuyển và nhập đáp án bằng cơ chế này.',
+    content: 'Hãy thử tương tác và nhập đáp án bằng cơ chế này.',
     type: QuestionType.SHORT_ANSWER,
     difficulty: Difficulty.EASY,
     challenge: DisplayChallenge.NORMAL,
@@ -152,7 +160,7 @@ const TeacherPortal: React.FC<TeacherPortalProps> = (props) => {
               {testMechanic ? (
                 <div className="bg-white rounded-[3.5rem] p-10 border-8 border-slate-100 shadow-2xl flex flex-col items-center">
                    <div className="w-full flex justify-between items-center mb-10">
-                      <button onClick={() => setTestMechanic(null)} className="px-6 py-3 bg-slate-100 text-slate-500 font-black rounded-xl uppercase italic text-[10px]">← Quay lại kho game</button>
+                      <button onClick={() => { setTestMechanic(null); setTestValue(''); }} className="px-6 py-3 bg-slate-100 text-slate-500 font-black rounded-xl uppercase italic text-[10px]">← Quay lại kho game</button>
                       <h4 className="text-3xl font-black uppercase italic text-slate-800">Chạy thử: {labGames.find(g => g.id === testMechanic)?.name}</h4>
                    </div>
                    <div className="w-full max-w-4xl h-[550px]"><AnswerInput problem={dummyProblem(testMechanic as InteractiveMechanic) as any} value={testValue} onChange={setTestValue} onSubmit={() => alert(`Bạn đã nhập: ${testValue}`)} disabled={false} /></div>
