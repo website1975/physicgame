@@ -19,7 +19,7 @@ interface Target {
   isRevealed: boolean;
   revealTimer: number; 
   isLit: boolean;
-  isColliding: boolean; // Cờ hiệu trạng thái va chạm (Flag 0/1)
+  isColliding: boolean; 
 }
 
 interface EngineState {
@@ -67,7 +67,7 @@ const AnswerInput: React.FC<AnswerInputProps> = ({ problem, value, onChange, onS
           isRevealed: !isHiddenMode,
           revealTimer: 0,
           isLit: false,
-          isColliding: false // Mặc định cờ hiệu = 0
+          isColliding: false 
         };
       });
 
@@ -85,11 +85,9 @@ const AnswerInput: React.FC<AnswerInputProps> = ({ problem, value, onChange, onS
   const handleHitLogic = useCallback((target: Target) => {
     if (activeMechanic === InteractiveMechanic.HIDDEN_TILES) {
       if (!target.isRevealed) {
-        // Lần chạm 1: Lật số
         target.isRevealed = true;
         target.revealTimer = REVEAL_DURATION;
       } else {
-        // Lần chạm 2 (khi đang hiện): Chọn số
         onChange(valueRef.current + target.value);
         target.isLit = true;
         setTimeout(() => { target.isLit = false; }, 300);
@@ -107,33 +105,27 @@ const AnswerInput: React.FC<AnswerInputProps> = ({ problem, value, onChange, onS
     const tick = () => {
       const eng = engineRef.current;
       const HIT_BOX_PROJECTILE = 6; 
-      const HIT_BOX_TOUCH = 8; // Vùng va chạm cho chế độ Chạm
+      const HIT_BOX_TOUCH = 8; 
 
-      // Cập nhật trạng thái target
       eng.targets.forEach(t => {
         if (activeMechanic === InteractiveMechanic.HIDDEN_TILES && t.revealTimer > 0) {
           t.revealTimer--;
           if (t.revealTimer === 0) t.isRevealed = false;
         }
 
-        // Logic Flag 0/1 cho chế độ CHẠM (MARIO)
         if (activeMechanic === InteractiveMechanic.MARIO) {
           const isInside = Math.abs(eng.playerX - t.x) < HIT_BOX_TOUCH && Math.abs(eng.playerY - t.y) < HIT_BOX_TOUCH;
-          
           if (isInside) {
             if (!t.isColliding) {
-              // Bắt đầu chạm (Trigger Enter)
               handleHitLogic(t);
-              t.isColliding = true; // Sét cờ hiệu = 1
+              t.isColliding = true; 
             }
           } else {
-            // Đã rời vùng va chạm (Trigger Exit)
-            t.isColliding = false; // Trả cờ hiệu về 0
+            t.isColliding = false; 
           }
         }
       });
 
-      // Cơ chế BẮN SỐ (Projectiles)
       const canShoot = [InteractiveMechanic.CANNON, InteractiveMechanic.RISING_WATER, InteractiveMechanic.SPACE_DASH].includes(activeMechanic);
       
       if (canShoot) {
@@ -145,7 +137,7 @@ const AnswerInput: React.FC<AnswerInputProps> = ({ problem, value, onChange, onS
           const hit = eng.targets.find(t => Math.abs(p.x - t.x) < HIT_BOX_PROJECTILE && Math.abs(p.y - t.y) < HIT_BOX_PROJECTILE);
           if (hit) {
             handleHitLogic(hit);
-            return false; // Đạn biến mất khi trúng
+            return false; 
           }
           return true;
         });
@@ -196,15 +188,33 @@ const AnswerInput: React.FC<AnswerInputProps> = ({ problem, value, onChange, onS
 
   if (problem.type === QuestionType.MULTIPLE_CHOICE) {
     return (
-      <div className="flex flex-col gap-3 h-full overflow-y-auto no-scrollbar pb-4 text-left">
+      <div className="flex flex-col gap-3 py-2 text-left w-full h-auto">
+        <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1 italic">Chọn đáp án đúng:</div>
         {(problem.options || []).map((opt, i) => {
           const label = String.fromCharCode(65 + i);
           const isSelected = value === label;
           return (
-            <button key={i} disabled={disabled} onClick={() => onChange(label)} className={`p-5 rounded-[2rem] border-4 text-left transition-all flex items-center gap-5 ${isSelected ? 'border-blue-600 bg-white shadow-xl scale-[1.01]' : 'border-slate-100 bg-slate-50 text-slate-700 hover:border-blue-200'}`}>
-              <span className={`w-12 h-12 rounded-2xl flex items-center justify-center font-black text-xl ${isSelected ? 'bg-blue-600 text-white' : 'bg-blue-500 text-white'}`}>{label}</span>
-              <div className="flex-1 font-bold text-lg"><LatexRenderer content={opt} /></div>
-              {isSelected && <div className="bg-emerald-500 text-white w-10 h-10 rounded-full flex items-center justify-center font-black">✓</div>}
+            <button 
+              key={i} 
+              disabled={disabled} 
+              onClick={() => onChange(label)} 
+              className={`group w-full p-4 rounded-xl border-2 text-left transition-all flex items-center gap-4 relative
+                ${isSelected 
+                  ? 'border-blue-600 bg-blue-50 shadow-md translate-x-1' 
+                  : 'border-slate-200 bg-white text-slate-700 hover:border-blue-300 hover:bg-slate-50'}`}
+            >
+              <span className={`w-10 h-10 rounded-lg flex items-center justify-center font-black text-xl transition-all shrink-0
+                ${isSelected ? 'bg-blue-600 text-white shadow-inner' : 'bg-slate-100 text-slate-500'}`}>
+                {label}
+              </span>
+              <div className="flex-1 font-bold text-base md:text-lg leading-snug py-1">
+                <LatexRenderer content={opt} />
+              </div>
+              {isSelected && (
+                <div className="bg-emerald-500 text-white w-6 h-6 rounded-full flex items-center justify-center font-black animate-in zoom-in shrink-0">
+                  ✓
+                </div>
+              )}
             </button>
           );
         })}
@@ -214,14 +224,25 @@ const AnswerInput: React.FC<AnswerInputProps> = ({ problem, value, onChange, onS
 
   if (problem.type === QuestionType.TRUE_FALSE) {
     return (
-      <div className="bg-white p-4 rounded-[2rem] border-2 border-slate-50 space-y-3 h-full overflow-y-auto no-scrollbar shadow-inner text-left">
+      <div className="space-y-3 py-2 text-left w-full h-auto">
+        <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1 italic">Xác định tính Đúng/Sai:</div>
         {['a', 'b', 'c', 'd'].map((l, i) => (
-          <div key={l} className="flex gap-4 items-center bg-slate-50 p-4 rounded-2xl border-2 border-slate-100">
-            <span className="font-black text-emerald-600 w-8 italic text-lg">{l})</span>
-            <div className="flex-1 font-bold text-slate-600 text-sm text-left"><LatexRenderer content={problem.options?.[i] || '...'} /></div>
-            <div className="flex gap-1 bg-white p-1 rounded-xl shadow-sm border border-slate-100">
+          <div key={l} className="flex gap-3 items-center bg-white p-4 rounded-xl border-2 border-slate-100 shadow-sm">
+            <span className="font-black text-blue-600 w-6 italic text-base uppercase shrink-0">{l})</span>
+            <div className="flex-1 font-bold text-slate-600 text-sm md:text-base text-left"><LatexRenderer content={problem.options?.[i] || '...'} /></div>
+            <div className="flex gap-1.5 bg-slate-50 p-1 rounded-lg border border-slate-200 shrink-0">
               {(['Đ', 'S'] as const).map(v => (
-                <button key={v} onClick={() => handleToggleDS(i, v)} className={`w-10 h-10 rounded-lg font-black transition-all text-sm ${dsAnswers[i] === v ? (v === 'Đ' ? 'bg-emerald-500 text-white' : 'bg-red-500 text-white') : 'text-slate-200 hover:bg-slate-50'}`}>{v}</button>
+                <button 
+                  key={v} 
+                  onClick={() => handleToggleDS(i, v)} 
+                  disabled={disabled}
+                  className={`w-9 h-9 rounded-md font-black transition-all text-xs border
+                    ${dsAnswers[i] === v 
+                      ? (v === 'Đ' ? 'bg-emerald-500 text-white border-emerald-400 shadow-sm' : 'bg-red-500 text-white border-red-400 shadow-sm') 
+                      : 'bg-white text-slate-300 border-slate-100 hover:text-slate-400'}`}
+                >
+                  {v}
+                </button>
               ))}
             </div>
           </div>
@@ -240,17 +261,17 @@ const AnswerInput: React.FC<AnswerInputProps> = ({ problem, value, onChange, onS
     <div className="space-y-4 flex flex-col h-full overflow-hidden text-left">
       <div className="flex justify-between items-center bg-slate-900 px-6 py-4 rounded-[2.2rem] border-4 border-slate-800 shadow-xl shrink-0">
          <div className="flex items-center gap-5">
-            <span className="text-slate-500 font-black text-[10px] uppercase tracking-widest italic">ĐÁP ÁN:</span>
+            <span className="text-slate-500 font-black text-[10px] uppercase tracking-widest italic">KẾT QUẢ:</span>
             <span className="text-yellow-400 text-3xl font-black tracking-widest drop-shadow-lg">{value || '...'}</span>
          </div>
-         <button onClick={() => onChange('')} className="bg-red-500/10 text-red-500 px-4 py-2 rounded-xl font-black text-[10px] uppercase border border-red-500/20 hover:bg-red-500 hover:text-white transition-all italic">Xoá</button>
+         <button onClick={() => onChange('')} disabled={disabled} className="bg-red-500/10 text-red-500 px-4 py-2 rounded-xl font-black text-[10px] uppercase border border-red-500/20 hover:bg-red-500 hover:text-white transition-all italic">Xoá</button>
       </div>
 
-      <div className="relative w-full flex-1 min-h-[500px] rounded-[3.5rem] border-[10px] overflow-hidden bg-slate-950 border-slate-900 shadow-inner">
+      <div className="relative w-full flex-1 min-h-[400px] rounded-[3.5rem] border-[10px] overflow-hidden bg-slate-950 border-slate-900 shadow-inner">
         {visual.targets.map(t => (
           <div 
             key={t.id} 
-            onClick={() => handleTileClick(t)}
+            onClick={() => !disabled && handleTileClick(t)}
             className={`absolute w-12 h-12 md:w-16 md:h-16 rounded-2xl flex items-center justify-center text-xl md:text-3xl font-black shadow-lg border-2 transition-all duration-300 
             ${t.isLit ? 'bg-yellow-400 border-white scale-125 text-slate-900 z-50 ring-4 ring-yellow-400/30' : 
               (t.isRevealed ? 'bg-blue-600 border-white text-white' : 'bg-blue-900/40 border-blue-500/20 text-blue-500/30')}
@@ -278,36 +299,37 @@ const AnswerInput: React.FC<AnswerInputProps> = ({ problem, value, onChange, onS
         )}
       </div>
 
-      {!isHiddenMode && (
+      {!isHiddenMode && !disabled && (
         <div className="grid grid-cols-3 gap-3 shrink-0">
-            <button onPointerDown={() => engineRef.current.playerX = Math.max(5, engineRef.current.playerX - 10)} className="bg-slate-800 text-white py-4 rounded-2xl font-black text-xl shadow-lg active:scale-90">←</button>
+            <button onPointerDown={() => engineRef.current.playerX = Math.max(5, engineRef.current.playerX - 10)} className="bg-slate-800 text-white py-4 rounded-2xl font-black text-xl shadow-lg active:scale-90 transition-transform">←</button>
             <div className="grid grid-rows-2 gap-2">
-              <button onPointerDown={() => engineRef.current.playerY = Math.max(10, engineRef.current.playerY - 10)} className="bg-slate-800 text-white py-2 rounded-xl font-black text-lg shadow-md active:scale-90">↑</button>
-              <button onPointerDown={() => engineRef.current.playerY = Math.min(92, engineRef.current.playerY + 10)} className="bg-slate-800 text-white py-2 rounded-xl font-black text-lg shadow-md active:scale-90">↓</button>
+              <button onPointerDown={() => engineRef.current.playerY = Math.max(10, engineRef.current.playerY - 10)} className="bg-slate-800 text-white py-2 rounded-xl font-black text-lg shadow-md active:scale-90 transition-transform">↑</button>
+              <button onPointerDown={() => engineRef.current.playerY = Math.min(92, engineRef.current.playerY + 10)} className="bg-slate-800 text-white py-2 rounded-xl font-black text-lg shadow-md active:scale-90 transition-transform">↓</button>
             </div>
-            <button onPointerDown={() => engineRef.current.playerX = Math.min(95, engineRef.current.playerX + 10)} className="bg-slate-800 text-white py-4 rounded-2xl font-black text-xl shadow-lg active:scale-90">→</button>
+            <button onPointerDown={() => engineRef.current.playerX = Math.min(95, engineRef.current.playerX + 10)} className="bg-slate-800 text-white py-4 rounded-2xl font-black text-xl shadow-lg active:scale-90 transition-transform">→</button>
         </div>
       )}
 
-      {isShootMode && (
+      {isShootMode && !disabled && (
         <button onPointerDown={() => engineRef.current.projectiles.push({ x: engineRef.current.playerX, y: engineRef.current.playerY - 6, id: Date.now() })} className="w-full py-5 bg-blue-600 text-white rounded-[1.8rem] font-black uppercase shadow-xl active:scale-95 transition-all text-xl border-b-8 border-blue-800 shrink-0">BẮN ĐÁP ÁN 🎯</button>
       )}
       
-      {isNấmMode && (
+      {isNấmMode && !disabled && (
         <div className="w-full py-5 bg-orange-600 text-white rounded-[1.8rem] font-black uppercase text-center italic text-sm shrink-0 border-b-8 border-orange-800 shadow-lg">
-           DI CHUYỂN NẤM ĐỂ CHẠM VÀO SỐ ĐÁP ÁN! ✨
+           DI CHUYỂN NẤM ĐỂ CHẠM VÀO SỐ! ✨
         </div>
       )}
 
-      {isHiddenMode && (
+      {isHiddenMode && !disabled && (
         <div className="w-full py-5 bg-emerald-600 text-white rounded-[1.8rem] font-black uppercase text-center italic text-sm shrink-0 border-b-8 border-emerald-800 shadow-lg">
-           CHẠM TRỰC TIẾP VÀO Ô: CHẠM 1 ĐỂ LẬT | CHẠM 2 ĐỂ CHỌN! 🃏
+           CHẠM TRỰC TIẾP ĐỂ LẬT VÀ CHỌN SỐ! 🃏
         </div>
       )}
     </div>
   );
 
   function handleToggleDS(idx: number, val: string) {
+    if (disabled) return;
     setDsAnswers(prev => {
       const next = [...prev];
       next[idx] = val;
