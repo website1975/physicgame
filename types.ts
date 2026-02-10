@@ -84,3 +84,13 @@ export interface GameSettings {
 export type AdminTab = 'EDITOR' | 'CONTROL' | 'CLOUD' | 'LAB' | 'MANAGEMENT'; 
 
 export type GameState = 'LOBBY' | 'ROOM_SELECTION' | 'SET_SELECTION' | 'WAITING_ROOM' | 'ADMIN' | 'ROUND_INTRO' | 'STARTING_ROUND' | 'WAITING_FOR_BUZZER' | 'ANSWERING' | 'FEEDBACK' | 'LECTURING' | 'GAME_OVER' | 'ENTER_CODE' | 'STUDENT_SETUP' | 'TEACHER_LOGIN' | 'WAITING_FOR_PLAYERS' | 'KEYWORD_SELECTION';
+
+export interface MatchData {
+  setId: string;
+  title: string;
+  rounds: Round[];
+  opponents?: { id: string, name: string }[];
+  joinedRoom?: any;
+  startIndex?: number;
+  myId?: string;
+}
