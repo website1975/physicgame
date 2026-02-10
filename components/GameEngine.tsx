@@ -9,8 +9,8 @@ import ConfirmModal from './ConfirmModal';
 import { supabase } from '../services/supabaseService';
 
 const DEFAULT_TIME = 40;
-const FEEDBACK_TIME = 15;
-const ROUND_INTRO_TIME = 10; 
+const FEEDBACK_TIME = 15; 
+const ROUND_INTRO_TIME = 10; // Thời gian chờ màn hình giới thiệu vòng (10 giây)
 
 interface GameEngineProps {
   gameState: GameState;
@@ -36,6 +36,7 @@ const GameEngine: React.FC<GameEngineProps> = ({
   const [opponentScores, setOpponentScores] = useState<Record<string, OpponentData>>({});
   const [timeLeft, setTimeLeft] = useState(DEFAULT_TIME);
   const [feedbackTimer, setFeedbackTimer] = useState(FEEDBACK_TIME);
+  const [roundIntroTimer, setRoundIntroTimer] = useState(ROUND_INTRO_TIME);
   const [userAnswer, setUserAnswer] = useState('');
   const [feedback, setFeedback] = useState<any>(null);
   const [buzzerWinner, setBuzzerWinner] = useState<'YOU' | 'OPPONENT' | null>(null);
@@ -73,6 +74,7 @@ const GameEngine: React.FC<GameEngineProps> = ({
     } else if (currentRoundIdx + 1 < rounds.length) {
       setCurrentRoundIdx(prev => prev + 1);
       setCurrentProblemIdx(0);
+      setRoundIntroTimer(ROUND_INTRO_TIME); // Reset timer cho vòng mới
       setGameState('ROUND_INTRO');
     } else {
       setGameState('GAME_OVER');
@@ -81,21 +83,52 @@ const GameEngine: React.FC<GameEngineProps> = ({
   }, [rounds, currentRound, currentRoundIdx, currentProblemIdx, setGameState]);
 
   const startProblemSync = useCallback((syncTime?: number) => {
-    setUserAnswer(''); setFeedback(null); setBuzzerWinner(null); setIsHelpUsed(false);
+    setUserAnswer(''); 
+    setFeedback(null); 
+    setBuzzerWinner(null); 
+    setIsHelpUsed(false);
+    
+    const nextProblem = rounds[currentRoundIdx]?.problems[currentProblemIdx + (isTransitioning.current ? 1 : 0)];
+    setTimeLeft(nextProblem?.timeLimit || DEFAULT_TIME);
+
     const delay = syncTime ? Math.max(0, syncTime - Date.now()) : 0;
     
     setTimeout(() => {
-      setGameState('STARTING_ROUND');
-      let count = 3;
-      const interval = setInterval(() => {
-        count--;
-        if (count <= 0) {
-          clearInterval(interval);
-          setGameState((isArenaA || isTeacherRoom) ? 'ANSWERING' : 'WAITING_FOR_BUZZER');
-        }
-      }, 1000);
+      if (isArenaA) {
+        setGameState('ANSWERING');
+        setBuzzerWinner('YOU');
+      } else {
+        setGameState('STARTING_ROUND');
+        let count = 3;
+        const interval = setInterval(() => {
+          count--;
+          if (count <= 0) {
+            clearInterval(interval);
+            setGameState((isArenaA || isTeacherRoom) ? 'ANSWERING' : 'WAITING_FOR_BUZZER');
+          }
+        }, 1000);
+      }
     }, delay);
-  }, [isArenaA, isTeacherRoom, setGameState]);
+  }, [isArenaA, isTeacherRoom, setGameState, currentRoundIdx, currentProblemIdx, rounds]);
+
+  // Logic đếm ngược cho màn hình ROUND_INTRO
+  useEffect(() => {
+    if (gameState === 'ROUND_INTRO') {
+      const timer = setInterval(() => {
+        setRoundIntroTimer(prev => {
+          if (prev <= 0.1) {
+            clearInterval(timer);
+            const syncTime = Date.now() + 500;
+            if (isMaster) channelRef.current?.send({ type: 'broadcast', event: 'sync_phase', payload: { phase: 'START_PROBLEM', syncTime } });
+            startProblemSync(syncTime);
+            return 0;
+          }
+          return prev - 0.1;
+        });
+      }, 100);
+      return () => clearInterval(timer);
+    }
+  }, [gameState, isMaster, startProblemSync]);
 
   useEffect(() => {
     if (!isArenaA && matchData.joinedRoom && !isTeacherRoom) {
@@ -114,6 +147,7 @@ const GameEngine: React.FC<GameEngineProps> = ({
            if (payload.phase === 'ROUND_INTRO') {
               setCurrentRoundIdx(payload.roundIdx);
               setCurrentProblemIdx(0);
+              setRoundIntroTimer(ROUND_INTRO_TIME);
               setGameState('ROUND_INTRO');
            } else if (payload.phase === 'START_PROBLEM') {
               startProblemSync(payload.syncTime);
@@ -146,24 +180,12 @@ const GameEngine: React.FC<GameEngineProps> = ({
   }, [isArenaA, isTeacherRoom, matchData.joinedRoom, myPresenceKey, myUniqueId, handleNext, startProblemSync, buzzerWinner]);
 
   useEffect(() => {
-    if (gameState === 'ROUND_INTRO') {
-       if (isMaster || isArenaA) {
-          setTimeout(() => {
-             const syncTime = Date.now() + 1500;
-             if (isMaster) channelRef.current?.send({ type: 'broadcast', event: 'sync_phase', payload: { phase: 'START_PROBLEM', syncTime } });
-             startProblemSync(syncTime);
-          }, ROUND_INTRO_TIME * 1000);
-       }
-    }
-  }, [gameState, isMaster, isArenaA, startProblemSync]);
-
-  useEffect(() => {
     if (gameState === 'FEEDBACK') {
-      const timer = setInterval(() => setFeedbackTimer(p => (p > 0 ? p - 1 : 0)), 1000);
-      if (feedbackTimer === 0) {
+      const timer = setInterval(() => setFeedbackTimer(p => (p > 0 ? p - 0.1 : 0)), 100);
+      if (feedbackTimer <= 0) {
         clearInterval(timer);
         if (isMaster || isArenaA) {
-          const syncTime = Date.now() + 1500;
+          const syncTime = Date.now() + 500;
           if (isMaster) channelRef.current?.send({ type: 'broadcast', event: 'sync_phase', payload: { phase: 'NEXT_QUESTION', syncTime } });
           handleNext(syncTime);
         }
@@ -173,19 +195,19 @@ const GameEngine: React.FC<GameEngineProps> = ({
   }, [gameState, feedbackTimer, isMaster, isArenaA, handleNext]);
 
   useEffect(() => {
-    if ((gameState === 'WAITING_FOR_BUZZER' || gameState === 'ANSWERING') && timeLeft > 0 && !isWhiteboardActive) {
+    if (((gameState as any) === 'WAITING_FOR_BUZZER' || (gameState as any) === 'ANSWERING') && timeLeft > 0 && !isWhiteboardActive) {
       const t = setInterval(() => setTimeLeft(p => p - 1), 1000);
       return () => clearInterval(t);
     }
     if (timeLeft === 0 && !isWhiteboardActive) {
-      if (gameState === 'ANSWERING' && buzzerWinner === 'YOU') submitAnswer();
-      else if (gameState === 'WAITING_FOR_BUZZER' && (isMaster || isArenaA)) {
+      if ((gameState as any) === 'ANSWERING' && (buzzerWinner === 'YOU' || isArenaA)) submitAnswer();
+      else if ((gameState as any) === 'WAITING_FOR_BUZZER' && (isMaster || isArenaA)) {
          setFeedback({ isCorrect: false, text: "HẾT GIỜ! KHÔNG AI GIÀNH QUYỀN.", winner: 'NONE' });
          setGameState('FEEDBACK');
          setFeedbackTimer(FEEDBACK_TIME);
       }
     }
-  }, [gameState, timeLeft, buzzerWinner, isWhiteboardActive]);
+  }, [gameState, timeLeft, buzzerWinner, isWhiteboardActive, isArenaA]);
 
   const submitAnswer = () => {
     const correct = (currentProblem?.correctAnswer || "").trim().toUpperCase();
@@ -194,9 +216,13 @@ const GameEngine: React.FC<GameEngineProps> = ({
     const fb = { isCorrect: isPerfect, text: isPerfect ? `CHÍNH XÁC! (+${points}đ)` : `SAI RỒI! Đáp án: ${correct}`, winner: 'YOU' };
     
     if (isPerfect) setScore(s => s + points);
-    setFeedback(fb); setGameState('FEEDBACK'); setFeedbackTimer(FEEDBACK_TIME);
+    setFeedback(fb); 
+    setGameState('FEEDBACK'); 
+    setFeedbackTimer(FEEDBACK_TIME);
     
-    channelRef.current?.send({ type: 'broadcast', event: 'match_result', payload: { player: playerName, playerId: myUniqueId, points, feedback: fb } });
+    if (!isArenaA) {
+      channelRef.current?.send({ type: 'broadcast', event: 'match_result', payload: { player: playerName, playerId: myUniqueId, points, feedback: fb } });
+    }
   };
 
   if (gameState === 'GAME_OVER') {
@@ -212,17 +238,52 @@ const GameEngine: React.FC<GameEngineProps> = ({
     );
   }
 
+  // MÀN HÌNH GIỚI THIỆU VÒNG ĐẤU 3D
+  if (gameState === 'ROUND_INTRO') {
+    return (
+      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-6 text-center animate-in fade-in duration-700">
+        <div className="relative mb-12 animate-bounce">
+           <span className="text-9xl drop-shadow-[0_10px_20px_rgba(0,0,0,0.5)]">⚔️</span>
+        </div>
+        
+        <h2 className="text-6xl font-black text-white uppercase italic mb-8 tracking-tighter drop-shadow-xl">
+           VÒNG {currentRound?.number}
+        </h2>
+
+        <div className="bg-white rounded-[3.5rem] p-10 shadow-[0_25px_50px_-12px_rgba(0,0,0,0.5)] max-w-2xl w-full border-b-[12px] border-blue-600 animate-in zoom-in duration-500">
+           <p className="text-slate-600 font-bold text-xl md:text-2xl italic uppercase tracking-widest leading-relaxed">
+             {currentRound?.description || "Hãy chuẩn bị tinh thần cho thử thách tiếp theo!"}
+           </p>
+        </div>
+
+        {/* Thanh Timeline 10 giây */}
+        <div className="mt-16 w-full max-w-md">
+           <div className="flex justify-between items-center px-4 mb-2">
+              <span className="text-[10px] font-black text-blue-400 uppercase italic tracking-[0.2em]">CHUẨN BỊ...</span>
+              <span className="text-[10px] font-black text-white uppercase italic">BẮT ĐẦU TRONG {Math.ceil(roundIntroTimer)}s</span>
+           </div>
+           <div className="h-3 w-full bg-white/10 rounded-full overflow-hidden border border-white/5">
+              <div 
+                className="h-full bg-gradient-to-r from-blue-400 to-blue-600 transition-all duration-100 ease-linear shadow-[0_0_15px_rgba(59,130,246,0.5)]"
+                style={{ width: `${(roundIntroTimer / ROUND_INTRO_TIME) * 100}%` }}
+              />
+           </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="h-screen bg-slate-100 flex flex-col p-3 overflow-hidden relative text-left">
+    <div className="min-h-screen bg-slate-100 flex flex-col p-3 overflow-y-auto no-scrollbar relative text-left">
       <ConfirmModal isOpen={showHelpConfirm} title="Sử dụng Trợ giúp?" message="Bạn chỉ nhận được tối đa 60% số điểm nếu trả lời đúng!" onConfirm={() => { setIsHelpUsed(true); setShowHelpConfirm(false); }} onCancel={() => setShowHelpConfirm(false)} />
       
-      <header className="bg-white px-5 py-3 rounded-[2rem] shadow-md mb-3 flex items-center justify-between border-b-4 border-slate-200 relative z-50 shrink-0">
+      <header className="bg-white px-5 py-3 rounded-[2rem] shadow-md mb-4 flex items-center justify-between border-b-4 border-slate-200 relative z-50 shrink-0">
         <div className="flex items-center gap-3">
            <div className="bg-blue-600 text-white px-5 py-2 rounded-[1.5rem] shadow-sm border-b-4 border-blue-800 flex flex-col items-center">
               <div className="text-[8px] font-black uppercase italic opacity-80 leading-none mb-1">BẠN</div>
               <div className="text-xl font-black leading-none">{score}đ</div>
            </div>
-           {(gameState === 'WAITING_FOR_BUZZER' || gameState === 'ANSWERING') && currentProblem?.challenge !== DisplayChallenge.NORMAL && !isHelpUsed && (
+           {((gameState as any) === 'WAITING_FOR_BUZZER' || (gameState as any) === 'ANSWERING') && currentProblem?.challenge !== DisplayChallenge.NORMAL && !isHelpUsed && (
              <button onClick={() => setShowHelpConfirm(true)} className="px-4 py-2 bg-emerald-100 text-emerald-600 rounded-xl font-black uppercase italic text-[10px] border-b-2 border-emerald-200 hover:bg-emerald-500 hover:text-white transition-all">💡 Trợ giúp</button>
            )}
         </div>
@@ -233,31 +294,37 @@ const GameEngine: React.FC<GameEngineProps> = ({
         <button onClick={() => setShowExitConfirm(true)} className="w-10 h-10 bg-red-50 text-red-500 rounded-xl flex items-center justify-center font-black">✕</button>
       </header>
 
-      <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-4 min-h-0 overflow-hidden">
-        <div className="lg:col-span-7 h-full min-h-0">
-          {gameState === 'ROUND_INTRO' ? (
-            <div className="h-full bg-white rounded-[2.5rem] p-8 shadow-inner flex flex-col items-center justify-center text-center animate-in zoom-in">
-               <div className="text-7xl mb-6 animate-bounce">⚔️</div>
-               <h2 className="text-4xl font-black text-slate-800 uppercase italic mb-4">VÒNG {currentRound?.number}</h2>
-               <div className="bg-slate-50 p-6 rounded-[2rem] border-4 border-slate-100 max-w-xl">
-                 <p className="text-slate-600 font-bold text-lg italic uppercase tracking-widest leading-relaxed">
-                   {currentRound?.description || "Hãy sẵn sàng cho thử thách tiếp theo!"}
-                 </p>
-               </div>
-            </div>
-          ) : (
-            <ProblemCard problem={currentProblem} isPaused={isWhiteboardActive} isHelpUsed={isHelpUsed} />
-          )}
+      <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-4 pb-10">
+        <div className="lg:col-span-7 h-fit min-h-[400px]">
+          <div className="h-full">
+             <ProblemCard problem={currentProblem} isPaused={isWhiteboardActive} isHelpUsed={isHelpUsed} />
+          </div>
         </div>
 
-        <div className="lg:col-span-5 bg-white rounded-[2.5rem] p-6 shadow-xl flex flex-col h-full overflow-hidden relative min-h-0">
-          {gameState === 'ROUND_INTRO' ? (
-            <div className="h-full flex flex-col items-center justify-center text-center">
-               <div className="text-xl font-black text-blue-600 uppercase italic mb-4">ĐANG ĐỒNG BỘ...</div>
-               <div className="w-16 h-16 border-6 border-slate-100 border-t-blue-600 rounded-full animate-spin"></div>
+        <div className="lg:col-span-5 bg-white rounded-[2.5rem] p-6 shadow-xl flex flex-col h-fit relative min-h-[400px]">
+          {((gameState as any) === 'ANSWERING' || (isArenaA && (gameState as any) === 'ROUND_INTRO')) ? (
+            <div className="flex flex-col animate-in zoom-in w-full h-auto">
+               <div className="w-full h-auto">
+                  <AnswerInput 
+                    problem={currentProblem} 
+                    value={userAnswer} 
+                    onChange={setUserAnswer} 
+                    onSubmit={submitAnswer} 
+                    disabled={(gameState as any) === 'FEEDBACK'} 
+                  />
+               </div>
+               
+               <button 
+                onClick={submitAnswer} 
+                disabled={!userAnswer}
+                className={`w-full py-5 rounded-[1.5rem] font-black italic text-lg mt-6 shadow-lg transition-all active:scale-95 shrink-0 border-b-6 
+                  ${userAnswer ? 'bg-blue-600 text-white border-blue-800' : 'bg-slate-100 text-slate-300 border-slate-200 cursor-not-allowed'}`}
+               >
+                 XÁC NHẬN ĐÁP ÁN ✅
+               </button>
             </div>
-          ) : gameState === 'WAITING_FOR_BUZZER' ? (
-            <div className="h-full flex flex-col items-center justify-center text-center animate-in fade-in">
+          ) : (gameState as any) === 'WAITING_FOR_BUZZER' && !isArenaA ? (
+            <div className="min-h-[400px] flex flex-col items-center justify-center text-center animate-in fade-in">
                <div className="text-4xl mb-4 animate-bounce">🔔</div>
                <h3 className="text-2xl font-black text-slate-800 uppercase italic mb-8">NHẤN CHUÔNG GIÀNH QUYỀN</h3>
                <button 
@@ -274,45 +341,50 @@ const GameEngine: React.FC<GameEngineProps> = ({
                  <span className="text-white font-black text-3xl uppercase italic drop-shadow-lg">BẤM!</span>
                </button>
             </div>
-          ) : gameState === 'ANSWERING' && buzzerWinner === 'YOU' ? (
-            <div className="flex-1 flex flex-col overflow-hidden animate-in zoom-in min-h-0">
-               <div className="flex-1 overflow-y-auto no-scrollbar min-h-0">
-                  <AnswerInput problem={currentProblem} value={userAnswer} onChange={setUserAnswer} onSubmit={submitAnswer} disabled={false} />
-               </div>
-               <button onClick={submitAnswer} className="w-full py-5 bg-blue-600 text-white rounded-[1.5rem] font-black italic text-lg mt-3 shadow-lg border-b-6 border-blue-800 shrink-0">NỘP ĐÁP ÁN ✅</button>
-            </div>
-          ) : gameState === 'ANSWERING' && buzzerWinner === 'OPPONENT' ? (
-            <div className="h-full flex flex-col items-center justify-center text-center animate-in slide-in-from-right">
+          ) : (gameState as any) === 'ANSWERING' && buzzerWinner === 'OPPONENT' ? (
+            <div className="min-h-[400px] flex flex-col items-center justify-center text-center animate-in slide-in-from-right">
                <div className="w-20 h-20 border-[8px] border-slate-100 border-t-red-600 rounded-full animate-spin mb-6"></div>
                <div className="bg-slate-900 text-white p-8 rounded-[2rem] border-b-[8px] border-slate-950">
                   <h3 className="text-xl font-black uppercase italic mb-2 text-red-400">ĐỐI THỦ ĐÃ GIÀNH QUYỀN!</h3>
                   <p className="font-bold text-slate-400 italic text-sm">Vui lòng đợi kết quả...</p>
                </div>
             </div>
-          ) : gameState === 'FEEDBACK' ? (
-             <div className="h-full flex flex-col animate-in zoom-in overflow-hidden min-h-0">
+          ) : (gameState as any) === 'FEEDBACK' ? (
+             <div className="flex flex-col animate-in zoom-in w-full h-auto">
                 <div className={`text-2xl font-black uppercase italic mb-3 ${feedback?.isCorrect ? 'text-emerald-500' : 'text-blue-500'}`}>
                   {feedback?.isCorrect ? 'CHÍNH XÁC!' : 'SAI RỒI!'}
                 </div>
-                <div className="flex-1 overflow-y-auto no-scrollbar space-y-4 min-h-0">
+                <div className="space-y-4 w-full h-auto">
                    <div className="bg-slate-50 p-5 rounded-2xl border-2 border-slate-100 italic font-bold text-slate-700">
                       <LatexRenderer content={feedback?.text || ""} />
                    </div>
                    <div className="bg-emerald-50/50 p-6 rounded-[1.5rem] border-2 border-emerald-100">
                       <h4 className="text-emerald-600 font-black uppercase text-[10px] mb-2">📖 GIẢI CHI TIẾT</h4>
-                      <div className="text-slate-600 text-sm italic leading-relaxed">
+                      <div className="text-slate-600 text-sm md:text-base italic leading-relaxed">
                          <LatexRenderer content={currentProblem?.explanation || ""} />
                       </div>
                    </div>
                 </div>
-                <div className="mt-3 flex items-center justify-between bg-slate-900 p-3 rounded-xl text-white shrink-0">
-                   <span className="font-black italic uppercase text-[8px] opacity-60">KẾ TIẾP SAU:</span>
-                   <span className="text-xl font-black text-yellow-400 italic">{feedbackTimer}s</span>
+                {/* Thanh Timeline tiến trình */}
+                <div className="mt-8 flex flex-col gap-2">
+                   <div className="flex justify-between items-center px-2">
+                      <span className="font-black italic uppercase text-[10px] text-slate-400">ĐANG ĐỌC ĐÁP ÁN...</span>
+                      <span className="text-[10px] font-black text-blue-500 italic">NEXT CÂU KẾ</span>
+                   </div>
+                   <div className="h-4 w-full bg-slate-100 rounded-full overflow-hidden border-2 border-slate-50 shadow-inner">
+                      <div 
+                        className="h-full bg-gradient-to-r from-blue-500 to-indigo-600 transition-all duration-100 ease-linear shadow-[0_0_10px_rgba(59,130,246,0.3)]"
+                        style={{ width: `${(feedbackTimer / FEEDBACK_TIME) * 100}%` }}
+                      />
+                   </div>
                 </div>
              </div>
           ) : (
-            <div className="h-full flex flex-col items-center justify-center opacity-5">
-               <div className="text-8xl">⏳</div>
+            <div className="min-h-[400px] flex flex-col items-center justify-center animate-pulse">
+               <div className="text-xl font-black text-blue-600 uppercase italic mb-4">CHUẨN BỊ CHIẾN ĐẤU...</div>
+               <div className="flex gap-2">
+                 {[1,2,3,4].map(i => <div key={i} className="w-3 h-3 bg-blue-600 rounded-full animate-bounce" style={{ animationDelay: `${i*0.2}s` }} />)}
+               </div>
             </div>
           )}
         </div>
