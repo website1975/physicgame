@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { GameState, Teacher, QuestionType, Round } from '../types';
+import { GameState, Teacher, QuestionType, Round, MatchData } from '../types';
 import { getRoomAssignments, fetchSetData, supabase, fetchTeacherByMaGV } from '../services/supabaseService';
 import KeywordSelector from './KeywordSelector';
 
@@ -10,7 +10,7 @@ interface StudentArenaFlowProps {
   playerName: string;
   studentGrade: string;
   currentTeacher: Teacher;
-  onStartMatch: (data: any) => void;
+  onStartMatch: (data: MatchData) => void;
   joinedRoom: any;
   setJoinedRoom: (room: any) => void;
   availableSets: any[];
@@ -51,7 +51,6 @@ const StudentArenaFlow: React.FC<StudentArenaFlowProps> = ({
   const matchStartedRef = useRef(false);
   const shortId = uniqueId.slice(-3).toUpperCase();
 
-  // Theo dõi sĩ số toàn bộ các phòng Arena của giáo viên này để hiển thị UI
   useEffect(() => {
     if (gameState === 'ROOM_SELECTION') {
       const channels = ARENA_ROOMS.map(room => {
@@ -89,7 +88,6 @@ const StudentArenaFlow: React.FC<StudentArenaFlowProps> = ({
       return;
     }
 
-    // Kiểm tra nhanh sĩ số qua cache trước khi nhấn (Optional nhưng tốt cho UX)
     if (roomOccupancy[room.code] >= room.capacity) {
       setError(`Phòng ${room.name} đã đầy (${roomOccupancy[room.code]}/${room.capacity}). Vui lòng chọn phòng khác!`);
       return;
@@ -181,14 +179,12 @@ const StudentArenaFlow: React.FC<StudentArenaFlowProps> = ({
       channel
         .on('presence', { event: 'sync' }, () => {
           const state = channel.presenceState();
-          const playersKeys = Object.keys(state).sort(); // Sắp xếp để xác định thứ tự vào phòng
+          const playersKeys = Object.keys(state).sort(); 
           
-          // logic KIỂM TRA OVERFLOW (Người thừa)
           if (!isTeacherRoom) {
              const myIndex = playersKeys.indexOf(myPresenceKey);
-             // Nếu mình không nằm trong danh sách được phép (theo capacity)
              if (myIndex >= requiredCapacity) {
-                setError(`Rất tiếc! Phòng đã vừa đủ người. Hãy chọn phòng khác nhé!`);
+                setError(`Phòng đã vừa đủ người. Hãy chọn phòng khác nhé!`);
                 setJoinedRoom(null);
                 setGameState('ROOM_SELECTION');
                 supabase.removeChannel(channel);
@@ -203,7 +199,8 @@ const StudentArenaFlow: React.FC<StudentArenaFlowProps> = ({
               return {
                 name: parts[0],
                 shortId: parts[1]?.slice(-3).toUpperCase() || '???',
-                fullKey: k
+                fullKey: k,
+                id: parts[1]
               };
             });
           
@@ -213,43 +210,56 @@ const StudentArenaFlow: React.FC<StudentArenaFlowProps> = ({
             const isMaster = playersKeys[0] === myPresenceKey;
             
             if (isMaster && availableSets.length > 0) {
-              const randomIndex = Math.floor(Math.random() * availableSets.length);
-              const selectedSet = availableSets[randomIndex];
-              
-              channel.send({
-                type: 'broadcast',
-                event: 'match_start_signal',
-                payload: {
-                  setId: selectedSet.id,
-                  masterName: playerName,
-                  masterId: uniqueId,
-                  joinedRoom: joinedRoom,
-                  rounds: selectedSet.rounds,
-                  title: selectedSet.title
-                }
-              });
+              // Master waits 800ms to ensure all other clients are fully subscribed to broadcast
+              setTimeout(() => {
+                const randomIndex = Math.floor(Math.random() * availableSets.length);
+                const selectedSet = availableSets[randomIndex];
+                
+                // Collect other players as opponents
+                const opponents = playerInfos
+                  .filter(p => p.fullKey !== myPresenceKey)
+                  .map(p => ({ id: p.id, name: p.name }));
 
-              matchStartedRef.current = true;
-              onStartMatch({
-                setId: selectedSet.id,
-                title: selectedSet.title,
-                rounds: selectedSet.rounds,
-                opponentName: playerInfos.filter(n => n.fullKey !== myPresenceKey).map(p => `${p.name} #${p.shortId}`).join(", "),
-                joinedRoom: joinedRoom,
-                myId: uniqueId
-              });
+                channel.send({
+                  type: 'broadcast',
+                  event: 'match_start_signal',
+                  payload: {
+                    setId: selectedSet.id,
+                    masterName: playerName,
+                    masterId: uniqueId,
+                    joinedRoom: joinedRoom,
+                    rounds: selectedSet.rounds,
+                    title: selectedSet.title,
+                    allPlayers: playerInfos.map(p => ({ id: p.id, name: p.name }))
+                  }
+                });
+
+                matchStartedRef.current = true;
+                onStartMatch({
+                  setId: selectedSet.id,
+                  title: selectedSet.title,
+                  rounds: selectedSet.rounds,
+                  opponents: opponents,
+                  joinedRoom: joinedRoom,
+                  myId: uniqueId
+                });
+              }, 800);
             }
           }
         })
         .on('broadcast', { event: 'match_start_signal' }, ({ payload }) => {
           if (isTeacherRoom || matchStartedRef.current) return;
           
+          const opponents = (payload.allPlayers || [])
+            .filter((p: any) => p.id !== uniqueId)
+            .map((p: any) => ({ id: p.id, name: p.name }));
+
           matchStartedRef.current = true;
           onStartMatch({ 
             setId: payload.setId, 
             title: payload.title, 
             rounds: payload.rounds, 
-            opponentName: `${payload.masterName} #${payload.masterId.slice(-3).toUpperCase()}`, 
+            opponents: opponents,
             joinedRoom: payload.joinedRoom,
             myId: uniqueId
           });
@@ -262,7 +272,7 @@ const StudentArenaFlow: React.FC<StudentArenaFlowProps> = ({
             title: payload.title, 
             rounds: payload.rounds, 
             joinedRoom: joinedRoom, 
-            opponentName: "Cả lớp",
+            opponents: [{ id: 'class', name: 'Cả lớp' }],
             startIndex: payload.currentQuestionIndex || 0,
             myId: uniqueId
           });
@@ -320,7 +330,6 @@ const StudentArenaFlow: React.FC<StudentArenaFlowProps> = ({
                 disabled={isLoading} 
                 className={`bg-white p-8 rounded-[4rem] flex flex-col items-center gap-6 hover:scale-105 transition-all shadow-2xl group relative ${isLoading ? 'opacity-50 cursor-not-allowed' : ''} ${isFull ? 'grayscale-[0.5] opacity-80' : ''}`}
               >
-                {/* Badge sĩ số */}
                 {room.code !== 'TEACHER_ROOM' && (
                   <div className={`absolute top-6 right-6 px-3 py-1 rounded-full font-black text-[10px] shadow-sm border-2 ${isFull ? 'bg-red-500 text-white border-red-400' : 'bg-emerald-500 text-white border-emerald-400'}`}>
                     {currentCount}/{room.capacity}
