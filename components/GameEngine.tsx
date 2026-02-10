@@ -49,7 +49,7 @@ const GameEngine: React.FC<GameEngineProps> = ({
   const [buzzerWinner, setBuzzerWinner] = useState<'YOU' | 'OPPONENT' | null>(null);
   const [countdown, setCountdown] = useState<number | null>(null);
   const [showExitConfirm, setShowExitConfirm] = useState(false);
-  const [showHelpConfirm, setShowHelpConfirm] = useState(false); // Modal xác nhận trợ giúp
+  const [showHelpConfirm, setShowHelpConfirm] = useState(false); 
   const [isMaster, setIsMaster] = useState(false);
   const [isPresenceSynced, setIsPresenceSynced] = useState(false);
   const [isHelpUsed, setIsHelpUsed] = useState(false); 
@@ -98,7 +98,7 @@ const GameEngine: React.FC<GameEngineProps> = ({
     }
 
     setTimeout(() => { isTransitioning.current = false; }, 1000);
-  }, [rounds]);
+  }, [rounds, setGameState]);
 
   const startProblem = useCallback(() => {
     setUserAnswer('');
@@ -187,7 +187,7 @@ const GameEngine: React.FC<GameEngineProps> = ({
       channelRef.current = channel;
       return () => { supabase.removeChannel(channel); };
     }
-  }, [isArenaA, isTeacherRoom, matchData.joinedRoom, playerName, myUniqueId, handleNext, startProblem]);
+  }, [isArenaA, isTeacherRoom, matchData.joinedRoom, playerName, myUniqueId, handleNext, startProblem, currentTeacher.id, buzzerWinner]);
 
   useEffect(() => {
     if (isTeacherRoom) {
@@ -285,7 +285,7 @@ const GameEngine: React.FC<GameEngineProps> = ({
 
   const handleUseHelp = () => {
     if (isHelpUsed || (gameState !== 'ANSWERING' && gameState !== 'WAITING_FOR_BUZZER')) return;
-    setShowHelpConfirm(true); // Hiển thị Modal xác nhận thay vì window.confirm
+    setShowHelpConfirm(true); 
   };
 
   const confirmUseHelp = () => {
@@ -324,9 +324,47 @@ const GameEngine: React.FC<GameEngineProps> = ({
 
   const hasChallenge = currentProblem?.challenge !== DisplayChallenge.NORMAL;
 
+  if (gameState === 'GAME_OVER') {
+    const allPlayers = [
+      { name: 'BẠN', score: score, isMe: true },
+      ...Object.values(opponentScores).map(o => ({ name: o.name, score: o.score, isMe: false }))
+    ].sort((a, b) => b.score - a.score);
+
+    return (
+      <div className="min-h-screen bg-slate-950 flex items-center justify-center p-6">
+        <div className="bg-white rounded-[4rem] p-12 shadow-2xl max-w-2xl w-full text-center border-b-[12px] border-blue-600 animate-in zoom-in duration-500">
+          <div className="text-8xl mb-8">🏆</div>
+          <h2 className="text-4xl font-black text-slate-800 uppercase italic mb-2 tracking-tighter">TRẬN ĐẤU KẾT THÚC</h2>
+          <p className="text-slate-400 font-bold uppercase text-[10px] mb-12 tracking-[0.2em]">Cảm ơn chiến binh {playerName} đã tham gia!</p>
+          
+          <div className="bg-slate-50 p-8 rounded-[3rem] border-4 border-slate-100 mb-12">
+             <div className="text-[11px] font-black text-slate-400 uppercase italic tracking-widest mb-6">BẢNG XẾP HẠNG CHUNG CUỘC</div>
+             <div className="space-y-4">
+                {allPlayers.map((p, i) => (
+                   <div key={i} className={`flex items-center justify-between p-5 rounded-2xl border-2 ${p.isMe ? 'bg-blue-600 border-blue-400 text-white shadow-lg' : 'bg-white border-slate-100 text-slate-700'}`}>
+                      <div className="flex items-center gap-4">
+                         <span className="w-8 h-8 rounded-full bg-slate-900 text-white flex items-center justify-center text-[10px] font-black italic">{i + 1}</span>
+                         <span className="font-black uppercase italic tracking-tighter truncate max-w-[150px]">{p.name}</span>
+                      </div>
+                      <div className="text-2xl font-black italic">{p.score}đ</div>
+                   </div>
+                ))}
+             </div>
+          </div>
+
+          <button 
+            onClick={onExit} 
+            className="w-full py-6 bg-slate-900 text-white rounded-3xl font-black uppercase italic text-xl shadow-xl hover:scale-105 active:scale-95 transition-all border-b-8 border-slate-950"
+          >
+            RỜI ARENA 🚪
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-slate-100 flex flex-col p-4 overflow-hidden relative">
-      {/* Modal Xác nhận Trợ giúp Tùy chỉnh */}
       <ConfirmModal 
         isOpen={showHelpConfirm} 
         title="Dùng trợ giúp?" 
@@ -347,28 +385,27 @@ const GameEngine: React.FC<GameEngineProps> = ({
       )}
 
       {/* Header */}
-      <header className="bg-white px-8 py-4 rounded-[2.5rem] shadow-lg mb-4 shrink-0 flex items-center gap-4 relative z-50">
+      <header className="bg-white px-6 md:px-8 py-4 rounded-[2.5rem] shadow-lg mb-4 shrink-0 flex items-center gap-4 relative z-50 overflow-x-auto no-scrollbar">
         <div className="flex items-center gap-3 shrink-0">
-           <div className="bg-blue-600 text-white px-6 py-2.5 rounded-[1.8rem] shadow-md border-b-4 border-blue-800 flex flex-col items-center min-w-[120px]">
-              <div className="text-[9px] font-black uppercase tracking-tighter italic opacity-80 leading-none mb-1">BẠN</div>
-              <div className="text-2xl font-black leading-none">{score}đ</div>
+           <div className="bg-blue-600 text-white px-5 md:px-7 py-2.5 rounded-[1.8rem] shadow-md border-b-4 border-blue-800 flex flex-col items-center min-w-[110px] md:min-w-[140px]">
+              <div className="text-[10px] font-black uppercase tracking-tighter italic opacity-80 leading-none mb-1">BẠN</div>
+              <div className="text-xl md:text-2xl font-black leading-none">{score}đ</div>
            </div>
         </div>
 
         {!isArenaA && !isTeacherRoom && (
-           <div className="flex items-center gap-3 border-l-2 border-slate-100 pl-4 shrink-0 overflow-x-auto no-scrollbar max-w-[200px] md:max-w-none">
-              {(Object.entries(opponentScores) as [string, OpponentData][]).length > 0 ? (
-                 (Object.entries(opponentScores) as [string, OpponentData][]).map(([id, data], index) => (
-                    <div key={id} className="bg-slate-900 text-white px-5 py-2.5 rounded-[1.8rem] shadow-md border-b-4 border-slate-800 flex flex-col items-center min-w-[110px] animate-in slide-in-from-left">
-                       <div className="text-[8px] font-black uppercase tracking-tighter italic opacity-60 leading-none mb-1">ĐỐI THỦ {index + 1}</div>
-                       <div className="text-xl font-black leading-none">{data.score}đ</div>
-                       <div className="text-[7px] font-bold opacity-30 mt-1 uppercase truncate max-w-[80px]">{data.name}</div>
-                    </div>
-                 ))
-              ) : (
-                <div className="bg-slate-100 text-slate-300 px-5 py-2.5 rounded-[1.8rem] border-2 border-dashed border-slate-200 flex flex-col items-center min-w-[110px]">
+           <div className="flex items-center gap-3 border-l-2 border-slate-100 pl-4 shrink-0">
+              {(Object.entries(opponentScores) as [string, OpponentData][]).map(([id, data]) => (
+                 <div key={id} className="bg-slate-900 text-white px-5 py-2.5 rounded-[1.8rem] shadow-md border-b-4 border-slate-800 flex flex-col items-center min-w-[110px] md:min-w-[130px] animate-in slide-in-from-left">
+                    <div className="text-[9px] font-black uppercase tracking-tighter italic opacity-80 leading-none mb-1 truncate max-w-[90px]">{data.name}</div>
+                    <div className="text-xl font-black leading-none">{data.score}đ</div>
+                    <div className="text-[7px] font-bold opacity-30 mt-1 uppercase tracking-widest italic">#{data.shortId}</div>
+                 </div>
+              ))}
+              {(Object.entries(opponentScores) as [string, OpponentData][]).length === 0 && (
+                <div className="bg-slate-50 text-slate-300 px-5 py-2.5 rounded-[1.8rem] border-2 border-dashed border-slate-200 flex flex-col items-center min-w-[110px]">
                    <div className="text-[8px] font-black uppercase leading-none mb-1">ĐỐI THỦ</div>
-                   <div className="text-xl font-black leading-none">0đ</div>
+                   <div className="text-xl font-black leading-none">...</div>
                 </div>
               )}
            </div>
@@ -377,7 +414,6 @@ const GameEngine: React.FC<GameEngineProps> = ({
         <div className="flex-1"></div>
 
         <div className="flex items-center gap-4 shrink-0">
-           {/* Nút trợ giúp được tăng cường khả năng phản hồi */}
            {hasChallenge && (gameState === 'ANSWERING' || gameState === 'WAITING_FOR_BUZZER') && (
              <button 
               onClick={handleUseHelp}
