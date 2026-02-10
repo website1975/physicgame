@@ -46,7 +46,6 @@ const MultiPlayerArenaManager: React.FC<MultiPlayerArenaManagerProps> = ({
         const capacity = joinedRoom.capacity || 2;
         const isMaster = keys[0] === myPresenceKey;
 
-        // CHỈ MASTER MỚI ĐIỀU PHỐI KHỞI TẠO
         if (playerInfos.length >= capacity && !matchStartedRef.current && isMaster && !heartbeatIntervalRef.current) {
           try {
             const assignments = await getRoomAssignments(currentTeacher.id, joinedRoom.code);
@@ -60,8 +59,8 @@ const MultiPlayerArenaManager: React.FC<MultiPlayerArenaManagerProps> = ({
               const selectedSet = validSets[Math.floor(Math.random() * validSets.length)];
               const allPlayersPayload = playerInfos.map(p => ({ id: p.id, name: p.name }));
               
-              // Tăng buffer lên 3 giây để đảm bảo sync mạng
-              const syncStartTime = Date.now() + 3000;
+              // Tạo mốc thời gian bắt đầu tuyệt đối (sau 4 giây để chắc chắn cả 2 đều nhận được)
+              const syncStartTime = Date.now() + 4000;
 
               const sendSignal = () => {
                 if (matchStartedRef.current) return;
@@ -81,7 +80,6 @@ const MultiPlayerArenaManager: React.FC<MultiPlayerArenaManagerProps> = ({
               sendSignal();
               heartbeatIntervalRef.current = setInterval(sendSignal, 500);
 
-              // Tự đợi đến giờ mới kích hoạt local
               const checkStart = setInterval(() => {
                 if (Date.now() >= syncStartTime) {
                   clearInterval(checkStart);
@@ -91,10 +89,10 @@ const MultiPlayerArenaManager: React.FC<MultiPlayerArenaManagerProps> = ({
                   const opponents = allPlayersPayload.filter(p => p.id !== uniqueId);
                   onStartMatch({ 
                     setId: selectedSet.id, title: selectedSet.title, rounds: selectedSet.rounds, 
-                    opponents, joinedRoom, myId: uniqueId 
+                    opponents, joinedRoom, myId: uniqueId, startIndex: 0 
                   });
                 }
-              }, 100);
+              }, 50);
             }
           } catch (e) {
             console.error("Lỗi Master khởi tạo:", e);
@@ -104,20 +102,20 @@ const MultiPlayerArenaManager: React.FC<MultiPlayerArenaManagerProps> = ({
       .on('broadcast', { event: 'match_start_signal' }, ({ payload }) => {
         if (matchStartedRef.current) return;
         
-        const delay = payload.startTime - Date.now();
-        
-        // Nếu tín hiệu đến quá trễ (quá mốc bắt đầu), bắt đầu ngay lập tức
-        // Nếu còn thời gian, đợi đến đúng milli-giây đó
         matchStartedRef.current = true;
         if (heartbeatIntervalRef.current) clearInterval(heartbeatIntervalRef.current);
         const opponents = (payload.allPlayers || []).filter((p: any) => p.id !== uniqueId).map((p: any) => ({ id: p.id, name: p.name }));
         
-        setTimeout(() => {
-          onStartMatch({ 
-            setId: payload.setId, title: payload.title, rounds: payload.rounds, 
-            opponents, joinedRoom, myId: uniqueId 
-          });
-        }, Math.max(0, delay));
+        // Đợi đến đúng thời điểm startTime mà Master quy định
+        const checkStart = setInterval(() => {
+          if (Date.now() >= payload.startTime) {
+            clearInterval(checkStart);
+            onStartMatch({ 
+              setId: payload.setId, title: payload.title, rounds: payload.rounds, 
+              opponents, joinedRoom, myId: uniqueId, startIndex: 0
+            });
+          }
+        }, 50);
       })
       .subscribe(async (status) => {
         if (status === 'SUBSCRIBED') {
@@ -148,11 +146,13 @@ const MultiPlayerArenaManager: React.FC<MultiPlayerArenaManagerProps> = ({
                    </div>
                  ))}
               </div>
-              <div className="flex items-center gap-4 bg-white/5 px-8 py-4 rounded-full border border-white/10">
-                 <div className="w-5 h-5 border-3 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
-                 <span className="font-black italic uppercase text-lg text-white tracking-widest">
-                   {presentPlayers.length >= (joinedRoom.capacity || 2) ? 'KÍCH HOẠT TRẬN ĐẤU...' : 'ĐANG ĐỢI ĐỐI THỦ...'}
-                 </span>
+              <div className="flex flex-col items-center gap-4">
+                 <div className="flex items-center gap-4 bg-white/5 px-8 py-4 rounded-full border border-white/10">
+                    <div className="w-5 h-5 border-3 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+                    <span className="font-black italic uppercase text-lg text-white tracking-widest">
+                      {presentPlayers.length >= (joinedRoom.capacity || 2) ? 'ĐANG ĐỒNG BỘ...' : 'ĐANG ĐỢI ĐỐI THỦ...'}
+                    </span>
+                 </div>
               </div>
            </div>
            <button onClick={() => { setJoinedRoom(null); setGameState('ROOM_SELECTION'); }} className="mt-10 px-12 py-5 bg-slate-100 text-slate-400 rounded-3xl font-black uppercase text-xs italic">Hủy</button>
