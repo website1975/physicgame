@@ -7,6 +7,7 @@ interface ProblemCardProps {
   problem: PhysicsProblem;
   isPaused?: boolean;
   isHelpUsed?: boolean; 
+  hideOptions?: boolean;
 }
 
 interface MovingObject {
@@ -20,12 +21,11 @@ interface MovingObject {
   size: number;
 }
 
-const ProblemCard: React.FC<ProblemCardProps> = ({ problem, isPaused, isHelpUsed }) => {
+const ProblemCard: React.FC<ProblemCardProps> = ({ problem, isPaused, isHelpUsed, hideOptions }) => {
   const [elapsed, setElapsed] = useState(0);
   const [isImgLoading, setIsImgLoading] = useState(true);
   const [imgLoadError, setImgLoadError] = useState(false);
   
-  // State cho các đối tượng di động
   const [movingAnts, setMovingAnts] = useState<MovingObject[]>([]);
   const [movingDistractors, setMovingDistractors] = useState<MovingObject[]>([]);
   
@@ -33,7 +33,6 @@ const ProblemCard: React.FC<ProblemCardProps> = ({ problem, isPaused, isHelpUsed
   const FOGGY_DURATION = 30;
   const FLOOD_DURATION = 25;
 
-  // Khởi tạo các đối tượng khi bắt đầu câu hỏi mới
   useEffect(() => {
     setElapsed(0);
     setIsImgLoading(true);
@@ -76,21 +75,17 @@ const ProblemCard: React.FC<ProblemCardProps> = ({ problem, isPaused, isHelpUsed
     }
   }, [problem.id, problem.challenge, isHelpUsed]);
 
-  // Vòng lặp animation xử lý chuyển động Brown
   useEffect(() => {
     if (isPaused) return;
 
     const interval = window.setInterval(() => {
       setElapsed(prev => prev + 0.1);
 
-      // Cập nhật kiến
       if (problem.challenge === DisplayChallenge.ANTS && !isHelpUsed) {
         setMovingAnts(current => current.map(ant => {
-          // Lực đẩy ngẫu nhiên (Brownian factor)
           let nvx = ant.vx + (Math.random() - 0.5) * 0.4;
           let nvy = ant.vy + (Math.random() - 0.5) * 0.4;
 
-          // Giới hạn tốc độ tối đa
           const speed = Math.sqrt(nvx * nvx + nvy * nvy);
           const maxSpeed = 2.5;
           if (speed > maxSpeed) {
@@ -98,22 +93,18 @@ const ProblemCard: React.FC<ProblemCardProps> = ({ problem, isPaused, isHelpUsed
             nvy = (nvy / speed) * maxSpeed;
           }
 
-          // Cập nhật vị trí
           let nx = ant.x + nvx;
           let ny = ant.y + nvy;
 
-          // Phản xạ biên (Bounce)
           if (nx < 5 || nx > 95) nvx *= -1;
           if (ny < 5 || ny > 95) nvy *= -1;
 
-          // Tính góc xoay dựa trên vector vận tốc (để kiến hướng đầu về phía trước)
           const angle = Math.atan2(nvy, nvx) * (180 / Math.PI) + 90;
 
           return { ...ant, x: nx, y: ny, vx: nvx, vy: nvy, angle };
         }));
       }
 
-      // Cập nhật vật thể nhiễu (Bay chậm và hỗn loạn hơn)
       if (problem.challenge === DisplayChallenge.DISTRACTORS && !isHelpUsed) {
         setMovingDistractors(current => current.map(d => {
           let nvx = d.vx + (Math.random() - 0.5) * 0.2;
@@ -136,7 +127,7 @@ const ProblemCard: React.FC<ProblemCardProps> = ({ problem, isPaused, isHelpUsed
         }));
       }
 
-    }, 50); // 20 FPS cho chuyển động mượt mà mà vẫn đảm bảo hiệu năng
+    }, 50);
 
     return () => clearInterval(interval);
   }, [isPaused, problem.challenge, isHelpUsed]);
@@ -172,7 +163,6 @@ const ProblemCard: React.FC<ProblemCardProps> = ({ problem, isPaused, isHelpUsed
 
   return (
     <div className="bg-white rounded-[2rem] md:rounded-[3rem] p-4 md:p-6 shadow-xl border-4 md:border-8 border-slate-50 relative overflow-hidden h-full flex flex-col animate-in fade-in duration-700">
-      {/* Background decoration */}
       <div className="absolute inset-0 opacity-[0.03] pointer-events-none overflow-hidden flex flex-wrap gap-x-8 gap-y-6 p-4 text-2xl md:text-3xl font-black italic select-none leading-relaxed">
         {Array.from({length: 12}).map((_, i) => (
           <span key={i} className="whitespace-nowrap">
@@ -200,7 +190,6 @@ const ProblemCard: React.FC<ProblemCardProps> = ({ problem, isPaused, isHelpUsed
         </h2>
         
         <div className="relative flex-1 min-h-0 flex flex-col gap-4">
-          {/* Progress Bar cho Memory hoặc Flooding */}
           {(problem.challenge === DisplayChallenge.MEMORY || problem.challenge === DisplayChallenge.FLOODING) && !isPaused && !isHelpUsed && (
             <div className="absolute -top-3 left-0 right-0 h-1.5 bg-slate-100 rounded-full overflow-hidden z-20">
               <div 
@@ -212,14 +201,12 @@ const ProblemCard: React.FC<ProblemCardProps> = ({ problem, isPaused, isHelpUsed
 
           <div className="bg-slate-50 p-4 md:p-6 rounded-[1.5rem] md:rounded-[2.5rem] border-2 md:border-4 border-slate-100 shadow-inner relative overflow-hidden flex-1 flex flex-col items-start justify-center backdrop-blur-sm gap-4">
             
-            {/* Thử thách: Nước dâng (Sóng sánh động) */}
             {problem.challenge === DisplayChallenge.FLOODING && !isHelpUsed && (
               <div 
                 className="absolute bottom-0 left-0 right-0 bg-blue-500/40 backdrop-blur-[2px] transition-all duration-300 z-30 pointer-events-none overflow-hidden"
                 style={{ height: `${Math.min(100, (elapsed / FLOOD_DURATION) * 100)}%` }}
               >
                  <div className="absolute top-0 left-0 right-0 h-8 bg-gradient-to-b from-white/30 to-transparent animate-pulse"></div>
-                 {/* Thêm hiệu ứng bọt nước nhẹ */}
                  <div className="absolute inset-0 opacity-20">
                     {Array.from({length: 10}).map((_, i) => (
                       <div key={i} className="absolute bg-white rounded-full animate-bounce" style={{
@@ -233,7 +220,6 @@ const ProblemCard: React.FC<ProblemCardProps> = ({ problem, isPaused, isHelpUsed
               </div>
             )}
 
-            {/* Thử thách: Kiến bò (Chuyển động Brown) */}
             {movingAnts.map(ant => (
               <div 
                 key={ant.id} 
@@ -247,7 +233,6 @@ const ProblemCard: React.FC<ProblemCardProps> = ({ problem, isPaused, isHelpUsed
               >🐜</div>
             ))}
 
-            {/* Thử thách: Vật thể nhiễu (Bay hỗn loạn) */}
             {movingDistractors.map(d => (
               <div 
                 key={d.id} 
@@ -296,6 +281,14 @@ const ProblemCard: React.FC<ProblemCardProps> = ({ problem, isPaused, isHelpUsed
               <div className="absolute inset-0 flex flex-col items-center justify-center text-slate-300 animate-in fade-in zoom-in duration-500 bg-slate-50/80">
                 <div className="text-6xl md:text-8xl mb-3 opacity-20">🧠</div>
                 <span className="font-black uppercase tracking-widest text-[8px] md:text-[10px] bg-slate-200 text-slate-500 px-4 py-1.5 rounded-full">Ghi nhớ nhanh</span>
+              </div>
+            )}
+
+            {hideOptions && (
+              <div className="absolute inset-0 z-[100] bg-slate-50/10 backdrop-blur-[1px] flex items-center justify-center">
+                <div className="bg-white/90 border-2 border-slate-100 px-6 py-3 rounded-full shadow-lg font-black text-[10px] uppercase italic text-slate-400 animate-pulse">
+                   Hệ thống đang nạp dữ liệu câu hỏi...
+                </div>
               </div>
             )}
           </div>
