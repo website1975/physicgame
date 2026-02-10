@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { GameState, Teacher, Round, QuestionType, DisplayChallenge } from '../types';
+import { GameState, Teacher, Round, QuestionType, DisplayChallenge, MatchData } from '../types';
 import ProblemCard from './ProblemCard';
 import AnswerInput from './AnswerInput';
 import Whiteboard from './Whiteboard';
@@ -10,22 +10,14 @@ import { supabase } from '../services/supabaseService';
 
 const DEFAULT_TIME = 40;
 const FEEDBACK_TIME = 15;
-const ROUND_INTRO_TIME = 5;
+const ROUND_INTRO_TIME = 8; // Tăng thêm thời gian để mọi người cùng ổn định ở màn hình intro
 
 interface GameEngineProps {
   gameState: GameState;
   setGameState: (s: GameState) => void;
   playerName: string;
   currentTeacher: Teacher;
-  matchData: { 
-    setId: string, 
-    title: string, 
-    rounds: Round[], 
-    opponentName?: string, 
-    joinedRoom?: any,
-    startIndex?: number,
-    myId?: string
-  };
+  matchData: MatchData;
   onExit: () => void;
 }
 
@@ -41,19 +33,31 @@ const GameEngine: React.FC<GameEngineProps> = ({
   const [currentRoundIdx, setCurrentRoundIdx] = useState(0);
   const [currentProblemIdx, setCurrentProblemIdx] = useState(matchData.startIndex || 0); 
   const [score, setScore] = useState(0);
-  const [opponentScores, setOpponentScores] = useState<Record<string, OpponentData>>({});
+  
+  const [opponentScores, setOpponentScores] = useState<Record<string, OpponentData>>(() => {
+    const initial: Record<string, OpponentData> = {};
+    if (matchData.opponents) {
+      matchData.opponents.forEach(p => {
+        initial[p.id] = { 
+          name: p.name, 
+          shortId: p.id.slice(-3).toUpperCase(), 
+          score: 0 
+        };
+      });
+    }
+    return initial;
+  });
+
   const [timeLeft, setTimeLeft] = useState(DEFAULT_TIME);
   const [feedbackTimer, setFeedbackTimer] = useState(FEEDBACK_TIME);
   const [userAnswer, setUserAnswer] = useState('');
   const [feedback, setFeedback] = useState<any>(null);
   const [buzzerWinner, setBuzzerWinner] = useState<'YOU' | 'OPPONENT' | null>(null);
-  const [countdown, setCountdown] = useState<number | null>(null);
   const [showExitConfirm, setShowExitConfirm] = useState(false);
   const [showHelpConfirm, setShowHelpConfirm] = useState(false); 
   const [isMaster, setIsMaster] = useState(false);
   const [isPresenceSynced, setIsPresenceSynced] = useState(false);
   const [isHelpUsed, setIsHelpUsed] = useState(false); 
-  
   const [isWhiteboardActive, setIsWhiteboardActive] = useState(false);
   
   const roomCode = matchData.joinedRoom?.code || '';
@@ -65,7 +69,6 @@ const GameEngine: React.FC<GameEngineProps> = ({
 
   const channelRef = useRef<any>(null);
   const controlChannelRef = useRef<any>(null);
-  const presenceKey = useRef(myPresenceKey);
   
   const currentProblemIdxRef = useRef(currentProblemIdx);
   const currentRoundIdxRef = useRef(currentRoundIdx);
@@ -82,10 +85,8 @@ const GameEngine: React.FC<GameEngineProps> = ({
   const handleNext = useCallback(() => {
     if (isTransitioning.current) return;
     isTransitioning.current = true;
-
     const nextProb = currentProblemIdxRef.current + 1;
     const currentRound = rounds[currentRoundIdxRef.current];
-
     if (nextProb < (currentRound?.problems.length || 0)) {
       setCurrentProblemIdx(nextProb);
       startProblem();
@@ -93,32 +94,21 @@ const GameEngine: React.FC<GameEngineProps> = ({
       setCurrentRoundIdx(prev => prev + 1);
       setCurrentProblemIdx(0);
       setGameState('ROUND_INTRO');
-    } else {
-      setGameState('GAME_OVER');
-    }
-
+    } else { setGameState('GAME_OVER'); }
     setTimeout(() => { isTransitioning.current = false; }, 1000);
   }, [rounds, setGameState]);
 
   const startProblem = useCallback(() => {
-    setUserAnswer('');
-    setFeedback(null);
-    setBuzzerWinner(null);
-    setIsHelpUsed(false); 
+    setUserAnswer(''); setFeedback(null); setBuzzerWinner(null); setIsHelpUsed(false); 
     setGameState('STARTING_ROUND');
-    setCountdown(3);
-    setFeedbackTimer(FEEDBACK_TIME);
     
+    let count = 3;
     const interval = setInterval(() => {
-      setCountdown(prev => {
-        if (prev !== null && prev <= 1) {
-          clearInterval(interval);
-          const nextState = (isArenaA || isTeacherRoom) ? 'ANSWERING' : 'WAITING_FOR_BUZZER';
-          setGameState(nextState);
-          return null;
-        }
-        return prev !== null ? prev - 1 : null;
-      });
+      count--;
+      if (count <= 0) {
+        clearInterval(interval);
+        setGameState((isArenaA || isTeacherRoom) ? 'ANSWERING' : 'WAITING_FOR_BUZZER');
+      }
     }, 1000);
   }, [isArenaA, isTeacherRoom, setGameState]);
 
@@ -132,58 +122,41 @@ const GameEngine: React.FC<GameEngineProps> = ({
   useEffect(() => {
     if (!isArenaA && matchData.joinedRoom && !isTeacherRoom) {
       const channel = supabase.channel(`match_${matchData.joinedRoom.code}_${currentTeacher.id}`, {
-        config: { presence: { key: presenceKey.current } }
+        config: { presence: { key: myPresenceKey } }
       });
-      
       channel
         .on('presence', { event: 'sync' }, () => {
           const state = channel.presenceState();
           const keys = Object.keys(state).sort();
-          setIsMaster(keys[0] === presenceKey.current);
+          setIsMaster(keys[0] === myPresenceKey);
           setIsPresenceSynced(true);
         })
-        .on('broadcast', { event: 'match_start_problem' }, () => {
-          if (gameStateRef.current === 'ROUND_INTRO') startProblem();
+        .on('broadcast', { event: 'match_start_problem' }, () => { 
+          if (gameStateRef.current === 'ROUND_INTRO') startProblem(); 
         })
-        .on('broadcast', { event: 'match_next_question' }, () => {
-          handleNext();
+        .on('broadcast', { event: 'match_next_question' }, () => { 
+          handleNext(); 
         })
         .on('broadcast', { event: 'buzzer_signal' }, ({ payload }) => {
           if (payload.playerId !== myUniqueId && !buzzerWinner && (gameStateRef.current === 'WAITING_FOR_BUZZER' || gameStateRef.current === 'ANSWERING')) {
-            setBuzzerWinner('OPPONENT');
-            setGameState('ANSWERING');
-            setTimeLeft(20);
+            setBuzzerWinner('OPPONENT'); setGameState('ANSWERING'); setTimeLeft(20);
           }
         })
         .on('broadcast', { event: 'match_result' }, ({ payload }) => {
           if (payload.playerId !== myUniqueId) {
             setOpponentScores(prev => {
               const currentData = prev[payload.playerId] || { name: payload.player, shortId: payload.playerId.slice(-3).toUpperCase(), score: 0 };
-              return {
-                ...prev,
-                [payload.playerId]: {
-                  ...currentData,
-                  score: currentData.score + (payload.points || 0)
-                }
-              };
+              return { ...prev, [payload.playerId]: { ...currentData, score: currentData.score + (payload.points || 0) } };
             });
             if (gameStateRef.current !== 'FEEDBACK') {
-              setFeedback({ 
-                ...payload.feedback, 
-                winner: 'OPPONENT', 
-                winnerName: `${payload.player} #${payload.playerId.slice(-3).toUpperCase()}` 
-              });
-              setGameState('FEEDBACK');
-              setFeedbackTimer(FEEDBACK_TIME);
+              setFeedback({ ...payload.feedback, winner: 'OPPONENT', winnerName: `${payload.player} #${payload.playerId.slice(-3).toUpperCase()}` });
+              setGameState('FEEDBACK'); setFeedbackTimer(FEEDBACK_TIME);
             }
           }
         })
         .subscribe(async (status) => {
-          if (status === 'SUBSCRIBED') {
-            await channel.track({ role: 'player', joined_at: new Date().toISOString() });
-          }
+          if (status === 'SUBSCRIBED') await channel.track({ role: 'player', joined_at: new Date().toISOString() });
         });
-
       channelRef.current = channel;
       return () => { supabase.removeChannel(channel); };
     }
@@ -191,17 +164,11 @@ const GameEngine: React.FC<GameEngineProps> = ({
 
   useEffect(() => {
     if (isTeacherRoom) {
-      const channel = supabase.channel(`control_TEACHER_ROOM_${currentTeacher.id}`, {
-        config: { presence: { key: presenceKey.current } }
-      });
+      const channel = supabase.channel(`control_TEACHER_ROOM_${currentTeacher.id}`, { config: { presence: { key: myPresenceKey } } });
       channel
         .on('broadcast', { event: 'teacher_next_question' }, ({ payload }) => {
-          if (payload && typeof payload.nextIndex === 'number') {
-             setCurrentProblemIdx(payload.nextIndex);
-             startProblem();
-          } else {
-             handleNext();
-          }
+          if (payload && typeof payload.nextIndex === 'number') { setCurrentProblemIdx(payload.nextIndex); startProblem(); } 
+          else handleNext();
         })
         .on('broadcast', { event: 'teacher_toggle_whiteboard' }, ({ payload }) => setIsWhiteboardActive(payload.active))
         .on('broadcast', { event: 'teacher_reset_room' }, () => onExit())
@@ -222,15 +189,13 @@ const GameEngine: React.FC<GameEngineProps> = ({
 
   useEffect(() => {
     if (gameState === 'FEEDBACK' && feedbackTimer === 0) {
-      if (isArenaA) {
-        handleNext();
-      } else if (!isTeacherRoom) {
+      if (isArenaA) { handleNext(); } 
+      else if (!isTeacherRoom) {
         if (isMaster) {
           channelRef.current?.send({ type: 'broadcast', event: 'match_next_question' });
           handleNext();
-        } else {
-          const safety = setTimeout(() => { if (gameStateRef.current === 'FEEDBACK') handleNext(); }, 2500);
-          return () => clearTimeout(safety);
+        } else { 
+          setTimeout(() => { if (gameStateRef.current === 'FEEDBACK') handleNext(); }, 3000); 
         }
       }
     }
@@ -238,21 +203,18 @@ const GameEngine: React.FC<GameEngineProps> = ({
 
   useEffect(() => {
     if (gameState === 'ROUND_INTRO') {
-      if (isArenaA) {
-        const t = setTimeout(startProblem, ROUND_INTRO_TIME * 1000);
-        return () => clearTimeout(t);
-      } else if (!isTeacherRoom && isPresenceSynced) {
+      if (isArenaA) { 
+        setTimeout(startProblem, ROUND_INTRO_TIME * 1000); 
+      } 
+      else if (!isTeacherRoom && isPresenceSynced) {
         if (isMaster) {
-          const t = setTimeout(() => {
+          setTimeout(() => {
             channelRef.current?.send({ type: 'broadcast', event: 'match_start_problem' });
             startProblem();
           }, ROUND_INTRO_TIME * 1000);
-          return () => clearTimeout(t);
-        } else {
-          const safety = setTimeout(() => {
-            if (gameStateRef.current === 'ROUND_INTRO') startProblem();
-          }, (ROUND_INTRO_TIME + 2) * 1000);
-          return () => clearTimeout(safety);
+        } else { 
+          // Người chơi thường đợi tín hiệu từ master hoặc tự vào sau một khoảng trễ an toàn dài hơn
+          setTimeout(() => { if (gameStateRef.current === 'ROUND_INTRO') startProblem(); }, (ROUND_INTRO_TIME + 4) * 1000); 
         }
       }
     }
@@ -264,265 +226,135 @@ const GameEngine: React.FC<GameEngineProps> = ({
       return () => clearInterval(t);
     }
     if (timeLeft === 0 && !isWhiteboardActive) {
-      if (gameState === 'ANSWERING' && buzzerWinner === 'YOU') {
-        submitAnswer();
-      } else if (gameState === 'WAITING_FOR_BUZZER') {
+      if (gameState === 'ANSWERING' && buzzerWinner === 'YOU') { submitAnswer(); } 
+      else if (gameState === 'WAITING_FOR_BUZZER') {
         setFeedback({ isCorrect: false, text: "HẾT GIỜ! KHÔNG AI GIÀNH QUYỀN TRẢ LỜI.", winner: 'NONE' });
-        setGameState('FEEDBACK');
-        setFeedbackTimer(FEEDBACK_TIME);
+        setGameState('FEEDBACK'); setFeedbackTimer(FEEDBACK_TIME);
       }
     }
   }, [gameState, timeLeft, buzzerWinner, isWhiteboardActive]);
 
-  const handleBuzzerClick = () => {
-    if (gameState === 'WAITING_FOR_BUZZER' && !buzzerWinner) {
-      channelRef.current?.send({ type: 'broadcast', event: 'buzzer_signal', payload: { player: playerName, playerId: myUniqueId } });
-      setBuzzerWinner('YOU');
-      setGameState('ANSWERING');
-      setTimeLeft(20);
-    }
-  };
-
-  const handleUseHelp = () => {
-    if (isHelpUsed || (gameState !== 'ANSWERING' && gameState !== 'WAITING_FOR_BUZZER')) return;
-    setShowHelpConfirm(true); 
-  };
-
-  const confirmUseHelp = () => {
-    setIsHelpUsed(true);
-    setShowHelpConfirm(false);
-  };
-
   const submitAnswer = () => {
     const prob = rounds[currentRoundIdxRef.current]?.problems[currentProblemIdxRef.current];
     const correct = (prob?.correctAnswer || "").trim().toUpperCase();
-    const user = userAnswer.trim().toUpperCase();
-    const isPerfect = user === correct;
-    
-    const basePoints = isPerfect ? 100 : 0;
-    const finalPoints = isHelpUsed ? Math.round(basePoints * 0.6) : basePoints;
+    const isPerfect = userAnswer.trim().toUpperCase() === correct;
+    const finalPoints = isPerfect ? (isHelpUsed ? 60 : 100) : 0;
 
-    const fb = { 
-      isCorrect: isPerfect, 
-      text: isPerfect 
-        ? (isHelpUsed ? `CHÍNH XÁC! (Sử dụng trợ giúp: +${finalPoints}đ)` : `CHÍNH XÁC! (+${finalPoints}đ)`)
-        : `SAI RỒI! Đáp án đúng là: ${correct}`, 
-      winner: 'YOU' 
-    };
-    
+    const fb = { isCorrect: isPerfect, text: isPerfect ? `CHÍNH XÁC! (+${finalPoints}đ)` : `SAI RỒI! Đúng là: ${correct}`, winner: 'YOU' };
     if (isPerfect) setScore(s => s + finalPoints);
-    setFeedback(fb);
-    setGameState('FEEDBACK');
-    setFeedbackTimer(FEEDBACK_TIME);
+    setFeedback(fb); setGameState('FEEDBACK'); setFeedbackTimer(FEEDBACK_TIME);
     
-    if (isTeacherRoom) {
-        controlChannelRef.current?.send({ type: 'broadcast', event: 'student_answer', payload: { playerName, playerId: myUniqueId, isCorrect: isPerfect, points: finalPoints } });
-    } else {
-        channelRef.current?.send({ type: 'broadcast', event: 'match_result', payload: { player: playerName, playerId: myUniqueId, points: finalPoints, feedback: fb } });
-    }
+    if (isTeacherRoom) { controlChannelRef.current?.send({ type: 'broadcast', event: 'student_answer', payload: { playerName, playerId: myUniqueId, isCorrect: isPerfect, points: finalPoints } }); } 
+    else { channelRef.current?.send({ type: 'broadcast', event: 'match_result', payload: { player: playerName, playerId: myUniqueId, points: finalPoints, feedback: fb } }); }
   };
 
-  const hasChallenge = currentProblem?.challenge !== DisplayChallenge.NORMAL;
-
   if (gameState === 'GAME_OVER') {
-    const allPlayers = [
-      { name: 'BẠN', score: score, isMe: true },
-      ...Object.values(opponentScores).map(o => ({ name: o.name, score: o.score, isMe: false }))
-    ].sort((a, b) => b.score - a.score);
-
+    const all = [{ name: 'BẠN', score, isMe: true }, ...Object.values(opponentScores).map(o => ({ name: o.name, score: o.score, isMe: false }))].sort((a,b) => b.score - a.score);
     return (
-      <div className="min-h-screen bg-slate-950 flex items-center justify-center p-6">
+      <div className="min-h-screen bg-slate-950 flex items-center justify-center p-6 text-left">
         <div className="bg-white rounded-[4rem] p-12 shadow-2xl max-w-2xl w-full text-center border-b-[12px] border-blue-600 animate-in zoom-in duration-500">
           <div className="text-8xl mb-8">🏆</div>
-          <h2 className="text-4xl font-black text-slate-800 uppercase italic mb-2 tracking-tighter">TRẬN ĐẤU KẾT THÚC</h2>
-          <p className="text-slate-400 font-bold uppercase text-[10px] mb-12 tracking-[0.2em]">Cảm ơn chiến binh {playerName} đã tham gia!</p>
-          
-          <div className="bg-slate-50 p-8 rounded-[3rem] border-4 border-slate-100 mb-12">
-             <div className="text-[11px] font-black text-slate-400 uppercase italic tracking-widest mb-6">BẢNG XẾP HẠNG CHUNG CUỘC</div>
-             <div className="space-y-4">
-                {allPlayers.map((p, i) => (
-                   <div key={i} className={`flex items-center justify-between p-5 rounded-2xl border-2 ${p.isMe ? 'bg-blue-600 border-blue-400 text-white shadow-lg' : 'bg-white border-slate-100 text-slate-700'}`}>
-                      <div className="flex items-center gap-4">
-                         <span className="w-8 h-8 rounded-full bg-slate-900 text-white flex items-center justify-center text-[10px] font-black italic">{i + 1}</span>
-                         <span className="font-black uppercase italic tracking-tighter truncate max-w-[150px]">{p.name}</span>
-                      </div>
-                      <div className="text-2xl font-black italic">{p.score}đ</div>
-                   </div>
-                ))}
-             </div>
+          <h2 className="text-4xl font-black text-slate-800 uppercase italic mb-12">KẾT THÚC</h2>
+          <div className="bg-slate-50 p-8 rounded-[3rem] border-4 border-slate-100 mb-12 space-y-4">
+             {all.map((p, i) => (
+               <div key={i} className={`flex items-center justify-between p-5 rounded-2xl ${p.isMe ? 'bg-blue-600 text-white' : 'bg-white border-2 border-slate-100 text-slate-700'}`}>
+                  <div className="flex items-center gap-4"><span className="w-8 h-8 rounded-full bg-slate-900 text-white flex items-center justify-center text-[10px] font-black">{i+1}</span><span className="font-black uppercase italic">{p.name}</span></div>
+                  <div className="text-2xl font-black italic">{p.score}đ</div>
+               </div>
+             ))}
           </div>
-
-          <button 
-            onClick={onExit} 
-            className="w-full py-6 bg-slate-900 text-white rounded-3xl font-black uppercase italic text-xl shadow-xl hover:scale-105 active:scale-95 transition-all border-b-8 border-slate-950"
-          >
-            RỜI ARENA 🚪
-          </button>
+          <button onClick={onExit} className="w-full py-6 bg-slate-900 text-white rounded-3xl font-black uppercase italic text-xl shadow-xl hover:scale-105 active:scale-95 border-b-8 border-slate-950">RỜI ARENA 🚪</button>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-slate-100 flex flex-col p-4 overflow-hidden relative">
-      <ConfirmModal 
-        isOpen={showHelpConfirm} 
-        title="Dùng trợ giúp?" 
-        message="Hệ thống sẽ làm rõ đề bài ngay lập tức, nhưng bạn chỉ nhận được tối đa 60% số điểm cho câu hỏi này!" 
-        confirmText="Đồng ý, dùng ngay!"
-        cancelText="Để mình tự cố gắng"
-        onConfirm={confirmUseHelp} 
-        onCancel={() => setShowHelpConfirm(false)} 
-        isDestructive={false}
-      />
+    <div className="min-h-screen bg-slate-100 flex flex-col p-4 overflow-hidden relative text-left">
+      <ConfirmModal isOpen={showHelpConfirm} title="Dùng trợ giúp?" message="Bạn chỉ nhận được tối đa 60% số điểm!" confirmText="Đồng ý!" cancelText="Hủy" onConfirm={() => { setIsHelpUsed(true); setShowHelpConfirm(false); }} onCancel={() => setShowHelpConfirm(false)} />
+      {isWhiteboardActive && <div className="fixed inset-0 z-[10000] p-4 bg-slate-950/98 backdrop-blur-3xl flex flex-col items-center justify-center"><div className="w-full h-full max-w-[95vw] max-h-[90vh] relative shadow-2xl"><Whiteboard isTeacher={false} channel={controlChannelRef.current} roomCode="TEACHER_ROOM" /></div></div>}
 
-      {isWhiteboardActive && (
-        <div className="fixed inset-0 z-[10000] p-4 md:p-8 bg-slate-950/98 backdrop-blur-3xl animate-in zoom-in flex flex-col items-center justify-center">
-          <div className="w-full h-full max-w-[95vw] max-h-[90vh] relative shadow-[0_0_100px_rgba(0,0,0,0.5)]">
-             <Whiteboard isTeacher={false} channel={controlChannelRef.current} roomCode="TEACHER_ROOM" />
-          </div>
-        </div>
-      )}
-
-      {/* Header */}
-      <header className="bg-white px-6 md:px-8 py-4 rounded-[2.5rem] shadow-lg mb-4 shrink-0 flex items-center gap-4 relative z-50 overflow-x-auto no-scrollbar">
+      <header className="bg-white px-6 py-4 rounded-[2.5rem] shadow-lg mb-4 flex items-center gap-4 relative z-50 overflow-x-auto no-scrollbar border-b-4 border-slate-200">
         <div className="flex items-center gap-3 shrink-0">
-           <div className="bg-blue-600 text-white px-5 md:px-7 py-2.5 rounded-[1.8rem] shadow-md border-b-4 border-blue-800 flex flex-col items-center min-w-[110px] md:min-w-[140px]">
+           <div className="bg-blue-600 text-white px-6 py-2.5 rounded-[1.8rem] shadow-md border-b-4 border-blue-800 flex flex-col items-center min-w-[130px]">
               <div className="text-[10px] font-black uppercase tracking-tighter italic opacity-80 leading-none mb-1">BẠN</div>
-              <div className="text-xl md:text-2xl font-black leading-none">{score}đ</div>
+              <div className="text-2xl font-black leading-none">{score}đ</div>
            </div>
         </div>
 
         {!isArenaA && !isTeacherRoom && (
            <div className="flex items-center gap-3 border-l-2 border-slate-100 pl-4 shrink-0">
-              {(Object.entries(opponentScores) as [string, OpponentData][]).map(([id, data]) => (
-                 <div key={id} className="bg-slate-900 text-white px-5 py-2.5 rounded-[1.8rem] shadow-md border-b-4 border-slate-800 flex flex-col items-center min-w-[110px] md:min-w-[130px] animate-in slide-in-from-left">
-                    <div className="text-[9px] font-black uppercase tracking-tighter italic opacity-80 leading-none mb-1 truncate max-w-[90px]">{data.name}</div>
+              {Object.entries(opponentScores).map(([id, data]) => (
+                 <div key={id} className="bg-slate-900 text-white px-6 py-2.5 rounded-[1.8rem] shadow-md border-b-4 border-slate-800 flex flex-col items-center min-w-[120px]">
+                    <div className="text-[10px] font-black uppercase tracking-tighter italic opacity-80 leading-none mb-1 truncate max-w-[100px]">{data.name}</div>
                     <div className="text-xl font-black leading-none">{data.score}đ</div>
-                    <div className="text-[7px] font-bold opacity-30 mt-1 uppercase tracking-widest italic">#{data.shortId}</div>
                  </div>
               ))}
-              {(Object.entries(opponentScores) as [string, OpponentData][]).length === 0 && (
-                <div className="bg-slate-50 text-slate-300 px-5 py-2.5 rounded-[1.8rem] border-2 border-dashed border-slate-200 flex flex-col items-center min-w-[110px]">
-                   <div className="text-[8px] font-black uppercase leading-none mb-1">ĐỐI THỦ</div>
-                   <div className="text-xl font-black leading-none">...</div>
-                </div>
-              )}
            </div>
         )}
 
         <div className="flex-1"></div>
-
         <div className="flex items-center gap-4 shrink-0">
-           {hasChallenge && (gameState === 'ANSWERING' || gameState === 'WAITING_FOR_BUZZER') && (
-             <button 
-              onClick={handleUseHelp}
-              disabled={isHelpUsed}
-              className={`relative z-[60] flex items-center gap-2 px-6 py-3 rounded-2xl font-black text-[10px] uppercase italic transition-all shadow-md border-b-4 pointer-events-auto active:scale-95
-                ${isHelpUsed 
-                  ? 'bg-slate-100 text-slate-300 border-slate-200 cursor-not-allowed' 
-                  : 'bg-emerald-100 text-emerald-600 border-emerald-300 hover:bg-emerald-500 hover:text-white hover:border-emerald-700'}`}
-             >
-               <span className="text-lg">💡</span>
-               <div className="flex flex-col items-start leading-none pointer-events-none">
-                  <span>Trợ giúp</span>
-                  <span className="text-[7px] opacity-60 mt-1">(-40% ĐIỂM)</span>
-               </div>
-             </button>
+           {currentProblem?.challenge !== DisplayChallenge.NORMAL && (gameState === 'ANSWERING' || gameState === 'WAITING_FOR_BUZZER') && (
+             <button onClick={() => !isHelpUsed && setShowHelpConfirm(true)} disabled={isHelpUsed} className={`px-6 py-3 rounded-2xl font-black text-[10px] uppercase italic transition-all border-b-4 ${isHelpUsed ? 'bg-slate-100 text-slate-300' : 'bg-emerald-100 text-emerald-600 border-emerald-300 hover:bg-emerald-500 hover:text-white'}`}>💡 Trợ giúp</button>
            )}
-
            <div className="flex flex-col items-center">
-             <div className="text-[9px] font-black text-slate-400 uppercase italic mb-0.5 tracking-widest">THỜI GIAN</div>
+             <div className="text-[9px] font-black text-slate-400 uppercase italic mb-0.5">THỜI GIAN</div>
              <div className={`text-4xl font-black italic tabular-nums leading-none ${timeLeft <= 5 ? 'text-red-500 animate-pulse' : 'text-slate-900'}`}>{timeLeft}s</div>
            </div>
-           
-           <div className="flex gap-2">
-             {isTeacherRoom && <div className="bg-amber-500 text-white px-4 py-2 rounded-xl font-black text-[9px] uppercase italic border-b-4 border-amber-700 shadow-md flex items-center">LIVE</div>}
-             <button onClick={() => setShowExitConfirm(true)} className="w-12 h-12 bg-red-50 text-red-500 rounded-2xl flex items-center justify-center font-black hover:bg-red-500 hover:text-white transition-all shadow-sm">✕</button>
-           </div>
+           <button onClick={() => setShowExitConfirm(true)} className="w-12 h-12 bg-red-50 text-red-500 rounded-2xl flex items-center justify-center font-black hover:bg-red-500 hover:text-white transition-all shadow-sm">✕</button>
         </div>
       </header>
 
       <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-6 min-h-0 overflow-hidden">
         <div className="lg:col-span-7 h-full overflow-hidden">
-           <ProblemCard problem={currentProblem} isPaused={isWhiteboardActive} isHelpUsed={isHelpUsed} />
+          {gameState === 'ROUND_INTRO' ? (
+            <div className="h-full bg-white rounded-[3rem] p-12 shadow-inner flex flex-col items-center justify-center text-center animate-in zoom-in">
+               <div className="text-9xl mb-8 animate-bounce">⚔️</div>
+               <h2 className="text-5xl font-black text-slate-800 uppercase italic mb-4">SẴN SÀNG CHIẾN ĐẤU</h2>
+               <p className="text-slate-400 font-bold text-lg italic uppercase tracking-widest">Vòng {rounds[currentRoundIdx].number}: {rounds[currentRoundIdx].description || 'Bắt đầu thử thách!'}</p>
+            </div>
+          ) : (
+            <ProblemCard problem={currentProblem} isPaused={isWhiteboardActive} isHelpUsed={isHelpUsed} />
+          )}
         </div>
         <div className="lg:col-span-5 bg-white rounded-[3rem] p-8 shadow-xl flex flex-col relative h-full overflow-hidden">
-          
-          {gameState === 'FEEDBACK' ? (
+          {gameState === 'ROUND_INTRO' ? (
+            <div className="h-full flex flex-col items-center justify-center text-center">
+               <div className="text-3xl font-black text-blue-600 uppercase italic mb-2">ĐỐI THỦ CỦA BẠN</div>
+               <div className="space-y-4 w-full px-10">
+                  {Object.values(opponentScores).map((op, i) => (
+                    <div key={i} className="bg-slate-900 text-white p-6 rounded-3xl font-black uppercase italic text-xl shadow-lg border-b-8 border-slate-800">
+                       👤 {op.name}
+                    </div>
+                  ))}
+               </div>
+               <div className="mt-12 text-[10px] font-black text-slate-300 uppercase italic animate-pulse tracking-widest">TRẬN ĐẤU SẼ BẮT ĐẦU SAU GIÂY LÁT...</div>
+            </div>
+          ) : gameState === 'FEEDBACK' ? (
             <div className="h-full flex flex-col animate-in fade-in zoom-in overflow-hidden">
-              <div className="flex justify-between items-center mb-2 shrink-0 px-2">
-                 <div className={`text-3xl font-black uppercase italic ${feedback?.isCorrect ? 'text-emerald-500' : 'text-blue-500'}`}>
-                    {feedback?.isCorrect ? 'CHÍNH XÁC!' : 'SAI RỒI!'}
-                 </div>
-                 <div className="bg-slate-900 text-white px-4 py-1.5 rounded-xl font-black italic text-[10px] flex items-center gap-2">
-                    <span className="opacity-40 uppercase">{isMaster ? 'MASTER SYNC' : 'ĐỒNG BỘ'}:</span>
-                    <span className="text-yellow-400 text-sm">{feedbackTimer}s</span>
-                 </div>
-              </div>
-
-              <div className="w-full h-1.5 bg-slate-100 rounded-full mb-4 overflow-hidden shrink-0">
-                 <div 
-                   className="h-full bg-yellow-400 transition-all duration-1000 ease-linear"
-                   style={{ width: `${(feedbackTimer / FEEDBACK_TIME) * 100}%` }}
-                 />
-              </div>
-
+              <div className="flex justify-between items-center mb-2 px-2"><div className={`text-3xl font-black uppercase italic ${feedback?.isCorrect ? 'text-emerald-500' : 'text-blue-500'}`}>{feedback?.isCorrect ? 'CHÍNH XÁC!' : 'SAI RỒI!'}</div><div className="bg-slate-900 text-white px-4 py-1.5 rounded-xl font-black text-[10px]"><span className="text-yellow-400">{feedbackTimer}s</span></div></div>
+              <div className="w-full h-1.5 bg-slate-100 rounded-full mb-4 overflow-hidden"><div className="h-full bg-yellow-400 transition-all duration-1000 ease-linear" style={{ width: `${(feedbackTimer / FEEDBACK_TIME) * 100}%` }} /></div>
               <div className="flex-1 overflow-y-auto no-scrollbar space-y-4 px-2 pb-4">
-                 {feedback?.winnerName && (
-                    <div className="bg-blue-50 p-3 rounded-xl border border-blue-100 text-[10px] font-black uppercase italic text-blue-600">
-                       🔥 {feedback.winnerName} ĐÃ GIÀNH QUYỀN TRẢ LỜI
-                    </div>
-                 )}
-                 <div className="bg-slate-50 p-5 rounded-3xl border-2 border-slate-100 italic text-base font-bold text-slate-700">
-                    <LatexRenderer content={feedback?.text || ""} />
-                 </div>
-                 <div className="bg-emerald-50/50 p-6 rounded-[2rem] border-2 border-emerald-100 mb-4">
-                    <h4 className="text-emerald-600 font-black uppercase text-[10px] mb-3 flex items-center gap-2">
-                       <span>📖</span> LỜI GIẢI CHI TIẾT
-                    </h4>
-                    <div className="text-slate-600 font-medium leading-relaxed italic text-sm">
-                       <LatexRenderer content={currentProblem?.explanation || "Chưa có lời giải chi tiết cho câu hỏi này."} />
-                    </div>
-                 </div>
+                 {feedback?.winnerName && <div className="bg-blue-50 p-3 rounded-xl border border-blue-100 text-[10px] font-black uppercase italic text-blue-600">🔥 {feedback.winnerName} ĐÃ TRẢ LỜI</div>}
+                 <div className="bg-slate-50 p-5 rounded-3xl border-2 border-slate-100 italic font-bold text-slate-700"><LatexRenderer content={feedback?.text || ""} /></div>
+                 <div className="bg-emerald-50/50 p-6 rounded-[2rem] border-2 border-emerald-100 mb-4"><h4 className="text-emerald-600 font-black uppercase text-[10px] mb-3">📖 LỜI GIẢI CHI TIẾT</h4><div className="text-slate-600 text-sm italic leading-relaxed"><LatexRenderer content={currentProblem?.explanation || ""} /></div></div>
               </div>
             </div>
           ) : gameState === 'WAITING_FOR_BUZZER' ? (
-            <div className="h-full flex flex-col items-center justify-center text-center animate-in fade-in px-4">
+            <div className="h-full flex flex-col items-center justify-center text-center animate-in fade-in">
                <div className="text-5xl mb-4 animate-bounce">🔔</div>
-               <h3 className="text-2xl font-black text-slate-800 uppercase italic mb-2">SẴN SÀNG CHƯA?</h3>
-               <p className="text-slate-400 font-bold text-[9px] uppercase mb-8 italic tracking-widest">Nhấn chuông để giành quyền trả lời!</p>
-               
-               <button 
-                onClick={handleBuzzerClick}
-                className="w-44 h-44 bg-red-600 rounded-full border-[12px] border-red-800 shadow-[0_15px_0_#991b1b,0_25px_50px_rgba(220,38,38,0.3)] hover:scale-105 active:translate-y-3 active:shadow-none transition-all flex items-center justify-center group"
-               >
-                  <span className="text-white font-black text-2xl uppercase italic group-active:scale-90 transition-transform text-center px-4 leading-tight">GIÀNH<br/>QUYỀN!</span>
-               </button>
-               <p className="mt-8 text-slate-300 font-black uppercase italic text-[8px] tracking-[0.2em] animate-pulse">NHẤN CHUÔNG ĐỂ MỞ BÀN PHÍM</p>
+               <h3 className="text-2xl font-black text-slate-800 uppercase italic mb-8">NHẤN CHUÔNG ĐỂ GIÀNH QUYỀN!</h3>
+               <button onClick={() => !buzzerWinner && (channelRef.current?.send({ type: 'broadcast', event: 'buzzer_signal', payload: { player: playerName, playerId: myUniqueId } }), setBuzzerWinner('YOU'), setGameState('ANSWERING'), setTimeLeft(20))} className="w-44 h-44 bg-red-600 rounded-full border-[12px] border-red-800 shadow-[0_15px_0_#991b1b,0_25px_50px_rgba(220,38,38,0.3)] hover:scale-105 active:translate-y-3 transition-all flex items-center justify-center"><span className="text-white font-black text-2xl uppercase italic text-center">GIÀNH<br/>QUYỀN!</span></button>
             </div>
           ) : gameState === 'ANSWERING' && buzzerWinner === 'OPPONENT' ? (
-            <div className="h-full flex flex-col items-center justify-center text-center animate-in slide-in-from-right px-4">
-               <div className="w-20 h-20 border-6 border-slate-100 border-t-blue-600 rounded-full animate-spin mb-8"></div>
-               <div className="bg-slate-900 text-white p-8 rounded-[2.5rem] shadow-2xl w-full">
-                  <h3 className="text-xl font-black uppercase italic mb-1 text-blue-400">TẠM DỪNG!</h3>
-                  <p className="font-bold text-slate-400 italic text-xs leading-relaxed">
-                    Đối thủ đang giành quyền trả lời...
-                  </p>
-               </div>
-               <p className="mt-8 text-slate-300 font-black uppercase italic tracking-widest text-[9px] animate-pulse">ĐANG CHỜ KẾT QUẢ ĐỒNG BỘ</p>
-            </div>
+            <div className="h-full flex flex-col items-center justify-center text-center animate-in slide-in-from-right"><div className="w-20 h-20 border-6 border-slate-100 border-t-blue-600 rounded-full animate-spin mb-8"></div><div className="bg-slate-900 text-white p-8 rounded-[2.5rem] shadow-2xl w-full"><h3 className="text-xl font-black uppercase italic mb-1 text-blue-400">TẠM DỪNG!</h3><p className="font-bold text-slate-400 italic text-xs">Đối thủ đang trả lời...</p></div></div>
           ) : (
-            <div className="flex-1 flex flex-col overflow-hidden">
-              <div className="flex-1 min-h-0">
-                 <AnswerInput problem={currentProblem} value={userAnswer} onChange={setUserAnswer} onSubmit={submitAnswer} disabled={false} />
-              </div>
-              <button onClick={submitAnswer} className="w-full py-5 bg-slate-900 text-white rounded-[1.8rem] font-black italic text-lg mt-4 shrink-0 shadow-lg active:scale-95 transition-all border-b-6 border-slate-950">NỘP ĐÁP ÁN ✅</button>
-            </div>
+            <div className="flex-1 flex flex-col overflow-hidden"><div className="flex-1 min-h-0"><AnswerInput problem={currentProblem} value={userAnswer} onChange={setUserAnswer} onSubmit={() => submitAnswer()} disabled={false} /></div><button onClick={() => submitAnswer()} className="w-full py-5 bg-slate-900 text-white rounded-[1.8rem] font-black italic text-lg mt-4 shadow-lg border-b-6 border-slate-950">NỘP ĐÁP ÁN ✅</button></div>
           )}
         </div>
       </div>
-      <ConfirmModal isOpen={showExitConfirm} title="Dừng trận đấu?" message="Bạn muốn rời khỏi đấu trường ngay bây giờ?" onConfirm={onExit} onCancel={() => setShowExitConfirm(false)} isDestructive={true} />
+      <ConfirmModal isOpen={showExitConfirm} title="Dừng trận đấu?" message="Bạn muốn rời khỏi ngay bây giờ?" onConfirm={onExit} onCancel={() => setShowExitConfirm(false)} isDestructive={true} />
     </div>
   );
 };
