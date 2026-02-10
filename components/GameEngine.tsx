@@ -33,9 +33,11 @@ const GameEngine: React.FC<GameEngineProps> = ({
   const [currentProblemIdx, setCurrentProblemIdx] = useState(matchData.startIndex || 0); 
   const [score, setScore] = useState(0);
   const [opponentScores, setOpponentScores] = useState<Record<string, OpponentData>>({});
+  
   const [timeLeft, setTimeLeft] = useState(DEFAULT_TIME);
   const [feedbackTimer, setFeedbackTimer] = useState(FEEDBACK_TIME);
   const [roundIntroTimer, setRoundIntroTimer] = useState(ROUND_INTRO_TIME);
+  
   const [userAnswer, setUserAnswer] = useState('');
   const [feedback, setFeedback] = useState<any>(null);
   const [buzzerWinner, setBuzzerWinner] = useState<'YOU' | 'OPPONENT' | null>(null);
@@ -53,64 +55,80 @@ const GameEngine: React.FC<GameEngineProps> = ({
 
   const channelRef = useRef<any>(null);
   const gameStateRef = useRef(gameState);
-  const isTransitioning = useRef(false);
+  const isTransitioningRef = useRef(false);
+  const lastProcessedQuestionKey = useRef("");
 
-  useEffect(() => { gameStateRef.current = gameState; }, [gameState]);
+  useEffect(() => { 
+    gameStateRef.current = gameState; 
+  }, [gameState]);
 
   const rounds = matchData.rounds;
   const currentRound = rounds[currentRoundIdx];
   const currentProblem = currentRound?.problems[currentProblemIdx];
 
-  // Logic nạp câu hỏi đồng bộ (Sử dụng index cụ thể để tránh lệch)
-  const syncToProblem = useCallback((roundIdx: number, probIdx: number, syncTime?: number) => {
+  const syncToProblem = useCallback((roundIdx: number, probIdx: number, syncTime: number) => {
+    const qKey = `R${roundIdx}P${probIdx}`;
+    if (lastProcessedQuestionKey.current === qKey) return;
+    lastProcessedQuestionKey.current = qKey;
+
+    // QUAN TRỌNG: Reset toàn bộ trạng thái trả lời ngay lập tức
     setUserAnswer(''); 
     setFeedback(null); 
     setBuzzerWinner(null); 
     setIsHelpUsed(false);
     
+    // Đưa về trạng thái trung gian để UI không hiển thị nhầm Feedback của câu cũ cho đề mới
+    setGameState('STARTING_ROUND');
+    
     setCurrentRoundIdx(roundIdx);
     setCurrentProblemIdx(probIdx);
     
     const targetProblem = rounds[roundIdx]?.problems[probIdx];
-    setTimeLeft(targetProblem?.timeLimit || DEFAULT_TIME);
+    const initialTime = targetProblem?.timeLimit || DEFAULT_TIME;
+    setTimeLeft(initialTime);
 
-    const delay = syncTime ? Math.max(0, syncTime - Date.now()) : 0;
+    const delay = Math.max(0, syncTime - Date.now());
     
     setTimeout(() => {
       if (isArenaA) {
         setGameState('ANSWERING');
         setBuzzerWinner('YOU');
+        isTransitioningRef.current = false;
       } else {
-        setGameState('STARTING_ROUND');
+        // Multiplayer hoặc Teacher room: Đếm ngược 3s
         let count = 3;
         const interval = setInterval(() => {
           count--;
           if (count <= 0) {
             clearInterval(interval);
             setGameState(isTeacherRoom ? 'ANSWERING' : 'WAITING_FOR_BUZZER');
+            isTransitioningRef.current = false;
           }
         }, 1000);
       }
     }, delay);
   }, [isArenaA, isTeacherRoom, rounds, setGameState]);
 
-  // Điều phối chuyển Intro -> Question
   useEffect(() => {
     if (gameState === 'ROUND_INTRO') {
       const timer = setInterval(() => {
         setRoundIntroTimer(prev => {
           if (prev <= 0.1) {
             clearInterval(timer);
-            if (isMaster && !isArenaA && !isTeacherRoom) {
-              const syncTime = Date.now() + 1000;
-              channelRef.current?.send({ 
-                type: 'broadcast', 
-                event: 'sync_phase', 
-                payload: { phase: 'START_PROBLEM', roundIdx: currentRoundIdx, probIdx: 0, syncTime } 
-              });
-              syncToProblem(currentRoundIdx, 0, syncTime);
-            } else if (isArenaA) {
-              syncToProblem(currentRoundIdx, 0);
+            if (!isTransitioningRef.current) {
+              if (isMaster && !isArenaA && !isTeacherRoom) {
+                isTransitioningRef.current = true;
+                const syncTime = Date.now() + 1000;
+                channelRef.current?.send({ 
+                  type: 'broadcast', 
+                  event: 'sync_phase', 
+                  payload: { phase: 'START_PROBLEM', roundIdx: currentRoundIdx, probIdx: 0, syncTime } 
+                });
+                syncToProblem(currentRoundIdx, 0, syncTime);
+              } else if (isArenaA) {
+                isTransitioningRef.current = true;
+                syncToProblem(currentRoundIdx, 0, Date.now());
+              }
             }
             return 0;
           }
@@ -121,7 +139,6 @@ const GameEngine: React.FC<GameEngineProps> = ({
     }
   }, [gameState, isMaster, isArenaA, isTeacherRoom, syncToProblem, currentRoundIdx]);
 
-  // Listeners đồng bộ kênh Supabase
   useEffect(() => {
     if (!isArenaA && matchData.joinedRoom) {
       const channel = supabase.channel(`match_${matchData.joinedRoom.code}_${currentTeacher.id}`, {
@@ -135,15 +152,18 @@ const GameEngine: React.FC<GameEngineProps> = ({
           setIsMaster(keys[0] === myPresenceKey);
         })
         .on('broadcast', { event: 'sync_phase' }, ({ payload }) => {
-           if (payload.phase === 'START_PROBLEM') {
+           if (payload.phase === 'START_PROBLEM' && !isTransitioningRef.current) {
+              isTransitioningRef.current = true;
               syncToProblem(payload.roundIdx, payload.probIdx, payload.syncTime);
-           } else if (payload.phase === 'NEXT_QUESTION') {
-              // Slave chỉ nhảy câu khi Master ra lệnh
+           } else if (payload.phase === 'NEXT_QUESTION' && !isTransitioningRef.current) {
+              isTransitioningRef.current = true;
               if (payload.newRound) {
+                setFeedback(null);
                 setCurrentRoundIdx(payload.roundIdx);
                 setCurrentProblemIdx(0);
                 setRoundIntroTimer(ROUND_INTRO_TIME);
                 setGameState('ROUND_INTRO');
+                isTransitioningRef.current = false;
               } else {
                 syncToProblem(payload.roundIdx, payload.probIdx, payload.syncTime);
               }
@@ -162,6 +182,7 @@ const GameEngine: React.FC<GameEngineProps> = ({
             setFeedback({ ...payload.feedback, winner: 'OPPONENT', winnerName: payload.player });
             setGameState('FEEDBACK');
             setFeedbackTimer(FEEDBACK_TIME);
+            isTransitioningRef.current = false;
           }
         })
         .subscribe(async (status) => {
@@ -173,64 +194,70 @@ const GameEngine: React.FC<GameEngineProps> = ({
     }
   }, [isArenaA, matchData.joinedRoom, myPresenceKey, myUniqueId, syncToProblem, currentTeacher.id]);
 
-  // Điều phối chuyển từ Feedback -> Câu kế tiếp (Chỉ Master lái)
   useEffect(() => {
     if (gameState === 'FEEDBACK') {
-      const timer = setInterval(() => setFeedbackTimer(p => (p > 0 ? p - 0.1 : 0)), 100);
-      
-      if (feedbackTimer <= 0) {
-        clearInterval(timer);
-        
-        if ((isMaster && !isArenaA && !isTeacherRoom) || isArenaA) {
-          const nextProbIdx = currentProblemIdx + 1;
-          const syncTime = Date.now() + 1000;
+      const timer = setInterval(() => {
+        setFeedbackTimer(p => {
+          if (p <= 0.1) {
+            clearInterval(timer);
+            if (!isTransitioningRef.current) {
+              if ((isMaster && !isArenaA && !isTeacherRoom) || isArenaA) {
+                isTransitioningRef.current = true;
+                const nextProbIdx = currentProblemIdx + 1;
+                const syncTime = Date.now() + 1000;
 
-          if (nextProbIdx < (currentRound?.problems.length || 0)) {
-            // Chuyển câu trong cùng vòng
-            if (isMaster && !isArenaA) {
-              channelRef.current?.send({ 
-                type: 'broadcast', 
-                event: 'sync_phase', 
-                payload: { phase: 'NEXT_QUESTION', roundIdx: currentRoundIdx, probIdx: nextProbIdx, syncTime } 
-              });
+                if (nextProbIdx < (currentRound?.problems.length || 0)) {
+                  if (isMaster && !isArenaA) {
+                    channelRef.current?.send({ 
+                      type: 'broadcast', 
+                      event: 'sync_phase', 
+                      payload: { phase: 'NEXT_QUESTION', roundIdx: currentRoundIdx, probIdx: nextProbIdx, syncTime } 
+                    });
+                  }
+                  syncToProblem(currentRoundIdx, nextProbIdx, syncTime);
+                } else if (currentRoundIdx + 1 < rounds.length) {
+                  // Sang vòng mới
+                  setFeedback(null);
+                  if (isMaster && !isArenaA) {
+                    channelRef.current?.send({ 
+                      type: 'broadcast', 
+                      event: 'sync_phase', 
+                      payload: { phase: 'NEXT_QUESTION', newRound: true, roundIdx: currentRoundIdx + 1 } 
+                    });
+                  }
+                  setCurrentRoundIdx(prev => prev + 1);
+                  setCurrentProblemIdx(0);
+                  setRoundIntroTimer(ROUND_INTRO_TIME);
+                  setGameState('ROUND_INTRO');
+                  isTransitioningRef.current = false;
+                } else {
+                  setGameState('GAME_OVER');
+                  isTransitioningRef.current = false;
+                }
+              }
             }
-            syncToProblem(currentRoundIdx, nextProbIdx, syncTime);
-          } else if (currentRoundIdx + 1 < rounds.length) {
-            // Chuyển sang vòng mới
-            if (isMaster && !isArenaA) {
-              channelRef.current?.send({ 
-                type: 'broadcast', 
-                event: 'sync_phase', 
-                payload: { phase: 'NEXT_QUESTION', newRound: true, roundIdx: currentRoundIdx + 1 } 
-              });
-            }
-            setCurrentRoundIdx(prev => prev + 1);
-            setCurrentProblemIdx(0);
-            setRoundIntroTimer(ROUND_INTRO_TIME);
-            setGameState('ROUND_INTRO');
-          } else {
-            // Hết bài
-            setGameState('GAME_OVER');
+            return 0;
           }
-        }
-      }
+          return p - 0.1;
+        });
+      }, 100);
       return () => clearInterval(timer);
     }
-  }, [gameState, feedbackTimer, isMaster, isArenaA, isTeacherRoom, currentRound, currentRoundIdx, currentProblemIdx, rounds, syncToProblem]);
+  }, [gameState, isMaster, isArenaA, isTeacherRoom, currentRound, currentRoundIdx, currentProblemIdx, rounds, syncToProblem]);
 
-  // Timer làm bài cục bộ
   useEffect(() => {
     if (((gameState as any) === 'WAITING_FOR_BUZZER' || (gameState as any) === 'ANSWERING') && timeLeft > 0 && !isWhiteboardActive) {
-      const t = setInterval(() => setTimeLeft(p => p - 1), 1000);
+      const t = setInterval(() => setTimeLeft(p => Math.max(0, p - 1)), 1000);
       return () => clearInterval(t);
     }
-    // Timeout logic
     if (timeLeft === 0 && !isWhiteboardActive && (gameState as any) === 'ANSWERING') {
       if (buzzerWinner === 'YOU' || isArenaA) submitAnswer();
     }
   }, [gameState, timeLeft, buzzerWinner, isWhiteboardActive, isArenaA]);
 
   const submitAnswer = () => {
+    if (gameStateRef.current === 'FEEDBACK') return;
+    
     const correct = (currentProblem?.correctAnswer || "").trim().toUpperCase();
     const isPerfect = userAnswer.trim().toUpperCase() === correct;
     const points = isPerfect ? (isHelpUsed ? 60 : 100) : 0;
@@ -240,6 +267,7 @@ const GameEngine: React.FC<GameEngineProps> = ({
     setFeedback(fb); 
     setGameState('FEEDBACK'); 
     setFeedbackTimer(FEEDBACK_TIME);
+    isTransitioningRef.current = false;
     
     if (!isArenaA) {
       channelRef.current?.send({ 
@@ -374,7 +402,7 @@ const GameEngine: React.FC<GameEngineProps> = ({
           ) : (gameState as any) === 'FEEDBACK' ? (
              <div className="flex flex-col animate-in zoom-in w-full h-auto">
                 <div className={`text-2xl font-black uppercase italic mb-3 ${feedback?.isCorrect ? 'text-emerald-500' : 'text-blue-500'}`}>
-                  {feedback?.isCorrect ? 'CHÍNH XÁC!' : 'SAI RỒI!'}
+                  {feedback?.isCorrect ? 'CHÍNH XÁC!' : 'SAI RỜI!'}
                 </div>
                 <div className="space-y-4 w-full h-auto">
                    <div className="bg-slate-50 p-5 rounded-2xl border-2 border-slate-100 italic font-bold text-slate-700">
