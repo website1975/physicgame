@@ -37,6 +37,7 @@ const GameEngine: React.FC<GameEngineProps> = ({
   const [timeLeft, setTimeLeft] = useState(DEFAULT_TIME);
   const [feedbackTimer, setFeedbackTimer] = useState(FEEDBACK_TIME);
   const [roundIntroTimer, setRoundIntroTimer] = useState(ROUND_INTRO_TIME);
+  const [syncCountdown, setSyncCountdown] = useState<number | null>(null);
   
   const [userAnswer, setUserAnswer] = useState('');
   const [feedback, setFeedback] = useState<any>(null);
@@ -75,6 +76,7 @@ const GameEngine: React.FC<GameEngineProps> = ({
     setFeedback(null); 
     setBuzzerWinner(null); 
     setIsHelpUsed(false);
+    setSyncCountdown(null);
     
     setGameState('STARTING_ROUND');
     
@@ -94,8 +96,10 @@ const GameEngine: React.FC<GameEngineProps> = ({
         isTransitioningRef.current = false;
       } else {
         let count = 3;
+        setSyncCountdown(count);
         const interval = setInterval(() => {
           count--;
+          setSyncCountdown(count > 0 ? count : null);
           if (count <= 0) {
             clearInterval(interval);
             setGameState(isTeacherRoom ? 'ANSWERING' : 'WAITING_FOR_BUZZER');
@@ -234,7 +238,6 @@ const GameEngine: React.FC<GameEngineProps> = ({
                   setGameState('ROUND_INTRO');
                   isTransitioningRef.current = false;
                 } else {
-                  // ĐỒNG BỘ GAME OVER
                   if (isMaster && !isArenaA) {
                     channelRef.current?.send({ 
                       type: 'broadcast', 
@@ -444,10 +447,19 @@ const GameEngine: React.FC<GameEngineProps> = ({
              </div>
           ) : (
             <div className="min-h-[400px] flex flex-col items-center justify-center animate-pulse">
-               <div className="text-xl font-black text-blue-600 uppercase italic mb-4">CHUẨN BỊ CHIẾN ĐẤU...</div>
-               <div className="flex gap-2">
-                 {[1,2,3,4].map(i => <div key={i} className="w-3 h-3 bg-blue-600 rounded-full animate-bounce" style={{ animationDelay: `${i*0.2}s` }} />)}
-               </div>
+               {syncCountdown !== null ? (
+                 <div className="flex flex-col items-center animate-in zoom-in duration-300">
+                   <div className="text-[10rem] font-black text-blue-600 drop-shadow-2xl italic leading-none">{syncCountdown}</div>
+                   <div className="text-xl font-black text-blue-400 uppercase italic mt-4 tracking-widest">TRẬN ĐẤU SẮP BẮT ĐẦU</div>
+                 </div>
+               ) : (
+                 <>
+                   <div className="text-xl font-black text-blue-600 uppercase italic mb-4">CHUẨN BỊ CHIẾN ĐẤU...</div>
+                   <div className="flex gap-2">
+                     {[1,2,3,4].map(i => <div key={i} className="w-3 h-3 bg-blue-600 rounded-full animate-bounce" style={{ animationDelay: `${i*0.2}s` }} />)}
+                   </div>
+                 </>
+               )}
             </div>
           )}
         </div>
