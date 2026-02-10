@@ -49,6 +49,10 @@ const GameEngine: React.FC<GameEngineProps> = ({
   const [isHelpUsed, setIsHelpUsed] = useState(false); 
   const [isWhiteboardActive, setIsWhiteboardActive] = useState(false);
   
+  // Ref để xử lý đồng bộ thời gian
+  const clockOffsetRef = useRef<number>(0); 
+  const lastHeartbeatRef = useRef<number>(Date.now());
+
   const roomCode = matchData.joinedRoom?.code || '';
   const isTeacherRoom = roomCode === 'TEACHER_ROOM';
   const isArenaA = roomCode === 'ARENA_A';
@@ -100,8 +104,11 @@ const GameEngine: React.FC<GameEngineProps> = ({
 
   const syncToProblem = useCallback((roundIdx: number, probIdx: number, syncTime: number) => {
     const qKey = `R${roundIdx}P${probIdx}`;
-    if (lastProcessedQuestionKey.current === qKey) return;
+    // Nếu Slave đã ở đúng câu này và không ở trạng thái treo, bỏ qua
+    if (lastProcessedQuestionKey.current === qKey && gameStateRef.current !== 'STARTING_ROUND') return;
+    
     lastProcessedQuestionKey.current = qKey;
+    isTransitioningRef.current = true;
 
     setUserAnswer(''); 
     setFeedback(null); 
@@ -118,8 +125,13 @@ const GameEngine: React.FC<GameEngineProps> = ({
     const initialTime = targetProblem?.timeLimit || DEFAULT_TIME;
     setTimeLeft(initialTime);
 
-    const delay = Math.max(0, syncTime - Date.now());
+    // Sử dụng clockOffsetRef để bù trừ sai lệch giờ giữa các thiết bị
+    const adjustedNow = Date.now() + clockOffsetRef.current;
+    const delay = Math.max(0, syncTime - adjustedNow);
     
+    // Nếu delay quá lớn (>10s), có thể do lệch giờ nặng, ép về 1s
+    const safeDelay = delay > 10000 ? 1000 : delay;
+
     setTimeout(() => {
       if (isArenaA) {
         setGameState('ANSWERING');
@@ -138,8 +150,27 @@ const GameEngine: React.FC<GameEngineProps> = ({
           }
         }, 1000);
       }
-    }, delay);
+    }, safeDelay);
   }, [isArenaA, isTeacherRoom, rounds, setGameState]);
+
+  // Master định kỳ gửi nhịp tim (Heartbeat) để các máy Slave bị treo có thể tự hồi phục
+  useEffect(() => {
+    if (isMaster && !isArenaA) {
+      const heartbeat = setInterval(() => {
+        channelRef.current?.send({
+          type: 'broadcast',
+          event: 'heartbeat',
+          payload: {
+            roundIdx: currentRoundIdx,
+            probIdx: currentProblemIdx,
+            phase: gameStateRef.current,
+            sentAt: Date.now()
+          }
+        });
+      }, 2500);
+      return () => clearInterval(heartbeat);
+    }
+  }, [isMaster, isArenaA, currentRoundIdx, currentProblemIdx]);
 
   useEffect(() => {
     if (gameState === 'ROUND_INTRO') {
@@ -154,7 +185,13 @@ const GameEngine: React.FC<GameEngineProps> = ({
                 channelRef.current?.send({ 
                   type: 'broadcast', 
                   event: 'sync_phase', 
-                  payload: { phase: 'START_PROBLEM', roundIdx: currentRoundIdx, probIdx: 0, syncTime } 
+                  payload: { 
+                    phase: 'START_PROBLEM', 
+                    roundIdx: currentRoundIdx, 
+                    probIdx: 0, 
+                    syncTime,
+                    sentAt: Date.now() // Để Slave tính clock offset
+                  } 
                 });
                 syncToProblem(currentRoundIdx, 0, syncTime);
               } else if (isArenaA) {
@@ -192,9 +229,30 @@ const GameEngine: React.FC<GameEngineProps> = ({
             }));
           setOpponents(others);
         })
+        .on('broadcast', { event: 'heartbeat' }, ({ payload }) => {
+          // Cập nhật Clock Offset từ Master
+          if (!isMaster) {
+            const currentOffset = payload.sentAt - Date.now();
+            // Dùng trung bình trượt để offset mượt hơn
+            clockOffsetRef.current = (clockOffsetRef.current * 0.8) + (currentOffset * 0.2);
+            
+            // LOGIC TỰ HỒI PHỤC: Nếu Slave bị kẹt ở STARTING_ROUND quá lâu trong khi Master đã đi tiếp
+            if (gameStateRef.current === 'STARTING_ROUND' && payload.phase !== 'STARTING_ROUND') {
+               console.log("Slave bị treo, tự động đồng bộ theo nhịp tim Master...");
+               // Ép buộc đồng bộ lại
+               setSyncCountdown(null);
+               setGameState(payload.phase);
+               isTransitioningRef.current = false;
+            }
+          }
+        })
         .on('broadcast', { event: 'sync_phase' }, ({ payload }) => {
+           // Tính offset ngay từ tin nhắn đầu tiên
+           if (payload.sentAt && !isMaster) {
+              clockOffsetRef.current = payload.sentAt - Date.now();
+           }
+
            if (payload.phase === 'START_PROBLEM' && !isTransitioningRef.current) {
-              isTransitioningRef.current = true;
               syncToProblem(payload.roundIdx, payload.probIdx, payload.syncTime);
            } else if (payload.phase === 'NEXT_QUESTION' && !isTransitioningRef.current) {
               isTransitioningRef.current = true;
@@ -210,7 +268,8 @@ const GameEngine: React.FC<GameEngineProps> = ({
               }
            } else if (payload.phase === 'GAME_OVER' && !isTransitioningRef.current) {
               isTransitioningRef.current = true;
-              const delay = Math.max(0, payload.syncTime - Date.now());
+              const adjustedNow = Date.now() + clockOffsetRef.current;
+              const delay = Math.max(0, payload.syncTime - adjustedNow);
               setTimeout(() => {
                 setGameState('GAME_OVER');
                 isTransitioningRef.current = false;
@@ -240,7 +299,7 @@ const GameEngine: React.FC<GameEngineProps> = ({
       channelRef.current = channel;
       return () => { supabase.removeChannel(channel); };
     }
-  }, [isArenaA, matchData.joinedRoom, myUniqueId, syncToProblem, currentTeacher.id, playerName]);
+  }, [isArenaA, matchData.joinedRoom, myUniqueId, syncToProblem, currentTeacher.id, playerName, isMaster, rounds]);
 
   // Cập nhật điểm lên Presence khi điểm thay đổi
   useEffect(() => {
@@ -266,7 +325,7 @@ const GameEngine: React.FC<GameEngineProps> = ({
                     channelRef.current?.send({ 
                       type: 'broadcast', 
                       event: 'sync_phase', 
-                      payload: { phase: 'NEXT_QUESTION', roundIdx: currentRoundIdx, probIdx: nextProbIdx, syncTime } 
+                      payload: { phase: 'NEXT_QUESTION', roundIdx: currentRoundIdx, probIdx: nextProbIdx, syncTime, sentAt: Date.now() } 
                     });
                   }
                   syncToProblem(currentRoundIdx, nextProbIdx, syncTime);
@@ -276,7 +335,7 @@ const GameEngine: React.FC<GameEngineProps> = ({
                     channelRef.current?.send({ 
                       type: 'broadcast', 
                       event: 'sync_phase', 
-                      payload: { phase: 'NEXT_QUESTION', newRound: true, roundIdx: currentRoundIdx + 1 } 
+                      payload: { phase: 'NEXT_QUESTION', newRound: true, roundIdx: currentRoundIdx + 1, sentAt: Date.now() } 
                     });
                   }
                   setCurrentRoundIdx(prev => prev + 1);
@@ -289,10 +348,11 @@ const GameEngine: React.FC<GameEngineProps> = ({
                     channelRef.current?.send({ 
                       type: 'broadcast', 
                       event: 'sync_phase', 
-                      payload: { phase: 'GAME_OVER', syncTime } 
+                      payload: { phase: 'GAME_OVER', syncTime, sentAt: Date.now() } 
                     });
                   }
-                  const delay = Math.max(0, syncTime - Date.now());
+                  const adjustedNow = Date.now() + clockOffsetRef.current;
+                  const delay = Math.max(0, syncTime - adjustedNow);
                   setTimeout(() => {
                     setGameState('GAME_OVER');
                     isTransitioningRef.current = false;
@@ -409,7 +469,9 @@ const GameEngine: React.FC<GameEngineProps> = ({
              {syncCountdown !== null && (
                 <div className="absolute inset-0 flex flex-col items-center justify-center z-30">
                    <div className="bg-slate-900/80 backdrop-blur-md px-10 py-6 rounded-[2rem] border-2 border-white/10 shadow-2xl">
-                      <p className="text-white font-black uppercase italic tracking-widest text-xl animate-pulse">ĐANG CHUYỂN CÂU...</p>
+                      <p className="text-white font-black uppercase italic tracking-widest text-xl animate-pulse">
+                        {Math.abs(clockOffsetRef.current) > 2000 ? "ĐANG ĐỒNG BỘ GIỜ..." : "ĐANG CHUYỂN CÂU..."}
+                      </p>
                    </div>
                 </div>
              )}
