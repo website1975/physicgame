@@ -49,7 +49,6 @@ const GameEngine: React.FC<GameEngineProps> = ({
   const [isHelpUsed, setIsHelpUsed] = useState(false); 
   const [isWhiteboardActive, setIsWhiteboardActive] = useState(false);
   
-  // Đồng bộ thời gian
   const clockOffsetRef = useRef<number>(0); 
   const syncIntervalRef = useRef<any>(null);
 
@@ -104,8 +103,6 @@ const GameEngine: React.FC<GameEngineProps> = ({
 
   const syncToProblem = useCallback((roundIdx: number, probIdx: number, syncTime: number) => {
     const qKey = `R${roundIdx}P${probIdx}`;
-    
-    // Nếu Slave đã ở đúng câu này và đang trong quá trình chuyển thì bỏ qua
     if (lastProcessedQuestionKey.current === qKey && gameStateRef.current === 'STARTING_ROUND') return;
     
     lastProcessedQuestionKey.current = qKey;
@@ -154,7 +151,6 @@ const GameEngine: React.FC<GameEngineProps> = ({
     }, safeDelay);
   }, [isArenaA, isTeacherRoom, rounds, setGameState]);
 
-  // Heartbeat Master: Đồng bộ trạng thái thực tế
   useEffect(() => {
     if (isMaster && !isArenaA) {
       const heartbeat = setInterval(() => {
@@ -179,16 +175,17 @@ const GameEngine: React.FC<GameEngineProps> = ({
         setRoundIntroTimer(prev => {
           if (prev <= 0.1) {
             clearInterval(timer);
-            if (isMaster && !isArenaA && !isTeacherRoom) {
+            // SỬA LỖI: Cả Master của phòng chung và phòng Giáo viên đều có quyền kích hoạt chuyển câu
+            if (isMaster || isArenaA) {
               const syncTime = Date.now() + 1000;
-              channelRef.current?.send({ 
-                type: 'broadcast', 
-                event: 'sync_phase', 
-                payload: { phase: 'START_PROBLEM', roundIdx: currentRoundIdx, probIdx: 0, syncTime, sentAt: Date.now() } 
-              });
+              if (!isArenaA && channelRef.current) {
+                channelRef.current.send({ 
+                  type: 'broadcast', 
+                  event: 'sync_phase', 
+                  payload: { phase: 'START_PROBLEM', roundIdx: currentRoundIdx, probIdx: 0, syncTime, sentAt: Date.now() } 
+                });
+              }
               syncToProblem(currentRoundIdx, 0, syncTime);
-            } else if (isArenaA) {
-              syncToProblem(currentRoundIdx, 0, Date.now());
             }
             return 0;
           }
@@ -197,11 +194,10 @@ const GameEngine: React.FC<GameEngineProps> = ({
       }, 100);
       return () => clearInterval(timer);
     }
-  }, [gameState, isMaster, isArenaA, isTeacherRoom, syncToProblem, currentRoundIdx]);
+  }, [gameState, isMaster, isArenaA, syncToProblem, currentRoundIdx]);
 
   useEffect(() => {
     if (!isArenaA && matchData.joinedRoom) {
-      // SỬA QUAN TRỌNG: Tên kênh phải khớp hoàn toàn với MultiPlayerArenaManager
       const channelName = isTeacherRoom 
         ? `control_TEACHER_ROOM_${currentTeacher.id}` 
         : `arena_${roomCode}_${currentTeacher.id}`;
@@ -228,13 +224,12 @@ const GameEngine: React.FC<GameEngineProps> = ({
         .on('broadcast', { event: 'heartbeat' }, ({ payload }) => {
           if (!isMaster) {
             clockOffsetRef.current = payload.sentAt - Date.now();
-            
-            // Nếu Master đã vượt qua phase chờ nạp dữ liệu, Slave cũng phải nhảy theo
             const qKeyMaster = `R${payload.roundIdx}P${payload.probIdx}`;
+            
+            // CƠ CHẾ TỰ PHỤC HỒI: Nếu máy Master đã đi xa, máy Slave phải nhảy theo ngay lập tức
             if (qKeyMaster !== lastProcessedQuestionKey.current) {
                syncToProblem(payload.roundIdx, payload.probIdx, payload.sentAt + 500);
-            } else if (gameStateRef.current === 'STARTING_ROUND' && payload.phase !== 'STARTING_ROUND') {
-               // Force finish countdown if master is already ahead
+            } else if ((gameStateRef.current === 'STARTING_ROUND' || gameStateRef.current === 'ROUND_INTRO') && payload.phase !== gameStateRef.current) {
                if (syncIntervalRef.current) clearInterval(syncIntervalRef.current);
                setSyncCountdown(null);
                setGameState(payload.phase);
@@ -287,7 +282,6 @@ const GameEngine: React.FC<GameEngineProps> = ({
     }
   }, [isArenaA, roomCode, currentTeacher.id, myUniqueId, playerName, isMaster, isTeacherRoom, syncToProblem]);
 
-  // Cập nhật điểm lên Presence
   useEffect(() => {
     if (channelRef.current && !isArenaA) {
       channelRef.current.track({ role: 'player', name: playerName, score: score });
