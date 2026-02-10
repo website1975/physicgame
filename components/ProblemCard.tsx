@@ -9,18 +9,37 @@ interface ProblemCardProps {
   isHelpUsed?: boolean; 
 }
 
+const READING_PHASE_DURATION = 15; // 15 giây đọc đề
+
 const ProblemCard: React.FC<ProblemCardProps> = ({ problem, isPaused, isHelpUsed }) => {
   const [elapsed, setElapsed] = useState(0);
+  const [isMemoryHidden, setIsMemoryHidden] = useState(false);
 
   useEffect(() => {
     setElapsed(0);
+    setIsMemoryHidden(false);
   }, [problem?.id]);
 
   useEffect(() => {
     if (isPaused) return;
-    const interval = setInterval(() => setElapsed(p => p + 0.1), 100);
+    const interval = setInterval(() => {
+      setElapsed(p => {
+        const next = p + 0.1;
+        return next;
+      });
+    }, 100);
+    
     return () => clearInterval(interval);
-  }, [isPaused]);
+  }, [isPaused, problem?.id]);
+
+  useEffect(() => {
+    // Logic cho Ghi nhớ nhanh: Ẩn sau 15 giây
+    if (problem?.challenge === DisplayChallenge.MEMORY && elapsed >= READING_PHASE_DURATION && !isHelpUsed) {
+      setIsMemoryHidden(true);
+    } else {
+      setIsMemoryHidden(false);
+    }
+  }, [elapsed, problem?.challenge, isHelpUsed]);
 
   const difficultyColor = {
     [Difficulty.EASY]: 'bg-emerald-500 text-white',
@@ -28,11 +47,71 @@ const ProblemCard: React.FC<ProblemCardProps> = ({ problem, isPaused, isHelpUsed
     [Difficulty.HARD]: 'bg-rose-500 text-white',
   };
 
+  // Tính toán hiệu ứng sương mờ động
+  const fogBlur = useMemo(() => {
+    if (isHelpUsed || problem.challenge !== DisplayChallenge.FOGGY) return 0;
+    // Tăng từ 0px đến 15px trong vòng 15 giây
+    return Math.min(15, (elapsed / READING_PHASE_DURATION) * 15);
+  }, [elapsed, problem.challenge, isHelpUsed]);
+
+  const challengeOverlay = useMemo(() => {
+    if (isHelpUsed) return null;
+    
+    switch (problem.challenge) {
+      case DisplayChallenge.FLOODING:
+        const height = Math.min(100, elapsed * 2);
+        return <div className="absolute bottom-0 left-0 right-0 bg-blue-500/30 backdrop-blur-[1px] border-t-2 border-blue-400/50 pointer-events-none z-20 transition-all" style={{ height: `${height}%` }}></div>;
+      case DisplayChallenge.ANTS:
+        return (
+          <div className="absolute inset-0 pointer-events-none z-20 overflow-hidden opacity-30">
+            {[...Array(15)].map((_, i) => (
+              <div 
+                key={i} 
+                className="absolute text-xs animate-bounce" 
+                style={{ 
+                  left: `${(Math.sin(elapsed + i) * 40) + 50}%`, 
+                  top: `${(Math.cos(elapsed * 0.5 + i) * 40) + 50}%`,
+                  transition: 'all 0.5s linear'
+                }}
+              >
+                🐜
+              </div>
+            ))}
+          </div>
+        );
+      default:
+        return null;
+    }
+  }, [problem.challenge, elapsed, isHelpUsed]);
+
   if (!problem) return null;
 
   return (
-    <div className="bg-white rounded-[2.5rem] p-6 shadow-xl border-4 border-slate-50 relative overflow-hidden h-full flex flex-col animate-in fade-in duration-700">
+    <div className="bg-white rounded-[2.5rem] p-6 shadow-xl border-4 border-slate-50 relative overflow-hidden h-auto min-h-full flex flex-col animate-in fade-in duration-700">
+      {/* Challenge Overlays */}
+      {challengeOverlay}
+
       <div className="relative z-10 flex flex-col h-full">
+        {/* Thanh Timeline 15s Quan sát */}
+        {(problem.challenge === DisplayChallenge.MEMORY || problem.challenge === DisplayChallenge.FOGGY) && !isHelpUsed && (
+           <div className="mb-4 bg-slate-100 p-3 rounded-2xl border-2 border-slate-50 shadow-inner">
+              <div className="flex justify-between items-center mb-1 px-1">
+                 <span className="text-[9px] font-black text-slate-400 uppercase italic tracking-widest">
+                    {elapsed < READING_PHASE_DURATION ? '⏱️ Thời gian đọc đề' : '⚠️ Đã hết thời gian quan sát'}
+                 </span>
+                 <span className={`text-[10px] font-black italic ${elapsed >= READING_PHASE_DURATION ? 'text-red-500' : 'text-blue-500'}`}>
+                    {Math.max(0, Math.ceil(READING_PHASE_DURATION - elapsed))}s
+                 </span>
+              </div>
+              <div className="h-2 w-full bg-slate-200 rounded-full overflow-hidden">
+                 <div 
+                    className={`h-full transition-all duration-100 ease-linear ${elapsed >= READING_PHASE_DURATION ? 'bg-red-500' : 'bg-gradient-to-r from-blue-400 to-indigo-500'}`}
+                    style={{ width: `${Math.max(0, (1 - elapsed / READING_PHASE_DURATION) * 100)}%` }}
+                 />
+              </div>
+           </div>
+        )}
+
         <div className="flex items-center gap-2 mb-3">
           <span className={`text-[8px] font-black px-3 py-1 rounded-full uppercase tracking-widest shadow-sm ${difficultyColor[problem.difficulty]}`}>
             {problem.difficulty}
@@ -41,28 +120,53 @@ const ProblemCard: React.FC<ProblemCardProps> = ({ problem, isPaused, isHelpUsed
             {problem.type}
           </span>
           <div className="flex-1"></div>
-          <span className="text-[8px] font-black text-slate-300 uppercase italic tracking-widest">
-            {problem.topic}
-          </span>
+          {problem.challenge !== DisplayChallenge.NORMAL && (
+            <span className="text-[8px] font-black text-amber-600 bg-amber-50 px-2 py-1 rounded-lg border border-amber-200 animate-pulse italic">
+              ⚠️ {problem.challenge}
+            </span>
+          )}
         </div>
         
-        <h2 className="text-lg font-black text-slate-800 mb-4 leading-tight uppercase italic tracking-tighter drop-shadow-sm line-clamp-2">
+        <h2 className="text-xl md:text-2xl font-black text-slate-800 mb-4 leading-tight uppercase italic tracking-tighter drop-shadow-sm">
           {problem.title}
         </h2>
         
-        <div className="flex-1 bg-slate-50 p-6 rounded-[2rem] border-2 border-slate-100 shadow-inner flex flex-col items-start justify-center overflow-y-auto no-scrollbar">
-           {problem.imageUrl && (
-              <div className="w-full mb-4 flex justify-center">
-                 <img src={problem.imageUrl} className="max-h-40 rounded-xl shadow-md border-2 border-white object-contain" alt="Problem Illustration" />
-              </div>
+        <div 
+          className="flex-1 bg-slate-50 p-6 rounded-[2rem] border-2 border-slate-100 shadow-inner flex flex-col items-start justify-center relative min-h-[200px] transition-all duration-300"
+          style={{ 
+            filter: problem.challenge === DisplayChallenge.FOGGY ? `blur(${fogBlur}px)` : 'none' 
+          }}
+        >
+           {isMemoryHidden ? (
+             <div className="w-full h-full flex flex-col items-center justify-center text-slate-300">
+                <span className="text-6xl mb-4">🧠</span>
+                <p className="font-black uppercase italic tracking-widest text-sm text-center">Nội dung đã bị ẩn!<br/>Dùng trí nhớ của bạn.</p>
+             </div>
+           ) : (
+             <>
+               {problem.imageUrl && (
+                  <div className="w-full mb-4 flex justify-center">
+                     <img src={problem.imageUrl} className="max-h-64 rounded-xl shadow-md border-2 border-white object-contain" alt="Problem Illustration" />
+                  </div>
+               )}
+               <div className="w-full h-auto">
+                  <LatexRenderer 
+                    content={problem.content} 
+                    className="text-lg md:text-2xl text-slate-700 leading-relaxed font-bold italic" 
+                  />
+               </div>
+             </>
            )}
-           <div className="w-full">
-              <LatexRenderer 
-                content={problem.content} 
-                className="text-lg md:text-xl text-slate-700 leading-relaxed font-bold italic" 
-              />
-           </div>
         </div>
+        
+        {/* Overlay cảnh báo khi đã nhòe hẳn (Foggy) */}
+        {problem.challenge === DisplayChallenge.FOGGY && elapsed >= READING_PHASE_DURATION && !isHelpUsed && (
+          <div className="absolute inset-x-6 bottom-10 z-30 pointer-events-none">
+            <div className="bg-slate-900/80 backdrop-blur-sm text-white px-4 py-2 rounded-xl text-[10px] font-black uppercase italic text-center border border-white/10 shadow-xl">
+               Sương mù đã bao phủ - Hãy trả lời ngay!
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
