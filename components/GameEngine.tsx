@@ -22,6 +22,7 @@ interface GameEngineProps {
 }
 
 interface OpponentData {
+  id: string;
   name: string;
   score: number;
 }
@@ -32,7 +33,7 @@ const GameEngine: React.FC<GameEngineProps> = ({
   const [currentRoundIdx, setCurrentRoundIdx] = useState(0);
   const [currentProblemIdx, setCurrentProblemIdx] = useState(matchData.startIndex || 0); 
   const [score, setScore] = useState(0);
-  const [opponentScores, setOpponentScores] = useState<Record<string, OpponentData>>({});
+  const [opponents, setOpponents] = useState<OpponentData[]>([]);
   
   const [timeLeft, setTimeLeft] = useState(DEFAULT_TIME);
   const [feedbackTimer, setFeedbackTimer] = useState(FEEDBACK_TIME);
@@ -52,7 +53,6 @@ const GameEngine: React.FC<GameEngineProps> = ({
   const isTeacherRoom = roomCode === 'TEACHER_ROOM';
   const isArenaA = roomCode === 'ARENA_A';
   const myUniqueId = matchData.myId || 'temp_id';
-  const myPresenceKey = `${playerName}_${myUniqueId}`;
 
   const channelRef = useRef<any>(null);
   const gameStateRef = useRef(gameState);
@@ -66,6 +66,37 @@ const GameEngine: React.FC<GameEngineProps> = ({
   const rounds = matchData.rounds;
   const currentRound = rounds[currentRoundIdx];
   const currentProblem = currentRound?.problems[currentProblemIdx];
+
+  const submitAnswer = useCallback((timeout = false) => {
+    if (gameStateRef.current === 'FEEDBACK') return;
+    
+    const correct = (currentProblem?.correctAnswer || "").trim().toUpperCase();
+    const isPerfect = !timeout && userAnswer.trim().toUpperCase() === correct;
+    const points = isPerfect ? (isHelpUsed ? 60 : 100) : 0;
+    
+    let fbText = "";
+    if (timeout) {
+      fbText = `HẾT GIỜ! Đáp án đúng là: ${correct}`;
+    } else {
+      fbText = isPerfect ? `CHÍNH XÁC! (+${points}đ)` : `SAI RỜI! Đáp án: ${correct}`;
+    }
+
+    const fb = { isCorrect: isPerfect, text: fbText, winner: 'YOU', isTimeout: timeout };
+    
+    if (isPerfect) setScore(s => s + points);
+    setFeedback(fb); 
+    setGameState('FEEDBACK'); 
+    setFeedbackTimer(FEEDBACK_TIME);
+    isTransitioningRef.current = false;
+    
+    if (!isArenaA) {
+      channelRef.current?.send({ 
+        type: 'broadcast', 
+        event: 'match_result', 
+        payload: { player: playerName, playerId: myUniqueId, points, feedback: fb } 
+      });
+    }
+  }, [currentProblem, userAnswer, isHelpUsed, isArenaA, playerName, myUniqueId, setGameState]);
 
   const syncToProblem = useCallback((roundIdx: number, probIdx: number, syncTime: number) => {
     const qKey = `R${roundIdx}P${probIdx}`;
@@ -151,6 +182,15 @@ const GameEngine: React.FC<GameEngineProps> = ({
           const state = channel.presenceState();
           const keys = Object.keys(state).sort();
           setIsMaster(keys[0] === myUniqueId);
+          
+          const others = keys
+            .filter(k => k !== myUniqueId)
+            .map(k => ({
+               id: k,
+               name: (state[k][0] as any)?.name || "Đối thủ",
+               score: (state[k][0] as any)?.score || 0
+            }));
+          setOpponents(others);
         })
         .on('broadcast', { event: 'sync_phase' }, ({ payload }) => {
            if (payload.phase === 'START_PROBLEM' && !isTransitioningRef.current) {
@@ -186,7 +226,7 @@ const GameEngine: React.FC<GameEngineProps> = ({
         })
         .on('broadcast', { event: 'match_result' }, ({ payload }) => {
           if (payload.playerId !== myUniqueId) {
-            setOpponentScores(prev => ({ ...prev, [payload.playerId]: { ...prev[payload.playerId], score: (prev[payload.playerId]?.score || 0) + (payload.points || 0) } }));
+            setOpponents(prev => prev.map(o => o.id === payload.playerId ? { ...o, score: o.score + (payload.points || 0) } : o));
             setFeedback({ ...payload.feedback, winner: 'OPPONENT', winnerName: payload.player });
             setGameState('FEEDBACK');
             setFeedbackTimer(FEEDBACK_TIME);
@@ -194,13 +234,20 @@ const GameEngine: React.FC<GameEngineProps> = ({
           }
         })
         .subscribe(async (status) => {
-          if (status === 'SUBSCRIBED') await channel.track({ role: 'player' });
+          if (status === 'SUBSCRIBED') await channel.track({ role: 'player', name: playerName, score: 0 });
         });
 
       channelRef.current = channel;
       return () => { supabase.removeChannel(channel); };
     }
-  }, [isArenaA, matchData.joinedRoom, myUniqueId, syncToProblem, currentTeacher.id]);
+  }, [isArenaA, matchData.joinedRoom, myUniqueId, syncToProblem, currentTeacher.id, playerName]);
+
+  // Cập nhật điểm lên Presence khi điểm thay đổi
+  useEffect(() => {
+    if (channelRef.current && !isArenaA) {
+      channelRef.current.track({ role: 'player', name: playerName, score: score });
+    }
+  }, [score, playerName, isArenaA]);
 
   useEffect(() => {
     if (gameState === 'FEEDBACK') {
@@ -267,33 +314,17 @@ const GameEngine: React.FC<GameEngineProps> = ({
       const t = setInterval(() => setTimeLeft(p => Math.max(0, p - 1)), 1000);
       return () => clearInterval(t);
     }
-    if (timeLeft === 0 && !isWhiteboardActive && (gameState as any) === 'ANSWERING') {
-      if (buzzerWinner === 'YOU' || isArenaA) submitAnswer();
+    if (timeLeft === 0 && !isWhiteboardActive) {
+      if (gameStateRef.current === 'ANSWERING') {
+        if (buzzerWinner === 'YOU' || isArenaA || isTeacherRoom) {
+          submitAnswer(true); // Timeout
+        }
+      } else if (gameStateRef.current === 'WAITING_FOR_BUZZER') {
+        // Cả hai không ai nhấn chuông
+        submitAnswer(true);
+      }
     }
-  }, [gameState, timeLeft, buzzerWinner, isWhiteboardActive, isArenaA]);
-
-  const submitAnswer = () => {
-    if (gameStateRef.current === 'FEEDBACK') return;
-    
-    const correct = (currentProblem?.correctAnswer || "").trim().toUpperCase();
-    const isPerfect = userAnswer.trim().toUpperCase() === correct;
-    const points = isPerfect ? (isHelpUsed ? 60 : 100) : 0;
-    const fb = { isCorrect: isPerfect, text: isPerfect ? `CHÍNH XÁC! (+${points}đ)` : `SAI RỜI! Đáp án: ${correct}`, winner: 'YOU' };
-    
-    if (isPerfect) setScore(s => s + points);
-    setFeedback(fb); 
-    setGameState('FEEDBACK'); 
-    setFeedbackTimer(FEEDBACK_TIME);
-    isTransitioningRef.current = false;
-    
-    if (!isArenaA) {
-      channelRef.current?.send({ 
-        type: 'broadcast', 
-        event: 'match_result', 
-        payload: { player: playerName, playerId: myUniqueId, points, feedback: fb } 
-      });
-    }
-  };
+  }, [gameState, timeLeft, buzzerWinner, isWhiteboardActive, isArenaA, isTeacherRoom, submitAnswer]);
 
   if (gameState === 'GAME_OVER') {
     return (
@@ -347,14 +378,23 @@ const GameEngine: React.FC<GameEngineProps> = ({
       
       <header className="bg-white px-5 py-3 rounded-[2rem] shadow-md mb-4 flex items-center justify-between border-b-4 border-slate-200 relative z-50 shrink-0">
         <div className="flex items-center gap-3">
-           <div className="bg-blue-600 text-white px-5 py-2 rounded-[1.5rem] shadow-sm border-b-4 border-blue-800 flex flex-col items-center">
-              <div className="text-[8px] font-black uppercase italic opacity-80 leading-none mb-1">BẠN</div>
+           <div className="bg-blue-600 text-white px-5 py-2 rounded-[1.5rem] shadow-sm border-b-4 border-blue-800 flex flex-col items-center min-w-[80px]">
+              <div className="text-[8px] font-black uppercase italic opacity-80 leading-none mb-1 truncate max-w-[60px]">{playerName}</div>
               <div className="text-xl font-black leading-none">{score}đ</div>
            </div>
+           
+           {opponents.map(opp => (
+             <div key={opp.id} className="bg-rose-600 text-white px-5 py-2 rounded-[1.5rem] shadow-sm border-b-4 border-rose-800 flex flex-col items-center min-w-[80px] animate-in slide-in-from-left-2">
+                <div className="text-[8px] font-black uppercase italic opacity-80 leading-none mb-1 truncate max-w-[60px]">{opp.name}</div>
+                <div className="text-xl font-black leading-none">{opp.score}đ</div>
+             </div>
+           ))}
+
            {((gameState as any) === 'WAITING_FOR_BUZZER' || (gameState as any) === 'ANSWERING') && currentProblem?.challenge !== DisplayChallenge.NORMAL && !isHelpUsed && (
-             <button onClick={() => setShowHelpConfirm(true)} className="px-4 py-2 bg-emerald-100 text-emerald-600 rounded-xl font-black uppercase italic text-[10px] border-b-2 border-emerald-200 hover:bg-emerald-500 hover:text-white transition-all">💡 Trợ giúp</button>
+             <button onClick={() => setShowHelpConfirm(true)} className="px-4 py-2 bg-emerald-100 text-emerald-600 rounded-xl font-black uppercase italic text-[10px] border-b-2 border-emerald-200 hover:bg-emerald-500 hover:text-white transition-all ml-2">💡 Trợ giúp</button>
            )}
         </div>
+        
         <div className="flex flex-col items-center">
            <div className="text-[8px] font-black text-slate-400 uppercase italic mb-0.5">TIME</div>
            <div className={`text-3xl font-black italic tabular-nums leading-none ${timeLeft <= 5 ? 'text-red-500 animate-pulse' : 'text-slate-900'}`}>{timeLeft}s</div>
@@ -364,25 +404,37 @@ const GameEngine: React.FC<GameEngineProps> = ({
 
       <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-4 pb-10">
         <div className="lg:col-span-7 h-fit min-h-[400px]">
-          <div className="h-full">
-             <ProblemCard problem={currentProblem} isPaused={isWhiteboardActive} isHelpUsed={isHelpUsed} />
+          <div className={`h-full relative transition-all duration-500 ${syncCountdown !== null ? 'blur-xl grayscale' : 'blur-0 grayscale-0'}`}>
+             <ProblemCard problem={currentProblem} isPaused={isWhiteboardActive || syncCountdown !== null} isHelpUsed={isHelpUsed} />
+             {syncCountdown !== null && (
+                <div className="absolute inset-0 flex flex-col items-center justify-center z-30">
+                   <div className="bg-slate-900/80 backdrop-blur-md px-10 py-6 rounded-[2rem] border-2 border-white/10 shadow-2xl">
+                      <p className="text-white font-black uppercase italic tracking-widest text-xl animate-pulse">ĐANG CHUYỂN CÂU...</p>
+                   </div>
+                </div>
+             )}
           </div>
         </div>
 
         <div className="lg:col-span-5 bg-white rounded-[2.5rem] p-6 shadow-xl flex flex-col h-fit relative min-h-[400px]">
-          {((gameState as any) === 'ANSWERING' && (buzzerWinner === 'YOU' || isArenaA || isTeacherRoom)) ? (
+          {syncCountdown !== null ? (
+            <div className="min-h-[400px] flex flex-col items-center justify-center animate-in zoom-in duration-300">
+               <div className="text-[12rem] font-black text-blue-600 drop-shadow-2xl italic leading-none animate-bounce">{syncCountdown}</div>
+               <div className="text-xl font-black text-blue-400 uppercase italic mt-4 tracking-widest">SẴN SÀNG!</div>
+            </div>
+          ) : ((gameState as any) === 'ANSWERING' && (buzzerWinner === 'YOU' || isArenaA || isTeacherRoom)) ? (
             <div className="flex flex-col animate-in zoom-in w-full h-auto">
                <div className="w-full h-auto">
                   <AnswerInput 
                     problem={currentProblem} 
                     value={userAnswer} 
                     onChange={setUserAnswer} 
-                    onSubmit={submitAnswer} 
+                    onSubmit={() => submitAnswer()} 
                     disabled={(gameState as any) === 'FEEDBACK'} 
                   />
                </div>
                <button 
-                onClick={submitAnswer} 
+                onClick={() => submitAnswer()} 
                 disabled={!userAnswer}
                 className={`w-full py-5 rounded-[1.5rem] font-black italic text-lg mt-6 shadow-lg transition-all active:scale-95 shrink-0 border-b-6 
                   ${userAnswer ? 'bg-blue-600 text-white border-blue-800' : 'bg-slate-100 text-slate-300 border-slate-200 cursor-not-allowed'}`}
@@ -419,7 +471,7 @@ const GameEngine: React.FC<GameEngineProps> = ({
           ) : (gameState as any) === 'FEEDBACK' ? (
              <div className="flex flex-col animate-in zoom-in w-full h-auto">
                 <div className={`text-2xl font-black uppercase italic mb-3 ${feedback?.isCorrect ? 'text-emerald-500' : 'text-blue-500'}`}>
-                  {feedback?.isCorrect ? 'CHÍNH XÁC!' : 'SAI RỜI!'}
+                  {feedback?.isTimeout ? 'HẾT GIỜ!' : feedback?.isCorrect ? 'CHÍNH XÁC!' : 'SAI RỜI!'}
                 </div>
                 <div className="space-y-4 w-full h-auto">
                    <div className="bg-slate-50 p-5 rounded-2xl border-2 border-slate-100 italic font-bold text-slate-700">
@@ -447,19 +499,10 @@ const GameEngine: React.FC<GameEngineProps> = ({
              </div>
           ) : (
             <div className="min-h-[400px] flex flex-col items-center justify-center animate-pulse">
-               {syncCountdown !== null ? (
-                 <div className="flex flex-col items-center animate-in zoom-in duration-300">
-                   <div className="text-[10rem] font-black text-blue-600 drop-shadow-2xl italic leading-none">{syncCountdown}</div>
-                   <div className="text-xl font-black text-blue-400 uppercase italic mt-4 tracking-widest">TRẬN ĐẤU SẮP BẮT ĐẦU</div>
-                 </div>
-               ) : (
-                 <>
-                   <div className="text-xl font-black text-blue-600 uppercase italic mb-4">CHUẨN BỊ CHIẾN ĐẤU...</div>
-                   <div className="flex gap-2">
-                     {[1,2,3,4].map(i => <div key={i} className="w-3 h-3 bg-blue-600 rounded-full animate-bounce" style={{ animationDelay: `${i*0.2}s` }} />)}
-                   </div>
-                 </>
-               )}
+               <div className="text-xl font-black text-blue-600 uppercase italic mb-4">CHUẨN BỊ CHIẾN ĐẤU...</div>
+               <div className="flex gap-2">
+                 {[1,2,3,4].map(i => <div key={i} className="w-3 h-3 bg-blue-600 rounded-full animate-bounce" style={{ animationDelay: `${i*0.2}s` }} />)}
+               </div>
             </div>
           )}
         </div>
