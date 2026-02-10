@@ -71,13 +71,11 @@ const GameEngine: React.FC<GameEngineProps> = ({
     if (lastProcessedQuestionKey.current === qKey) return;
     lastProcessedQuestionKey.current = qKey;
 
-    // QUAN TRỌNG: Reset toàn bộ trạng thái trả lời ngay lập tức
     setUserAnswer(''); 
     setFeedback(null); 
     setBuzzerWinner(null); 
     setIsHelpUsed(false);
     
-    // Đưa về trạng thái trung gian để UI không hiển thị nhầm Feedback của câu cũ cho đề mới
     setGameState('STARTING_ROUND');
     
     setCurrentRoundIdx(roundIdx);
@@ -95,7 +93,6 @@ const GameEngine: React.FC<GameEngineProps> = ({
         setBuzzerWinner('YOU');
         isTransitioningRef.current = false;
       } else {
-        // Multiplayer hoặc Teacher room: Đếm ngược 3s
         let count = 3;
         const interval = setInterval(() => {
           count--;
@@ -142,14 +139,14 @@ const GameEngine: React.FC<GameEngineProps> = ({
   useEffect(() => {
     if (!isArenaA && matchData.joinedRoom) {
       const channel = supabase.channel(`match_${matchData.joinedRoom.code}_${currentTeacher.id}`, {
-        config: { presence: { key: myPresenceKey } }
+        config: { presence: { key: myUniqueId } }
       });
 
       channel
         .on('presence', { event: 'sync' }, () => {
           const state = channel.presenceState();
           const keys = Object.keys(state).sort();
-          setIsMaster(keys[0] === myPresenceKey);
+          setIsMaster(keys[0] === myUniqueId);
         })
         .on('broadcast', { event: 'sync_phase' }, ({ payload }) => {
            if (payload.phase === 'START_PROBLEM' && !isTransitioningRef.current) {
@@ -167,6 +164,13 @@ const GameEngine: React.FC<GameEngineProps> = ({
               } else {
                 syncToProblem(payload.roundIdx, payload.probIdx, payload.syncTime);
               }
+           } else if (payload.phase === 'GAME_OVER' && !isTransitioningRef.current) {
+              isTransitioningRef.current = true;
+              const delay = Math.max(0, payload.syncTime - Date.now());
+              setTimeout(() => {
+                setGameState('GAME_OVER');
+                isTransitioningRef.current = false;
+              }, delay);
            }
         })
         .on('broadcast', { event: 'buzzer_signal' }, ({ payload }) => {
@@ -192,7 +196,7 @@ const GameEngine: React.FC<GameEngineProps> = ({
       channelRef.current = channel;
       return () => { supabase.removeChannel(channel); };
     }
-  }, [isArenaA, matchData.joinedRoom, myPresenceKey, myUniqueId, syncToProblem, currentTeacher.id]);
+  }, [isArenaA, matchData.joinedRoom, myUniqueId, syncToProblem, currentTeacher.id]);
 
   useEffect(() => {
     if (gameState === 'FEEDBACK') {
@@ -216,7 +220,6 @@ const GameEngine: React.FC<GameEngineProps> = ({
                   }
                   syncToProblem(currentRoundIdx, nextProbIdx, syncTime);
                 } else if (currentRoundIdx + 1 < rounds.length) {
-                  // Sang vòng mới
                   setFeedback(null);
                   if (isMaster && !isArenaA) {
                     channelRef.current?.send({ 
@@ -231,8 +234,19 @@ const GameEngine: React.FC<GameEngineProps> = ({
                   setGameState('ROUND_INTRO');
                   isTransitioningRef.current = false;
                 } else {
-                  setGameState('GAME_OVER');
-                  isTransitioningRef.current = false;
+                  // ĐỒNG BỘ GAME OVER
+                  if (isMaster && !isArenaA) {
+                    channelRef.current?.send({ 
+                      type: 'broadcast', 
+                      event: 'sync_phase', 
+                      payload: { phase: 'GAME_OVER', syncTime } 
+                    });
+                  }
+                  const delay = Math.max(0, syncTime - Date.now());
+                  setTimeout(() => {
+                    setGameState('GAME_OVER');
+                    isTransitioningRef.current = false;
+                  }, delay);
                 }
               }
             }
@@ -261,7 +275,7 @@ const GameEngine: React.FC<GameEngineProps> = ({
     const correct = (currentProblem?.correctAnswer || "").trim().toUpperCase();
     const isPerfect = userAnswer.trim().toUpperCase() === correct;
     const points = isPerfect ? (isHelpUsed ? 60 : 100) : 0;
-    const fb = { isCorrect: isPerfect, text: isPerfect ? `CHÍNH XÁC! (+${points}đ)` : `SAI RỒI! Đáp án: ${correct}`, winner: 'YOU' };
+    const fb = { isCorrect: isPerfect, text: isPerfect ? `CHÍNH XÁC! (+${points}đ)` : `SAI RỜI! Đáp án: ${correct}`, winner: 'YOU' };
     
     if (isPerfect) setScore(s => s + points);
     setFeedback(fb); 
