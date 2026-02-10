@@ -49,9 +49,9 @@ const GameEngine: React.FC<GameEngineProps> = ({
   const [isHelpUsed, setIsHelpUsed] = useState(false); 
   const [isWhiteboardActive, setIsWhiteboardActive] = useState(false);
   
-  // Ref để xử lý đồng bộ thời gian
+  // Đồng bộ thời gian
   const clockOffsetRef = useRef<number>(0); 
-  const lastHeartbeatRef = useRef<number>(Date.now());
+  const syncIntervalRef = useRef<any>(null);
 
   const roomCode = matchData.joinedRoom?.code || '';
   const isTeacherRoom = roomCode === 'TEACHER_ROOM';
@@ -104,11 +104,14 @@ const GameEngine: React.FC<GameEngineProps> = ({
 
   const syncToProblem = useCallback((roundIdx: number, probIdx: number, syncTime: number) => {
     const qKey = `R${roundIdx}P${probIdx}`;
-    // Nếu Slave đã ở đúng câu này và không ở trạng thái treo, bỏ qua
-    if (lastProcessedQuestionKey.current === qKey && gameStateRef.current !== 'STARTING_ROUND') return;
+    
+    // Nếu Slave đã ở đúng câu này và đang trong quá trình chuyển thì bỏ qua
+    if (lastProcessedQuestionKey.current === qKey && gameStateRef.current === 'STARTING_ROUND') return;
     
     lastProcessedQuestionKey.current = qKey;
     isTransitioningRef.current = true;
+
+    if (syncIntervalRef.current) clearInterval(syncIntervalRef.current);
 
     setUserAnswer(''); 
     setFeedback(null); 
@@ -117,7 +120,6 @@ const GameEngine: React.FC<GameEngineProps> = ({
     setSyncCountdown(null);
     
     setGameState('STARTING_ROUND');
-    
     setCurrentRoundIdx(roundIdx);
     setCurrentProblemIdx(probIdx);
     
@@ -125,12 +127,9 @@ const GameEngine: React.FC<GameEngineProps> = ({
     const initialTime = targetProblem?.timeLimit || DEFAULT_TIME;
     setTimeLeft(initialTime);
 
-    // Sử dụng clockOffsetRef để bù trừ sai lệch giờ giữa các thiết bị
     const adjustedNow = Date.now() + clockOffsetRef.current;
     const delay = Math.max(0, syncTime - adjustedNow);
-    
-    // Nếu delay quá lớn (>10s), có thể do lệch giờ nặng, ép về 1s
-    const safeDelay = delay > 10000 ? 1000 : delay;
+    const safeDelay = delay > 8000 ? 1000 : delay;
 
     setTimeout(() => {
       if (isArenaA) {
@@ -140,20 +139,22 @@ const GameEngine: React.FC<GameEngineProps> = ({
       } else {
         let count = 3;
         setSyncCountdown(count);
-        const interval = setInterval(() => {
+        syncIntervalRef.current = setInterval(() => {
           count--;
-          setSyncCountdown(count > 0 ? count : null);
           if (count <= 0) {
-            clearInterval(interval);
+            clearInterval(syncIntervalRef.current);
+            setSyncCountdown(null);
             setGameState(isTeacherRoom ? 'ANSWERING' : 'WAITING_FOR_BUZZER');
             isTransitioningRef.current = false;
+          } else {
+            setSyncCountdown(count);
           }
         }, 1000);
       }
     }, safeDelay);
   }, [isArenaA, isTeacherRoom, rounds, setGameState]);
 
-  // Master định kỳ gửi nhịp tim (Heartbeat) để các máy Slave bị treo có thể tự hồi phục
+  // Heartbeat Master: Đồng bộ trạng thái thực tế
   useEffect(() => {
     if (isMaster && !isArenaA) {
       const heartbeat = setInterval(() => {
@@ -167,10 +168,10 @@ const GameEngine: React.FC<GameEngineProps> = ({
             sentAt: Date.now()
           }
         });
-      }, 2500);
+      }, 2000);
       return () => clearInterval(heartbeat);
     }
-  }, [isMaster, isArenaA, currentRoundIdx, currentProblemIdx]);
+  }, [isMaster, isArenaA, currentRoundIdx, currentProblemIdx, gameState]);
 
   useEffect(() => {
     if (gameState === 'ROUND_INTRO') {
@@ -178,26 +179,16 @@ const GameEngine: React.FC<GameEngineProps> = ({
         setRoundIntroTimer(prev => {
           if (prev <= 0.1) {
             clearInterval(timer);
-            if (!isTransitioningRef.current) {
-              if (isMaster && !isArenaA && !isTeacherRoom) {
-                isTransitioningRef.current = true;
-                const syncTime = Date.now() + 1000;
-                channelRef.current?.send({ 
-                  type: 'broadcast', 
-                  event: 'sync_phase', 
-                  payload: { 
-                    phase: 'START_PROBLEM', 
-                    roundIdx: currentRoundIdx, 
-                    probIdx: 0, 
-                    syncTime,
-                    sentAt: Date.now() // Để Slave tính clock offset
-                  } 
-                });
-                syncToProblem(currentRoundIdx, 0, syncTime);
-              } else if (isArenaA) {
-                isTransitioningRef.current = true;
-                syncToProblem(currentRoundIdx, 0, Date.now());
-              }
+            if (isMaster && !isArenaA && !isTeacherRoom) {
+              const syncTime = Date.now() + 1000;
+              channelRef.current?.send({ 
+                type: 'broadcast', 
+                event: 'sync_phase', 
+                payload: { phase: 'START_PROBLEM', roundIdx: currentRoundIdx, probIdx: 0, syncTime, sentAt: Date.now() } 
+              });
+              syncToProblem(currentRoundIdx, 0, syncTime);
+            } else if (isArenaA) {
+              syncToProblem(currentRoundIdx, 0, Date.now());
             }
             return 0;
           }
@@ -210,7 +201,12 @@ const GameEngine: React.FC<GameEngineProps> = ({
 
   useEffect(() => {
     if (!isArenaA && matchData.joinedRoom) {
-      const channel = supabase.channel(`match_${matchData.joinedRoom.code}_${currentTeacher.id}`, {
+      // SỬA QUAN TRỌNG: Tên kênh phải khớp hoàn toàn với MultiPlayerArenaManager
+      const channelName = isTeacherRoom 
+        ? `control_TEACHER_ROOM_${currentTeacher.id}` 
+        : `arena_${roomCode}_${currentTeacher.id}`;
+
+      const channel = supabase.channel(channelName, {
         config: { presence: { key: myUniqueId } }
       });
 
@@ -224,22 +220,22 @@ const GameEngine: React.FC<GameEngineProps> = ({
             .filter(k => k !== myUniqueId)
             .map(k => ({
                id: k,
-               name: (state[k][0] as any)?.name || "Đối thủ",
+               name: (state[k][0] as any)?.name || k.split('_')[0] || "Đối thủ",
                score: (state[k][0] as any)?.score || 0
             }));
           setOpponents(others);
         })
         .on('broadcast', { event: 'heartbeat' }, ({ payload }) => {
-          // Cập nhật Clock Offset từ Master
           if (!isMaster) {
-            const currentOffset = payload.sentAt - Date.now();
-            // Dùng trung bình trượt để offset mượt hơn
-            clockOffsetRef.current = (clockOffsetRef.current * 0.8) + (currentOffset * 0.2);
+            clockOffsetRef.current = payload.sentAt - Date.now();
             
-            // LOGIC TỰ HỒI PHỤC: Nếu Slave bị kẹt ở STARTING_ROUND quá lâu trong khi Master đã đi tiếp
-            if (gameStateRef.current === 'STARTING_ROUND' && payload.phase !== 'STARTING_ROUND') {
-               console.log("Slave bị treo, tự động đồng bộ theo nhịp tim Master...");
-               // Ép buộc đồng bộ lại
+            // Nếu Master đã vượt qua phase chờ nạp dữ liệu, Slave cũng phải nhảy theo
+            const qKeyMaster = `R${payload.roundIdx}P${payload.probIdx}`;
+            if (qKeyMaster !== lastProcessedQuestionKey.current) {
+               syncToProblem(payload.roundIdx, payload.probIdx, payload.sentAt + 500);
+            } else if (gameStateRef.current === 'STARTING_ROUND' && payload.phase !== 'STARTING_ROUND') {
+               // Force finish countdown if master is already ahead
+               if (syncIntervalRef.current) clearInterval(syncIntervalRef.current);
                setSyncCountdown(null);
                setGameState(payload.phase);
                isTransitioningRef.current = false;
@@ -247,15 +243,11 @@ const GameEngine: React.FC<GameEngineProps> = ({
           }
         })
         .on('broadcast', { event: 'sync_phase' }, ({ payload }) => {
-           // Tính offset ngay từ tin nhắn đầu tiên
-           if (payload.sentAt && !isMaster) {
-              clockOffsetRef.current = payload.sentAt - Date.now();
-           }
+           if (payload.sentAt && !isMaster) clockOffsetRef.current = payload.sentAt - Date.now();
 
-           if (payload.phase === 'START_PROBLEM' && !isTransitioningRef.current) {
+           if (payload.phase === 'START_PROBLEM') {
               syncToProblem(payload.roundIdx, payload.probIdx, payload.syncTime);
-           } else if (payload.phase === 'NEXT_QUESTION' && !isTransitioningRef.current) {
-              isTransitioningRef.current = true;
+           } else if (payload.phase === 'NEXT_QUESTION') {
               if (payload.newRound) {
                 setFeedback(null);
                 setCurrentRoundIdx(payload.roundIdx);
@@ -266,14 +258,8 @@ const GameEngine: React.FC<GameEngineProps> = ({
               } else {
                 syncToProblem(payload.roundIdx, payload.probIdx, payload.syncTime);
               }
-           } else if (payload.phase === 'GAME_OVER' && !isTransitioningRef.current) {
-              isTransitioningRef.current = true;
-              const adjustedNow = Date.now() + clockOffsetRef.current;
-              const delay = Math.max(0, payload.syncTime - adjustedNow);
-              setTimeout(() => {
-                setGameState('GAME_OVER');
-                isTransitioningRef.current = false;
-              }, delay);
+           } else if (payload.phase === 'GAME_OVER') {
+              setGameState('GAME_OVER');
            }
         })
         .on('broadcast', { event: 'buzzer_signal' }, ({ payload }) => {
@@ -285,7 +271,7 @@ const GameEngine: React.FC<GameEngineProps> = ({
         })
         .on('broadcast', { event: 'match_result' }, ({ payload }) => {
           if (payload.playerId !== myUniqueId) {
-            setOpponents(prev => prev.map(o => o.id === payload.playerId ? { ...o, score: o.score + (payload.points || 0) } : o));
+            setOpponents(prev => prev.map(o => o.id === payload.playerId ? { ...o, score: (payload.totalScore || o.score + payload.points) } : o));
             setFeedback({ ...payload.feedback, winner: 'OPPONENT', winnerName: payload.player });
             setGameState('FEEDBACK');
             setFeedbackTimer(FEEDBACK_TIME);
@@ -299,9 +285,9 @@ const GameEngine: React.FC<GameEngineProps> = ({
       channelRef.current = channel;
       return () => { supabase.removeChannel(channel); };
     }
-  }, [isArenaA, matchData.joinedRoom, myUniqueId, syncToProblem, currentTeacher.id, playerName, isMaster, rounds]);
+  }, [isArenaA, roomCode, currentTeacher.id, myUniqueId, playerName, isMaster, isTeacherRoom, syncToProblem]);
 
-  // Cập nhật điểm lên Presence khi điểm thay đổi
+  // Cập nhật điểm lên Presence
   useEffect(() => {
     if (channelRef.current && !isArenaA) {
       channelRef.current.track({ role: 'player', name: playerName, score: score });
@@ -314,50 +300,37 @@ const GameEngine: React.FC<GameEngineProps> = ({
         setFeedbackTimer(p => {
           if (p <= 0.1) {
             clearInterval(timer);
-            if (!isTransitioningRef.current) {
-              if ((isMaster && !isArenaA && !isTeacherRoom) || isArenaA) {
-                isTransitioningRef.current = true;
-                const nextProbIdx = currentProblemIdx + 1;
-                const syncTime = Date.now() + 1000;
+            if (isMaster || isArenaA) {
+              const nextProbIdx = currentProblemIdx + 1;
+              const syncTime = Date.now() + 1000;
 
-                if (nextProbIdx < (currentRound?.problems.length || 0)) {
-                  if (isMaster && !isArenaA) {
-                    channelRef.current?.send({ 
-                      type: 'broadcast', 
-                      event: 'sync_phase', 
-                      payload: { phase: 'NEXT_QUESTION', roundIdx: currentRoundIdx, probIdx: nextProbIdx, syncTime, sentAt: Date.now() } 
-                    });
-                  }
-                  syncToProblem(currentRoundIdx, nextProbIdx, syncTime);
-                } else if (currentRoundIdx + 1 < rounds.length) {
-                  setFeedback(null);
-                  if (isMaster && !isArenaA) {
-                    channelRef.current?.send({ 
-                      type: 'broadcast', 
-                      event: 'sync_phase', 
-                      payload: { phase: 'NEXT_QUESTION', newRound: true, roundIdx: currentRoundIdx + 1, sentAt: Date.now() } 
-                    });
-                  }
-                  setCurrentRoundIdx(prev => prev + 1);
-                  setCurrentProblemIdx(0);
-                  setRoundIntroTimer(ROUND_INTRO_TIME);
-                  setGameState('ROUND_INTRO');
-                  isTransitioningRef.current = false;
-                } else {
-                  if (isMaster && !isArenaA) {
-                    channelRef.current?.send({ 
-                      type: 'broadcast', 
-                      event: 'sync_phase', 
-                      payload: { phase: 'GAME_OVER', syncTime, sentAt: Date.now() } 
-                    });
-                  }
-                  const adjustedNow = Date.now() + clockOffsetRef.current;
-                  const delay = Math.max(0, syncTime - adjustedNow);
-                  setTimeout(() => {
-                    setGameState('GAME_OVER');
-                    isTransitioningRef.current = false;
-                  }, delay);
+              if (nextProbIdx < (currentRound?.problems.length || 0)) {
+                if (isMaster && !isArenaA) {
+                  channelRef.current?.send({ 
+                    type: 'broadcast', 
+                    event: 'sync_phase', 
+                    payload: { phase: 'NEXT_QUESTION', roundIdx: currentRoundIdx, probIdx: nextProbIdx, syncTime, sentAt: Date.now() } 
+                  });
                 }
+                syncToProblem(currentRoundIdx, nextProbIdx, syncTime);
+              } else if (currentRoundIdx + 1 < rounds.length) {
+                if (isMaster && !isArenaA) {
+                  channelRef.current?.send({ 
+                    type: 'broadcast', 
+                    event: 'sync_phase', 
+                    payload: { phase: 'NEXT_QUESTION', newRound: true, roundIdx: currentRoundIdx + 1, sentAt: Date.now() } 
+                  });
+                }
+                setFeedback(null);
+                setCurrentRoundIdx(prev => prev + 1);
+                setCurrentProblemIdx(0);
+                setRoundIntroTimer(ROUND_INTRO_TIME);
+                setGameState('ROUND_INTRO');
+              } else {
+                if (isMaster && !isArenaA) {
+                  channelRef.current?.send({ type: 'broadcast', event: 'sync_phase', payload: { phase: 'GAME_OVER', sentAt: Date.now() } });
+                }
+                setGameState('GAME_OVER');
               }
             }
             return 0;
@@ -367,24 +340,21 @@ const GameEngine: React.FC<GameEngineProps> = ({
       }, 100);
       return () => clearInterval(timer);
     }
-  }, [gameState, isMaster, isArenaA, isTeacherRoom, currentRound, currentRoundIdx, currentProblemIdx, rounds, syncToProblem]);
+  }, [gameState, isMaster, isArenaA, currentRoundIdx, currentProblemIdx, rounds, currentRound, isTeacherRoom, syncToProblem]);
 
   useEffect(() => {
     if (((gameState as any) === 'WAITING_FOR_BUZZER' || (gameState as any) === 'ANSWERING') && timeLeft > 0 && !isWhiteboardActive) {
       const t = setInterval(() => setTimeLeft(p => Math.max(0, p - 1)), 1000);
       return () => clearInterval(t);
     }
-    if (timeLeft === 0 && !isWhiteboardActive) {
+    if (timeLeft === 0 && !isWhiteboardActive && !isTransitioningRef.current) {
       if (gameStateRef.current === 'ANSWERING') {
-        if (buzzerWinner === 'YOU' || isArenaA || isTeacherRoom) {
-          submitAnswer(true); // Timeout
-        }
-      } else if (gameStateRef.current === 'WAITING_FOR_BUZZER') {
-        // Cả hai không ai nhấn chuông
+        if (buzzerWinner === 'YOU' || isArenaA || isTeacherRoom) submitAnswer(true);
+      } else if (gameStateRef.current === 'WAITING_FOR_BUZZER' && (isMaster || isArenaA)) {
         submitAnswer(true);
       }
     }
-  }, [gameState, timeLeft, buzzerWinner, isWhiteboardActive, isArenaA, isTeacherRoom, submitAnswer]);
+  }, [gameState, timeLeft, buzzerWinner, isWhiteboardActive, isArenaA, isTeacherRoom, isMaster, submitAnswer]);
 
   if (gameState === 'GAME_OVER') {
     return (
@@ -405,27 +375,17 @@ const GameEngine: React.FC<GameEngineProps> = ({
         <div className="relative mb-12 animate-bounce">
            <span className="text-9xl drop-shadow-[0_10px_20px_rgba(0,0,0,0.5)]">⚔️</span>
         </div>
-        
-        <h2 className="text-6xl font-black text-white uppercase italic mb-8 tracking-tighter drop-shadow-xl">
-           VÒNG {currentRound?.number}
-        </h2>
-
+        <h2 className="text-6xl font-black text-white uppercase italic mb-8 tracking-tighter drop-shadow-xl">VÒNG {currentRound?.number}</h2>
         <div className="bg-white rounded-[3.5rem] p-10 shadow-[0_25px_50px_-12px_rgba(0,0,0,0.5)] max-w-2xl w-full border-b-[12px] border-blue-600 animate-in zoom-in duration-500">
-           <p className="text-slate-600 font-bold text-xl md:text-2xl italic uppercase tracking-widest leading-relaxed">
-             {currentRound?.description || "Hãy chuẩn bị tinh thần cho thử thách tiếp theo!"}
-           </p>
+           <p className="text-slate-600 font-bold text-xl md:text-2xl italic uppercase tracking-widest leading-relaxed">{currentRound?.description || "Hãy chuẩn bị tinh thần!"}</p>
         </div>
-
         <div className="mt-16 w-full max-w-md">
            <div className="flex justify-between items-center px-4 mb-2">
-              <span className="text-[10px] font-black text-blue-400 uppercase italic tracking-[0.2em]">CHUẨN BỊ...</span>
+              <span className="text-[10px] font-black text-blue-400 uppercase italic">CHUẨN BỊ...</span>
               <span className="text-[10px] font-black text-white uppercase italic">BẮT ĐẦU TRONG {Math.max(0, Math.ceil(roundIntroTimer))}s</span>
            </div>
-           <div className="h-3 w-full bg-white/10 rounded-full overflow-hidden border border-white/5">
-              <div 
-                className="h-full bg-gradient-to-r from-blue-400 to-blue-600 transition-all duration-100 ease-linear shadow-[0_0_15px_rgba(59,130,246,0.5)]"
-                style={{ width: `${(roundIntroTimer / ROUND_INTRO_TIME) * 100}%` }}
-              />
+           <div className="h-3 w-full bg-white/10 rounded-full overflow-hidden">
+              <div className="h-full bg-blue-500 transition-all duration-100 ease-linear" style={{ width: `${(roundIntroTimer / ROUND_INTRO_TIME) * 100}%` }} />
            </div>
         </div>
       </div>
@@ -434,29 +394,26 @@ const GameEngine: React.FC<GameEngineProps> = ({
 
   return (
     <div className="min-h-screen bg-slate-100 flex flex-col p-3 overflow-y-auto no-scrollbar relative text-left">
-      <ConfirmModal isOpen={showHelpConfirm} title="Sử dụng Trợ giúp?" message="Bạn chỉ nhận được tối đa 60% số điểm nếu trả lời đúng!" onConfirm={() => { setIsHelpUsed(true); setShowHelpConfirm(false); }} onCancel={() => setShowHelpConfirm(false)} />
+      <ConfirmModal isOpen={showHelpConfirm} title="Sử dụng Trợ giúp?" message="Bạn chỉ nhận được tối đa 60% số điểm!" onConfirm={() => { setIsHelpUsed(true); setShowHelpConfirm(false); }} onCancel={() => setShowHelpConfirm(false)} />
       
       <header className="bg-white px-5 py-3 rounded-[2rem] shadow-md mb-4 flex items-center justify-between border-b-4 border-slate-200 relative z-50 shrink-0">
         <div className="flex items-center gap-3">
            <div className="bg-blue-600 text-white px-5 py-2 rounded-[1.5rem] shadow-sm border-b-4 border-blue-800 flex flex-col items-center min-w-[80px]">
-              <div className="text-[8px] font-black uppercase italic opacity-80 leading-none mb-1 truncate max-w-[60px]">{playerName}</div>
-              <div className="text-xl font-black leading-none">{score}đ</div>
+              <div className="text-[8px] font-black uppercase italic opacity-80 mb-1 truncate max-w-[60px]">{playerName}</div>
+              <div className="text-xl font-black">{score}đ</div>
            </div>
-           
            {opponents.map(opp => (
              <div key={opp.id} className="bg-rose-600 text-white px-5 py-2 rounded-[1.5rem] shadow-sm border-b-4 border-rose-800 flex flex-col items-center min-w-[80px] animate-in slide-in-from-left-2">
-                <div className="text-[8px] font-black uppercase italic opacity-80 leading-none mb-1 truncate max-w-[60px]">{opp.name}</div>
-                <div className="text-xl font-black leading-none">{opp.score}đ</div>
+                <div className="text-[8px] font-black uppercase italic opacity-80 mb-1 truncate max-w-[60px]">{opp.name}</div>
+                <div className="text-xl font-black">{opp.score}đ</div>
              </div>
            ))}
-
            {((gameState as any) === 'WAITING_FOR_BUZZER' || (gameState as any) === 'ANSWERING') && currentProblem?.challenge !== DisplayChallenge.NORMAL && !isHelpUsed && (
-             <button onClick={() => setShowHelpConfirm(true)} className="px-4 py-2 bg-emerald-100 text-emerald-600 rounded-xl font-black uppercase italic text-[10px] border-b-2 border-emerald-200 hover:bg-emerald-500 hover:text-white transition-all ml-2">💡 Trợ giúp</button>
+             <button onClick={() => setShowHelpConfirm(true)} className="px-4 py-2 bg-emerald-100 text-emerald-600 rounded-xl font-black uppercase italic text-[10px] border-b-2 border-emerald-200 ml-2">💡 Trợ giúp</button>
            )}
         </div>
-        
         <div className="flex flex-col items-center">
-           <div className="text-[8px] font-black text-slate-400 uppercase italic mb-0.5">TIME</div>
+           <div className="text-[8px] font-black text-slate-400 uppercase italic">TIME</div>
            <div className={`text-3xl font-black italic tabular-nums leading-none ${timeLeft <= 5 ? 'text-red-500 animate-pulse' : 'text-slate-900'}`}>{timeLeft}s</div>
         </div>
         <button onClick={() => setShowExitConfirm(true)} className="w-10 h-10 bg-red-50 text-red-500 rounded-xl flex items-center justify-center font-black">✕</button>
@@ -481,28 +438,19 @@ const GameEngine: React.FC<GameEngineProps> = ({
         <div className="lg:col-span-5 bg-white rounded-[2.5rem] p-6 shadow-xl flex flex-col h-fit relative min-h-[400px]">
           {syncCountdown !== null ? (
             <div className="min-h-[400px] flex flex-col items-center justify-center animate-in zoom-in duration-300">
-               <div className="text-[12rem] font-black text-blue-600 drop-shadow-2xl italic leading-none animate-bounce">{syncCountdown}</div>
+               <div className="text-[12rem] font-black text-blue-600 drop-shadow-2xl italic animate-bounce">{syncCountdown}</div>
                <div className="text-xl font-black text-blue-400 uppercase italic mt-4 tracking-widest">SẴN SÀNG!</div>
             </div>
           ) : ((gameState as any) === 'ANSWERING' && (buzzerWinner === 'YOU' || isArenaA || isTeacherRoom)) ? (
             <div className="flex flex-col animate-in zoom-in w-full h-auto">
                <div className="w-full h-auto">
-                  <AnswerInput 
-                    problem={currentProblem} 
-                    value={userAnswer} 
-                    onChange={setUserAnswer} 
-                    onSubmit={() => submitAnswer()} 
-                    disabled={(gameState as any) === 'FEEDBACK'} 
-                  />
+                  <AnswerInput problem={currentProblem} value={userAnswer} onChange={setUserAnswer} onSubmit={() => submitAnswer()} disabled={(gameState as any) === 'FEEDBACK'} />
                </div>
                <button 
                 onClick={() => submitAnswer()} 
                 disabled={!userAnswer}
-                className={`w-full py-5 rounded-[1.5rem] font-black italic text-lg mt-6 shadow-lg transition-all active:scale-95 shrink-0 border-b-6 
-                  ${userAnswer ? 'bg-blue-600 text-white border-blue-800' : 'bg-slate-100 text-slate-300 border-slate-200 cursor-not-allowed'}`}
-               >
-                 XÁC NHẬN ĐÁP ÁN ✅
-               </button>
+                className={`w-full py-5 rounded-[1.5rem] font-black italic text-lg mt-6 shadow-lg transition-all active:scale-95 border-b-6 ${userAnswer ? 'bg-blue-600 text-white border-blue-800' : 'bg-slate-100 text-slate-300 border-slate-200'}`}
+               >XÁC NHẬN ĐÁP ÁN ✅</button>
             </div>
           ) : (gameState as any) === 'WAITING_FOR_BUZZER' && !isArenaA && !isTeacherRoom ? (
             <div className="min-h-[400px] flex flex-col items-center justify-center text-center animate-in fade-in">
@@ -517,10 +465,8 @@ const GameEngine: React.FC<GameEngineProps> = ({
                     setTimeLeft(20);
                   }
                 }}
-                className="w-48 h-48 bg-red-600 rounded-full border-[12px] border-red-800 shadow-[0_12px_0_#991b1b,0_20px_40px_rgba(220,38,38,0.4)] hover:scale-105 active:translate-y-4 transition-all flex items-center justify-center group"
-               >
-                 <span className="text-white font-black text-3xl uppercase italic drop-shadow-lg">BẤM!</span>
-               </button>
+                className="w-48 h-48 bg-red-600 rounded-full border-[12px] border-red-800 shadow-[0_12px_0_#991b1b,0_20px_40px_rgba(220,38,38,0.4)] hover:scale-105 active:translate-y-4 transition-all flex items-center justify-center"
+               ><span className="text-white font-black text-3xl uppercase italic">BẤM!</span></button>
             </div>
           ) : (gameState as any) === 'ANSWERING' && buzzerWinner === 'OPPONENT' ? (
             <div className="min-h-[400px] flex flex-col items-center justify-center text-center animate-in slide-in-from-right">
@@ -536,14 +482,10 @@ const GameEngine: React.FC<GameEngineProps> = ({
                   {feedback?.isTimeout ? 'HẾT GIỜ!' : feedback?.isCorrect ? 'CHÍNH XÁC!' : 'SAI RỜI!'}
                 </div>
                 <div className="space-y-4 w-full h-auto">
-                   <div className="bg-slate-50 p-5 rounded-2xl border-2 border-slate-100 italic font-bold text-slate-700">
-                      <LatexRenderer content={feedback?.text || ""} />
-                   </div>
+                   <div className="bg-slate-50 p-5 rounded-2xl border-2 border-slate-100 italic font-bold text-slate-700"><LatexRenderer content={feedback?.text || ""} /></div>
                    <div className="bg-emerald-50/50 p-6 rounded-[1.5rem] border-2 border-emerald-100">
                       <h4 className="text-emerald-600 font-black uppercase text-[10px] mb-2">📖 GIẢI CHI TIẾT</h4>
-                      <div className="text-slate-600 text-sm md:text-base italic leading-relaxed">
-                         <LatexRenderer content={currentProblem?.explanation || ""} />
-                      </div>
+                      <div className="text-slate-600 text-sm md:text-base italic leading-relaxed"><LatexRenderer content={currentProblem?.explanation || ""} /></div>
                    </div>
                 </div>
                 <div className="mt-8 flex flex-col gap-2">
@@ -551,11 +493,8 @@ const GameEngine: React.FC<GameEngineProps> = ({
                       <span className="font-black italic uppercase text-[10px] text-slate-400">ĐANG ĐỌC ĐÁP ÁN...</span>
                       <span className="text-[10px] font-black text-blue-500 italic">NEXT CÂU KẾ</span>
                    </div>
-                   <div className="h-4 w-full bg-slate-100 rounded-full overflow-hidden border-2 border-slate-50 shadow-inner">
-                      <div 
-                        className="h-full bg-gradient-to-r from-blue-500 to-indigo-600 transition-all duration-100 ease-linear shadow-[0_0_10px_rgba(59,130,246,0.3)]"
-                        style={{ width: `${(feedbackTimer / FEEDBACK_TIME) * 100}%` }}
-                      />
+                   <div className="h-4 w-full bg-slate-100 rounded-full overflow-hidden">
+                      <div className="h-full bg-blue-500 transition-all duration-100 ease-linear" style={{ width: `${(feedbackTimer / FEEDBACK_TIME) * 100}%` }} />
                    </div>
                 </div>
              </div>
@@ -569,7 +508,7 @@ const GameEngine: React.FC<GameEngineProps> = ({
           )}
         </div>
       </div>
-      <ConfirmModal isOpen={showExitConfirm} title="Thoát trận đấu?" message="Kết quả hiện tại sẽ không được lưu lại!" onConfirm={onExit} onCancel={() => setShowExitConfirm(false)} isDestructive={true} />
+      <ConfirmModal isOpen={showExitConfirm} title="Thoát trận đấu?" message="Kết quả sẽ không được lưu!" onConfirm={onExit} onCancel={() => setShowExitConfirm(false)} isDestructive={true} />
     </div>
   );
 };
