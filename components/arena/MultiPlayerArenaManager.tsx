@@ -46,7 +46,7 @@ const MultiPlayerArenaManager: React.FC<MultiPlayerArenaManagerProps> = ({
         const capacity = joinedRoom.capacity || 2;
         const isMaster = keys[0] === myPresenceKey;
 
-        // Chỉ Master mới được quyền chọn đề và phát tín hiệu bắt đầu
+        // CHỈ MASTER MỚI ĐIỀU PHỐI KHỞI TẠO
         if (playerInfos.length >= capacity && !matchStartedRef.current && isMaster && !heartbeatIntervalRef.current) {
           try {
             const assignments = await getRoomAssignments(currentTeacher.id, joinedRoom.code);
@@ -60,8 +60,8 @@ const MultiPlayerArenaManager: React.FC<MultiPlayerArenaManagerProps> = ({
               const selectedSet = validSets[Math.floor(Math.random() * validSets.length)];
               const allPlayersPayload = playerInfos.map(p => ({ id: p.id, name: p.name }));
               
-              // Tạo một mốc thời gian bắt đầu trong tương lai (2 giây tới) để tất cả các máy cùng sync
-              const syncStartTime = Date.now() + 2000;
+              // Tăng buffer lên 3 giây để đảm bảo sync mạng
+              const syncStartTime = Date.now() + 3000;
 
               const sendSignal = () => {
                 if (matchStartedRef.current) return;
@@ -78,21 +78,23 @@ const MultiPlayerArenaManager: React.FC<MultiPlayerArenaManagerProps> = ({
                 });
               };
 
-              // Gửi liên tục tín hiệu cho đến khi trận đấu thực sự bắt đầu
               sendSignal();
-              heartbeatIntervalRef.current = setInterval(sendSignal, 300);
+              heartbeatIntervalRef.current = setInterval(sendSignal, 500);
 
-              // Tự kích hoạt cho chính Master sau khi đến giờ
-              setTimeout(() => {
-                if (matchStartedRef.current) return;
-                matchStartedRef.current = true;
-                if (heartbeatIntervalRef.current) clearInterval(heartbeatIntervalRef.current);
-                const opponents = allPlayersPayload.filter(p => p.id !== uniqueId);
-                onStartMatch({ 
-                  setId: selectedSet.id, title: selectedSet.title, rounds: selectedSet.rounds, 
-                  opponents, joinedRoom, myId: uniqueId 
-                });
-              }, 2000); 
+              // Tự đợi đến giờ mới kích hoạt local
+              const checkStart = setInterval(() => {
+                if (Date.now() >= syncStartTime) {
+                  clearInterval(checkStart);
+                  if (matchStartedRef.current) return;
+                  matchStartedRef.current = true;
+                  if (heartbeatIntervalRef.current) clearInterval(heartbeatIntervalRef.current);
+                  const opponents = allPlayersPayload.filter(p => p.id !== uniqueId);
+                  onStartMatch({ 
+                    setId: selectedSet.id, title: selectedSet.title, rounds: selectedSet.rounds, 
+                    opponents, joinedRoom, myId: uniqueId 
+                  });
+                }
+              }, 100);
             }
           } catch (e) {
             console.error("Lỗi Master khởi tạo:", e);
@@ -102,10 +104,10 @@ const MultiPlayerArenaManager: React.FC<MultiPlayerArenaManagerProps> = ({
       .on('broadcast', { event: 'match_start_signal' }, ({ payload }) => {
         if (matchStartedRef.current) return;
         
-        const now = Date.now();
-        const delay = Math.max(0, payload.startTime - now);
+        const delay = payload.startTime - Date.now();
         
-        // Chờ đợi đến đúng giây `startTime` mới chuyển cảnh
+        // Nếu tín hiệu đến quá trễ (quá mốc bắt đầu), bắt đầu ngay lập tức
+        // Nếu còn thời gian, đợi đến đúng milli-giây đó
         matchStartedRef.current = true;
         if (heartbeatIntervalRef.current) clearInterval(heartbeatIntervalRef.current);
         const opponents = (payload.allPlayers || []).filter((p: any) => p.id !== uniqueId).map((p: any) => ({ id: p.id, name: p.name }));
@@ -115,7 +117,7 @@ const MultiPlayerArenaManager: React.FC<MultiPlayerArenaManagerProps> = ({
             setId: payload.setId, title: payload.title, rounds: payload.rounds, 
             opponents, joinedRoom, myId: uniqueId 
           });
-        }, delay);
+        }, Math.max(0, delay));
       })
       .subscribe(async (status) => {
         if (status === 'SUBSCRIBED') {
