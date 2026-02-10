@@ -46,7 +46,7 @@ const MultiPlayerArenaManager: React.FC<MultiPlayerArenaManagerProps> = ({
         const capacity = joinedRoom.capacity || 2;
         const isMaster = keys[0] === myPresenceKey;
 
-        // Chỉ Master mới có quyền khởi tạo trận đấu
+        // Chỉ Master mới được quyền chọn đề và phát tín hiệu bắt đầu
         if (playerInfos.length >= capacity && !matchStartedRef.current && isMaster && !heartbeatIntervalRef.current) {
           try {
             const assignments = await getRoomAssignments(currentTeacher.id, joinedRoom.code);
@@ -60,11 +60,11 @@ const MultiPlayerArenaManager: React.FC<MultiPlayerArenaManagerProps> = ({
               const selectedSet = validSets[Math.floor(Math.random() * validSets.length)];
               const allPlayersPayload = playerInfos.map(p => ({ id: p.id, name: p.name }));
               
-              // ĐỒNG BỘ TUYỆT ĐỐI: Master ấn định thời gian bắt đầu vào 3 giây tới
-              const syncStartTime = Date.now() + 3000;
+              // Tạo một mốc thời gian bắt đầu trong tương lai (2 giây tới) để tất cả các máy cùng sync
+              const syncStartTime = Date.now() + 2000;
 
               const sendSignal = () => {
-                if (matchStartedRef.current && isMaster) return;
+                if (matchStartedRef.current) return;
                 channel.send({
                   type: 'broadcast',
                   event: 'match_start_signal',
@@ -73,15 +73,16 @@ const MultiPlayerArenaManager: React.FC<MultiPlayerArenaManagerProps> = ({
                     rounds: selectedSet.rounds,
                     title: selectedSet.title,
                     allPlayers: allPlayersPayload,
-                    startTime: syncStartTime // Mốc thời gian bắt đầu chuẩn
+                    startTime: syncStartTime
                   }
                 });
               };
 
+              // Gửi liên tục tín hiệu cho đến khi trận đấu thực sự bắt đầu
               sendSignal();
-              heartbeatIntervalRef.current = setInterval(sendSignal, 1000);
+              heartbeatIntervalRef.current = setInterval(sendSignal, 300);
 
-              // Tự chuyển trạng thái sau khi đợi syncStartTime
+              // Tự kích hoạt cho chính Master sau khi đến giờ
               setTimeout(() => {
                 if (matchStartedRef.current) return;
                 matchStartedRef.current = true;
@@ -91,9 +92,7 @@ const MultiPlayerArenaManager: React.FC<MultiPlayerArenaManagerProps> = ({
                   setId: selectedSet.id, title: selectedSet.title, rounds: selectedSet.rounds, 
                   opponents, joinedRoom, myId: uniqueId 
                 });
-              }, 3000); 
-            } else {
-              alert("Thầy/Cô chưa gán đề cho phòng này!");
+              }, 2000); 
             }
           } catch (e) {
             console.error("Lỗi Master khởi tạo:", e);
@@ -103,15 +102,14 @@ const MultiPlayerArenaManager: React.FC<MultiPlayerArenaManagerProps> = ({
       .on('broadcast', { event: 'match_start_signal' }, ({ payload }) => {
         if (matchStartedRef.current) return;
         
-        // Tính toán độ trễ dựa trên mốc thời gian Master gửi
         const now = Date.now();
         const delay = Math.max(0, payload.startTime - now);
         
+        // Chờ đợi đến đúng giây `startTime` mới chuyển cảnh
         matchStartedRef.current = true;
         if (heartbeatIntervalRef.current) clearInterval(heartbeatIntervalRef.current);
         const opponents = (payload.allPlayers || []).filter((p: any) => p.id !== uniqueId).map((p: any) => ({ id: p.id, name: p.name }));
         
-        // Tất cả các máy cùng nạp màn hình vào đúng mili giây delay
         setTimeout(() => {
           onStartMatch({ 
             setId: payload.setId, title: payload.title, rounds: payload.rounds, 
@@ -136,7 +134,7 @@ const MultiPlayerArenaManager: React.FC<MultiPlayerArenaManagerProps> = ({
     <div className="min-h-screen flex items-center justify-center p-6 bg-slate-950">
       <div className="bg-white rounded-[4rem] p-12 shadow-2xl max-w-4xl w-full border-b-[12px] border-purple-600 flex flex-col items-center">
            <div className="text-5xl mb-6">📡</div>
-           <h2 className="text-3xl font-black text-slate-800 uppercase italic mb-8 text-center tracking-tighter">KẾT NỐI ĐẤU TRƯỜNG</h2>
+           <h2 className="text-3xl font-black text-slate-800 uppercase italic mb-8 text-center tracking-tighter">ARENA SYNC</h2>
            <div className="w-full py-12 bg-slate-950 rounded-[3rem] text-white flex flex-col items-center gap-10">
               <div className="grid grid-cols-2 md:grid-cols-4 gap-6 px-10">
                  {presentPlayers.map((p, i) => (
@@ -151,7 +149,7 @@ const MultiPlayerArenaManager: React.FC<MultiPlayerArenaManagerProps> = ({
               <div className="flex items-center gap-4 bg-white/5 px-8 py-4 rounded-full border border-white/10">
                  <div className="w-5 h-5 border-3 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
                  <span className="font-black italic uppercase text-lg text-white tracking-widest">
-                   {presentPlayers.length >= (joinedRoom.capacity || 2) ? 'ĐANG ĐỒNG BỘ THỜI GIAN THỰC...' : 'ĐANG ĐỢI ĐỐI THỦ...'}
+                   {presentPlayers.length >= (joinedRoom.capacity || 2) ? 'KÍCH HOẠT TRẬN ĐẤU...' : 'ĐANG ĐỢI ĐỐI THỦ...'}
                  </span>
               </div>
            </div>
