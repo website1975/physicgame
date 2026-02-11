@@ -1,11 +1,8 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { PhysicsProblem, Round, Difficulty, QuestionType, DisplayChallenge, GameState, GameSettings, InteractiveMechanic, Player, AdminTab } from '../types';
-import LatexRenderer from './LatexRenderer';
 import Whiteboard from './Whiteboard';
-import { fetchQuestionsLibrary, uploadQuestionImage, supabase } from '../services/supabaseService';
-import { parseQuestionsFromText } from '../services/geminiService';
-import ConfirmModal from './ConfirmModal';
+import { supabase } from '../services/supabaseService';
 
 interface AdminPanelProps {
   rounds: Round[];
@@ -43,10 +40,9 @@ interface StudentStatus {
 
 const AdminPanel: React.FC<AdminPanelProps> = (props) => {
   const { 
-    rounds, setRounds, onSaveSet, loadedSetTitle, loadedSetId, 
+    rounds = [], setRounds, onSaveSet, loadedSetTitle, loadedSetId, 
     loadedSetTopic, teacherId, adminTab, setAdminTab, onStartGame,
-    onNextQuestion, currentProblemIdx, totalProblems, examSets,
-    liveSessionKey
+    onNextQuestion, currentProblemIdx, totalProblems, examSets
   } = props;
 
   const [activeRoundIdx, setActiveRoundIdx] = useState(0);
@@ -67,10 +63,8 @@ const AdminPanel: React.FC<AdminPanelProps> = (props) => {
 
   const LIVE_CHANNEL_NAME = `room_TEACHER_LIVE_${teacherId}`;
 
-  // Đảm bảo kênh Live được thiết lập ngay khi vào tab Control
   useEffect(() => {
     if (adminTab === 'CONTROL' && teacherId) {
-      console.log("Establishing Teacher Control Channel:", LIVE_CHANNEL_NAME);
       const channel = supabase.channel(LIVE_CHANNEL_NAME, {
         config: { presence: { key: 'teacher' } }
       });
@@ -112,7 +106,7 @@ const AdminPanel: React.FC<AdminPanelProps> = (props) => {
               [key]: { 
                 ...prev[key], 
                 answered: true, 
-                isCorrect: payload.feedback.isCorrect 
+                isCorrect: payload.feedback?.isCorrect || false
               }
             };
           });
@@ -142,12 +136,8 @@ const AdminPanel: React.FC<AdminPanelProps> = (props) => {
   };
 
   const handleStartLiveMatch = () => {
-    if (Object.keys(connectedStudents).length === 0) {
-      notify("Cần ít nhất 1 học sinh tham gia!", "error");
-      return;
-    }
-    if (rounds.length === 0 || !rounds[0].problems.length) {
-      notify("Vui lòng soạn đề hoặc chọn bộ đề trước!", "error");
+    if (!rounds || rounds.length === 0) {
+      notify("Dữ liệu bộ đề chưa sẵn sàng!", "error");
       return;
     }
     
@@ -166,22 +156,20 @@ const AdminPanel: React.FC<AdminPanelProps> = (props) => {
         type: 'broadcast',
         event: 'teacher_start_game',
         payload: { 
-          setId: loadedSetId || 'live_manual', 
-          title: loadedSetTitle || currentTitle, 
-          rounds: rounds, 
+          setId: loadedSetId, 
+          teacherId: teacherId,
           currentQuestionIndex: 0,
-          currentRoundIndex: 0,
-          teacherId: teacherId
+          currentRoundIndex: 0
         }
       });
-      notify("🚀 ĐÃ PHÁT TÍN HIỆU BẮT ĐẦU!");
+      notify("🚀 ĐÃ KÍCH HOẠT ARENA!");
     }
   };
 
   const handleNextLiveQuestion = () => {
+    const currentProblems = rounds[liveRoundIdx]?.problems || [];
     let nextProb = liveProblemIdx + 1;
     let nextRound = liveRoundIdx;
-    const currentProblems = rounds[liveRoundIdx]?.problems || [];
     
     if (nextProb >= currentProblems.length) {
       if (liveRoundIdx + 1 < rounds.length) {
@@ -211,7 +199,6 @@ const AdminPanel: React.FC<AdminPanelProps> = (props) => {
           nextRoundIndex: nextRound
         } 
       });
-      notify(`⏩ ĐÃ CHUYỂN: VÒNG ${nextRound + 1} - CÂU ${nextProb + 1}`);
     }
   };
 
@@ -227,65 +214,84 @@ const AdminPanel: React.FC<AdminPanelProps> = (props) => {
     }
   };
 
-  const currentLiveProblem = rounds[liveRoundIdx]?.problems[liveProblemIdx];
-
   if (adminTab === 'CONTROL') {
+    const totalQInCurrentRound = rounds[liveRoundIdx]?.problems?.length || 0;
+    const answeredCount = Object.values(connectedStudents).filter(s => s.answered).length;
+    const totalConnected = Object.keys(connectedStudents).length;
+
     return (
       <div className="flex flex-col gap-6 animate-in fade-in duration-500 text-left h-full">
-         <header className="bg-white p-6 rounded-[2.5rem] shadow-xl border-b-8 border-slate-200 flex flex-col md:flex-row items-center justify-between gap-6 shrink-0">
-            <div className="flex items-center gap-6">
-               <div className="bg-slate-900 text-white p-5 rounded-[2.2rem] text-center min-w-[160px] shadow-2xl border-b-8 border-blue-600 relative">
+         <header className="bg-white p-8 rounded-[3rem] shadow-xl border-b-[10px] border-slate-100 flex flex-col md:flex-row items-center justify-between gap-8 shrink-0">
+            <div className="flex items-center gap-8">
+               <div className="bg-slate-900 text-white p-6 rounded-[2.5rem] text-center min-w-[200px] shadow-2xl border-b-8 border-blue-600 relative">
                   <span className="text-[10px] font-black uppercase text-blue-400 block mb-1">MÃ PHÒNG</span>
-                  <div className="text-3xl font-black tracking-widest uppercase italic leading-none">@{teacherMaGV || '...'}@</div>
-                  <div className="absolute -top-3 -right-3 bg-red-500 text-white text-[8px] font-black px-2 py-1 rounded-lg animate-pulse">LIVE</div>
+                  <div className="text-4xl font-black tracking-widest uppercase italic leading-none">@{teacherMaGV || '...'}@</div>
+                  <div className="absolute -top-3 -right-3 bg-red-500 text-white text-[10px] font-black px-3 py-1 rounded-xl animate-pulse">LIVE</div>
                </div>
                <div className="text-left">
-                  <h3 className="text-2xl font-black text-slate-800 uppercase italic leading-none">ARENA CONTROL</h3>
-                  <p className="text-[10px] font-black text-slate-400 uppercase mt-2 italic tracking-widest leading-none">
-                    {isLiveGameActive ? 'ĐANG TRONG TRẬN ĐẤU' : 'PHÒNG CHỜ HỌC SINH'}
+                  <h3 className="text-3xl font-black text-slate-800 uppercase italic leading-none">BẢNG ĐIỀU KHIỂN</h3>
+                  <p className="text-xs font-black text-slate-400 uppercase mt-3 italic tracking-widest leading-none flex items-center gap-2">
+                    <span className={`w-2 h-2 rounded-full ${isLiveGameActive ? 'bg-emerald-500 animate-ping' : 'bg-slate-300'}`}></span>
+                    {isLiveGameActive ? 'HỆ THỐNG ĐANG PHÁT TÍN HIỆU' : 'PHÒNG CHỜ TÍN HIỆU'}
                   </p>
                </div>
             </div>
+            
             <div className="flex gap-4">
-               <button onClick={toggleWhiteboard} className={`px-8 py-5 rounded-2xl font-black uppercase italic shadow-lg transition-all flex items-center gap-3 border-b-4 ${isWhiteboardActive ? 'bg-emerald-600 text-white border-emerald-800' : 'bg-slate-100 text-slate-400 border-slate-200 hover:bg-slate-200'}`}>
-                 <span className="text-xl">🎨</span> {isWhiteboardActive ? 'ĐANG GIẢNG BÀI' : 'MỞ BẢNG TRẮNG'}
+               <button onClick={toggleWhiteboard} className={`px-10 py-6 rounded-[2rem] font-black uppercase italic shadow-lg transition-all flex items-center gap-3 border-b-8 ${isWhiteboardActive ? 'bg-emerald-600 text-white border-emerald-800' : 'bg-slate-100 text-slate-400 border-slate-200 hover:bg-slate-200'}`}>
+                 <span className="text-2xl">🎨</span> {isWhiteboardActive ? 'ĐANG GIẢNG BÀI' : 'BẢNG TRẮNG'}
                </button>
                {!isLiveGameActive ? (
-                 <button onClick={handleStartLiveMatch} className="px-10 py-5 bg-blue-600 text-white rounded-2xl font-black uppercase italic shadow-xl hover:scale-105 transition-all flex items-center gap-3 border-b-8 border-blue-800">
-                   <span className="text-xl">⚡</span> BẮT ĐẦU ARENA
+                 <button onClick={handleStartLiveMatch} className="px-12 py-6 bg-blue-600 text-white rounded-[2rem] font-black uppercase italic shadow-2xl hover:scale-105 transition-all flex items-center gap-4 border-b-8 border-blue-800">
+                   <span className="text-2xl">⚡</span> PHÁT TRẬN ĐẤU
                  </button>
                ) : (
-                 <button onClick={handleNextLiveQuestion} className="px-10 py-5 bg-amber-500 text-white rounded-2xl font-black uppercase italic shadow-xl hover:scale-105 transition-all flex items-center gap-3 border-b-8 border-amber-700">
-                   <span className="text-xl">⏩</span> CÂU KẾ TIẾP
+                 <button onClick={handleNextLiveQuestion} className="px-12 py-6 bg-amber-500 text-white rounded-[2rem] font-black uppercase italic shadow-2xl hover:scale-105 transition-all flex items-center gap-4 border-b-8 border-amber-700">
+                   <span className="text-2xl">⏩</span> CÂU KẾ TIẾP
                  </button>
                )}
             </div>
          </header>
 
-         <div className="grid grid-cols-12 gap-6 items-start flex-1 min-h-0">
+         <div className="grid grid-cols-12 gap-8 items-start flex-1 min-h-0">
+            {/* TRUNG TÂM CHỈ HUY: CHỈ HIỆN SỐ, KHÔNG HIỆN NỘI DUNG */}
             <div className="col-span-12 lg:col-span-8 h-full">
-               <div className="bg-white rounded-[3.5rem] border-4 border-slate-50 shadow-2xl overflow-hidden relative h-full flex flex-col">
+               <div className="bg-slate-900 rounded-[4rem] border-[12px] border-slate-800 shadow-2xl overflow-hidden relative h-full flex flex-col">
                   {isWhiteboardActive ? (
                     <Whiteboard isTeacher={true} channel={controlChannelRef.current} roomCode="TEACHER_ROOM" />
                   ) : (
-                    <div className="flex-1 flex flex-col items-center justify-center text-center bg-slate-50/50 relative">
-                       {isLiveGameActive && currentLiveProblem ? (
-                         <div className="relative z-10 w-full px-12 animate-in zoom-in">
-                            <div className="bg-white p-10 rounded-[3rem] shadow-xl border-b-[10px] border-blue-600 inline-block max-w-2xl text-left">
-                               <div className="flex items-center gap-3 mb-6">
-                                  <span className="px-3 py-1 bg-blue-600 text-white text-[10px] font-black uppercase rounded-lg">CÂU {liveProblemIdx + 1}</span>
-                                  <span className="px-3 py-1 bg-slate-900 text-white text-[10px] font-black uppercase rounded-lg">VÒNG {liveRoundIdx + 1}</span>
+                    <div className="flex-1 flex flex-col items-center justify-center text-center relative p-12">
+                       {isLiveGameActive ? (
+                         <div className="flex flex-col items-center animate-in zoom-in duration-500">
+                            <div className="text-slate-500 font-black uppercase tracking-[0.5em] mb-6 text-sm italic">ĐANG TRÌNH CHIẾU</div>
+                            <div className="flex items-baseline gap-4 mb-10">
+                               <span className="text-[12rem] font-black text-white italic leading-none drop-shadow-[0_10px_30px_rgba(59,130,246,0.3)]">{liveProblemIdx + 1}</span>
+                               <span className="text-4xl font-black text-slate-600 italic uppercase">/ {totalQInCurrentRound}</span>
+                            </div>
+                            <div className="bg-white/5 backdrop-blur-md px-12 py-6 rounded-[2.5rem] border border-white/10 flex items-center gap-8">
+                               <div className="text-left">
+                                  <div className="text-[10px] font-black text-blue-400 uppercase italic mb-1">TRẠNG THÁI VÒNG</div>
+                                  <div className="text-2xl font-black text-white italic">VÒNG SỐ {liveRoundIdx + 1}</div>
                                </div>
-                               <div className="text-3xl font-black text-slate-800 italic leading-snug">
-                                  <LatexRenderer content={currentLiveProblem.content} />
+                               <div className="w-[2px] h-10 bg-white/10"></div>
+                               <div className="text-left">
+                                  <div className="text-[10px] font-black text-emerald-400 uppercase italic mb-1">ĐÃ TRẢ LỜI</div>
+                                  <div className="text-2xl font-black text-white italic">{answeredCount} / {totalConnected}</div>
                                </div>
+                            </div>
+                            
+                            {/* Thanh tiến trình học sinh trả lời */}
+                            <div className="w-full max-w-md mt-12 bg-white/5 h-4 rounded-full overflow-hidden p-1">
+                               <div 
+                                 className="h-full bg-gradient-to-r from-blue-500 to-emerald-500 rounded-full transition-all duration-700"
+                                 style={{ width: `${totalConnected > 0 ? (answeredCount / totalConnected) * 100 : 0}%` }}
+                               ></div>
                             </div>
                          </div>
                        ) : (
-                         <div className="relative z-10 px-10">
-                            <div className="text-8xl mb-6">📡</div>
-                            <p className="font-black uppercase italic tracking-[0.2em] text-3xl text-blue-600 animate-pulse">ĐANG CHỜ LỆNH BẮT ĐẦU</p>
-                            <p className="text-slate-400 font-bold italic mt-4 uppercase text-xs">Học sinh đã vào sẽ xuất hiện ở danh sách bên phải</p>
+                         <div className="flex flex-col items-center opacity-40">
+                            <div className="text-9xl mb-8 animate-pulse">📡</div>
+                            <p className="font-black uppercase italic tracking-[0.3em] text-3xl text-white">READY FOR SIGNAL</p>
                          </div>
                        )}
                     </div>
@@ -293,22 +299,23 @@ const AdminPanel: React.FC<AdminPanelProps> = (props) => {
                </div>
             </div>
 
-            <div className="col-span-12 lg:col-span-4 flex flex-col gap-6 h-full min-h-0">
-               <div className="bg-white p-8 rounded-[3rem] border-4 border-slate-50 shadow-xl flex flex-col h-1/2 min-h-0">
-                  <h4 className="text-xl font-black text-slate-800 uppercase italic mb-6 flex justify-between items-center">
-                    <span>👥 HỌC SINH</span>
-                    <span className="bg-blue-100 text-blue-600 px-3 py-1 rounded-full text-xs">{Object.keys(connectedStudents).length}</span>
+            {/* DANH SÁCH HỌC SINH & THÔNG TIN ĐỀ */}
+            <div className="col-span-12 lg:col-span-4 flex flex-col gap-8 h-full min-h-0">
+               <div className="bg-white p-8 rounded-[3.5rem] border-4 border-slate-50 shadow-xl flex flex-col h-2/3 min-h-0">
+                  <h4 className="text-xl font-black text-slate-800 uppercase italic mb-6 flex justify-between items-center border-b-2 border-slate-50 pb-4">
+                    <span>👥 DANH SÁCH LỚP</span>
+                    <span className="bg-blue-600 text-white px-4 py-1 rounded-xl text-xs shadow-lg">{totalConnected}</span>
                   </h4>
-                  <div className="flex-1 overflow-y-auto no-scrollbar border-t-2 border-slate-50 pt-4 space-y-2">
+                  <div className="flex-1 overflow-y-auto no-scrollbar space-y-3">
                      {Object.values(connectedStudents).map((s, i) => (
-                        <div key={i} className={`flex items-center gap-4 py-4 px-5 rounded-[1.5rem] border-2 transition-all ${s.answered ? (s.isCorrect ? 'bg-emerald-50 border-emerald-100' : 'bg-red-50 border-red-100') : 'bg-slate-50 border-transparent'}`}>
-                           <div className={`w-10 h-10 rounded-full flex items-center justify-center text-lg shadow-sm ${s.answered ? (s.isCorrect ? 'bg-emerald-500 text-white' : 'bg-red-500 text-white') : 'bg-white text-slate-300'}`}>
+                        <div key={i} className={`flex items-center gap-4 py-4 px-6 rounded-[1.8rem] border-2 transition-all ${s.answered ? (s.isCorrect ? 'bg-emerald-50 border-emerald-100' : 'bg-red-50 border-red-100') : 'bg-slate-50 border-transparent'}`}>
+                           <div className={`w-12 h-12 rounded-2xl flex items-center justify-center text-xl shadow-inner ${s.answered ? (s.isCorrect ? 'bg-emerald-500 text-white' : 'bg-red-500 text-white') : 'bg-white text-slate-300'}`}>
                              {s.answered ? (s.isCorrect ? '✓' : '✕') : '👤'}
                            </div>
-                           <div className="flex-1 flex flex-col">
-                              <div className="font-black text-slate-700 uppercase italic text-sm truncate">{s.name}</div>
-                              <div className="text-[9px] font-black uppercase opacity-50 tracking-widest">
-                                {s.answered ? (s.isCorrect ? 'ĐÃ TRẢ LỜI' : 'TRẢ LỜI SAI') : 'CHỜ ĐÁP ÁN...'}
+                           <div className="flex-1">
+                              <div className="font-black text-slate-700 uppercase italic text-sm">{s.name}</div>
+                              <div className="text-[9px] font-black uppercase opacity-40 tracking-widest mt-1">
+                                {s.answered ? (s.isCorrect ? 'CHÍNH XÁC' : 'SAI RỒI') : 'ĐANG SUY NGHĨ...'}
                               </div>
                            </div>
                         </div>
@@ -316,22 +323,14 @@ const AdminPanel: React.FC<AdminPanelProps> = (props) => {
                   </div>
                </div>
 
-               <div className="bg-slate-900 p-8 rounded-[3rem] border-b-[10px] border-blue-700 shadow-2xl flex flex-col h-1/2 min-h-0">
-                  <h4 className="text-lg font-black text-blue-400 uppercase italic mb-6 tracking-widest">THÔNG TIN ĐỀ</h4>
-                  <div className="space-y-6 overflow-y-auto no-scrollbar">
-                     <div>
-                        <span className="text-[10px] font-black text-slate-500 uppercase italic block mb-1">TÊN BỘ ĐỀ:</span>
-                        <div className="text-xl font-black text-white italic uppercase truncate">{loadedSetTitle || currentTitle || 'Tự soạn nhanh'}</div>
-                     </div>
-                     <div className="grid grid-cols-2 gap-4">
-                        <div className="bg-white/5 p-4 rounded-2xl border border-white/10">
-                           <span className="text-[8px] font-black text-slate-500 uppercase block mb-1">VÒNG</span>
-                           <div className="text-2xl font-black text-white italic">{rounds.length}</div>
-                        </div>
-                        <div className="bg-white/5 p-4 rounded-2xl border border-white/10">
-                           <span className="text-[8px] font-black text-slate-500 uppercase block mb-1">CÂU HỎI</span>
-                           <div className="text-2xl font-black text-white italic">{rounds.reduce((a, b) => a + (b.problems?.length || 0), 0)}</div>
-                        </div>
+               <div className="bg-blue-600 p-8 rounded-[3.5rem] shadow-2xl flex flex-col h-1/3 min-h-0 relative overflow-hidden group">
+                  <div className="absolute top-0 right-0 p-8 opacity-10 text-9xl rotate-12 transition-transform group-hover:scale-110">📚</div>
+                  <h4 className="text-sm font-black text-blue-100 uppercase italic mb-4 tracking-widest relative z-10">THÔNG TIN BỘ ĐỀ</h4>
+                  <div className="relative z-10 space-y-4">
+                     <div className="text-2xl font-black text-white italic uppercase truncate drop-shadow-md">{loadedSetTitle || currentTitle || 'Dạy Live'}</div>
+                     <div className="flex gap-4">
+                        <div className="bg-white/20 backdrop-blur-md px-4 py-2 rounded-xl text-white font-black text-xs italic border border-white/20">KHỐI {currentGrade}</div>
+                        <div className="bg-white/20 backdrop-blur-md px-4 py-2 rounded-xl text-white font-black text-xs italic border border-white/20">{rounds.length} VÒNG</div>
                      </div>
                   </div>
                </div>
@@ -341,6 +340,7 @@ const AdminPanel: React.FC<AdminPanelProps> = (props) => {
     );
   }
 
+  // PHẦN SOẠN THẢO VẪN GIỮ NGUYÊN
   return (
     <div className="bg-[#f8fafc] min-h-full flex flex-col gap-4 relative no-scrollbar text-left">
       {status && <div className={`fixed top-6 left-1/2 -translate-x-1/2 px-10 py-4 rounded-full font-black text-xs uppercase shadow-2xl z-[10000] animate-in slide-in-from-top-4 ${status.type === 'success' ? 'bg-emerald-600' : 'bg-red-600'} text-white`}>{status.text}</div>}
@@ -374,13 +374,13 @@ const AdminPanel: React.FC<AdminPanelProps> = (props) => {
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 flex-1 min-h-0">
         <div className="lg:col-span-3 flex flex-col gap-4 max-h-full overflow-hidden">
           <div className="bg-white p-4 rounded-3xl border-4 border-slate-50 shadow-sm flex items-center gap-3 overflow-x-auto no-scrollbar shrink-0">
-             {rounds.map((r, i) => (
+             {rounds?.map((r, i) => (
                 <button key={i} onClick={() => { setActiveRoundIdx(i); setEditingIdx(null); }} className={`px-6 py-3 rounded-2xl text-[11px] font-black uppercase border-2 transition-all shrink-0 ${activeRoundIdx === i ? 'bg-slate-900 text-white border-slate-900 shadow-lg' : 'bg-slate-50 text-slate-400 border-slate-100'}`}>Vòng {r.number}</button>
              ))}
-             <button onClick={() => { setRounds([...rounds, { number: rounds.length + 1, problems: [], description: '' }]); setActiveRoundIdx(rounds.length); }} className="px-6 py-3 rounded-2xl text-[11px] font-black text-blue-600 border-2 border-dashed border-blue-200 uppercase">+ VÒNG</button>
+             <button onClick={() => { setRounds([...(rounds || []), { number: (rounds?.length || 0) + 1, problems: [], description: '' }]); setActiveRoundIdx(rounds?.length || 0); }} className="px-6 py-3 rounded-2xl text-[11px] font-black text-blue-600 border-2 border-dashed border-blue-200 uppercase">+ VÒNG</button>
           </div>
           <div className="bg-white rounded-[2rem] p-5 shadow-md border-2 border-slate-50 flex-1 overflow-y-auto no-scrollbar flex flex-col gap-4">
-              {rounds[activeRoundIdx]?.problems.map((p, i) => (
+              {rounds?.[activeRoundIdx]?.problems?.map((p, i) => (
                 <button key={p.id} onClick={() => setEditingIdx(i)} className={`w-full p-4 rounded-2xl text-left border-4 transition-all ${editingIdx === i ? 'bg-blue-600 border-blue-400 text-white shadow-lg' : 'bg-slate-50 border-white text-slate-500 hover:bg-slate-100'}`}>
                   <div className="text-[11px] font-black uppercase italic">Câu {i+1}</div>
                   <div className="text-[9px] font-bold opacity-70 uppercase truncate">{p.content || 'Nội dung mới...'}</div>
@@ -388,7 +388,8 @@ const AdminPanel: React.FC<AdminPanelProps> = (props) => {
               ))}
               <button onClick={() => {
                 const newProb = { id: Math.random().toString(36).substring(7), title: 'Câu hỏi mới', content: '', type: QuestionType.MULTIPLE_CHOICE, difficulty: Difficulty.EASY, challenge: DisplayChallenge.NORMAL, topic: currentTopic, correctAnswer: 'A', explanation: '', options: ['', '', '', ''] };
-                const updated = [...rounds];
+                const updated = [...(rounds || [])];
+                if (!updated[activeRoundIdx]) updated[activeRoundIdx] = { number: activeRoundIdx + 1, problems: [] };
                 updated[activeRoundIdx].problems.push(newProb);
                 setRounds(updated);
                 setEditingIdx(updated[activeRoundIdx].problems.length - 1);
@@ -397,12 +398,12 @@ const AdminPanel: React.FC<AdminPanelProps> = (props) => {
         </div>
 
         <div className="lg:col-span-9 bg-white rounded-[3rem] shadow-xl p-10 overflow-y-auto no-scrollbar border-4 border-slate-50 relative">
-          {editingIdx !== null && rounds[activeRoundIdx]?.problems[editingIdx] ? (
+          {editingIdx !== null && rounds?.[activeRoundIdx]?.problems?.[editingIdx] ? (
             <div className="max-w-4xl mx-auto space-y-10 pb-20 animate-in fade-in">
                 <div className="flex justify-between items-center border-b-4 border-slate-50 pb-6">
                   <h3 className="text-3xl font-black italic uppercase">Câu {editingIdx + 1}</h3>
                   <button onClick={() => {
-                    const updated = [...rounds];
+                    const updated = [...(rounds || [])];
                     updated[activeRoundIdx].problems.splice(editingIdx, 1);
                     setRounds(updated);
                     setEditingIdx(null);
@@ -411,7 +412,7 @@ const AdminPanel: React.FC<AdminPanelProps> = (props) => {
                 <div className="space-y-4">
                    <label className="text-[10px] font-black text-slate-400 uppercase italic">Nội dung câu hỏi</label>
                    <textarea className="w-full p-6 bg-slate-50 border-2 border-slate-100 rounded-3xl font-bold text-xl min-h-[120px]" value={rounds[activeRoundIdx].problems[editingIdx].content} onChange={e => {
-                     const updated = [...rounds];
+                     const updated = [...(rounds || [])];
                      updated[activeRoundIdx].problems[editingIdx].content = e.target.value;
                      setRounds(updated);
                    }} />
@@ -419,7 +420,7 @@ const AdminPanel: React.FC<AdminPanelProps> = (props) => {
                 <div className="bg-emerald-50/30 p-8 rounded-[3rem] border-2 border-emerald-100">
                    <h4 className="text-xl font-black text-emerald-700 uppercase italic mb-4">📖 LỜI GIẢI CHI TIẾT</h4>
                    <textarea className="w-full p-6 bg-white border-2 border-emerald-100 rounded-3xl font-medium min-h-[150px]" value={rounds[activeRoundIdx].problems[editingIdx].explanation} onChange={e => {
-                     const updated = [...rounds];
+                     const updated = [...(rounds || [])];
                      updated[activeRoundIdx].problems[editingIdx].explanation = e.target.value;
                      setRounds(updated);
                    }} />
