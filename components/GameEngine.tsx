@@ -51,13 +51,16 @@ const GameEngine: React.FC<GameEngineProps> = ({
   
   const channelRef = useRef<any>(null);
   const gameStateRef = useRef(gameState);
-  const buzzerLockedRef = useRef(false); // Quan trọng: Khóa chuông để tránh xử lý 2 lần
-  const currentQuestionKey = `R${currentRoundIdx}P${currentProblemIdx}`;
+  const buzzerLockedRef = useRef(false);
   const syncIntervalRef = useRef<any>(null);
+  
+  // Sử dụng Refs cho các giá trị thay đổi nhanh để tránh re-render Channel
+  const currentQuestionKeyRef = useRef(`R${currentRoundIdx}P${currentProblemIdx}`);
 
   useEffect(() => { 
     gameStateRef.current = gameState; 
-  }, [gameState]);
+    currentQuestionKeyRef.current = `R${currentRoundIdx}P${currentProblemIdx}`;
+  }, [gameState, currentRoundIdx, currentProblemIdx]);
 
   const rounds = matchData.rounds;
   const currentRound = rounds[currentRoundIdx];
@@ -72,9 +75,6 @@ const GameEngine: React.FC<GameEngineProps> = ({
   }, [score, opponents, playerName, matchData.myId]);
 
   const syncToProblem = useCallback((roundIdx: number, probIdx: number) => {
-    const qKey = `R${roundIdx}P${probIdx}`;
-    if (gameStateRef.current === 'STARTING_ROUND' && currentQuestionKey === qKey) return;
-    
     if (syncIntervalRef.current) clearInterval(syncIntervalRef.current);
 
     setUserAnswer(''); 
@@ -82,7 +82,7 @@ const GameEngine: React.FC<GameEngineProps> = ({
     setBuzzerWinner(null); 
     setIsHelpUsed(false);
     setSyncCountdown(null);
-    buzzerLockedRef.current = false; // Mở khóa chuông cho câu mới
+    buzzerLockedRef.current = false; 
     
     setGameState('STARTING_ROUND');
     setCurrentRoundIdx(roundIdx);
@@ -109,7 +109,7 @@ const GameEngine: React.FC<GameEngineProps> = ({
         }
       }, 1000);
     }
-  }, [rounds, setGameState, matchData, currentQuestionKey]);
+  }, [rounds, setGameState, matchData]);
 
   const submitAnswer = useCallback((timeout = false) => {
     if (gameStateRef.current === 'FEEDBACK') return;
@@ -135,6 +135,82 @@ const GameEngine: React.FC<GameEngineProps> = ({
     }
   }, [currentProblem, userAnswer, isHelpUsed, playerName, matchData, setGameState]);
 
+  // Khởi tạo Channel DUY NHẤT MỘT LẦN khi vào trận
+  useEffect(() => {
+    const roomCode = matchData.joinedRoom?.code || '';
+    const myUniqueId = matchData.myId || 'temp_id';
+    
+    if (roomCode !== 'ARENA_A' && matchData.joinedRoom) {
+      const channelName = roomCode === 'TEACHER_ROOM' 
+        ? `control_TEACHER_ROOM_${currentTeacher.id}` 
+        : `arena_${roomCode}_${currentTeacher.id}`;
+
+      const channel = supabase.channel(channelName, {
+        config: { presence: { key: myUniqueId } }
+      });
+
+      channel
+        .on('presence', { event: 'sync' }, () => {
+          const state = channel.presenceState();
+          const keys = Object.keys(state).sort();
+          setIsMaster(keys[0] === myUniqueId);
+          
+          // Chỉ lấy tên đối thủ từ Presence, không lấy điểm để tránh render liên tục
+          const others = keys.filter(k => k !== myUniqueId).map(k => {
+             const existing = opponents.find(o => o.id === k);
+             return {
+                id: k,
+                name: (state[k][0] as any)?.name || k.split('_')[0] || "Đối thủ",
+                score: existing ? existing.score : 0
+             };
+          });
+          setOpponents(others);
+        })
+        .on('broadcast', { event: 'start_first_problem' }, ({ payload }) => {
+          syncToProblem(payload.roundIdx, 0);
+        })
+        .on('broadcast', { event: 'buzzer_signal' }, ({ payload }) => {
+          // Kiểm tra logic nhấn chuông bằng Ref
+          if (payload.playerId !== myUniqueId && payload.questionKey === currentQuestionKeyRef.current && !buzzerLockedRef.current) {
+            buzzerLockedRef.current = true;
+            if (syncIntervalRef.current) clearInterval(syncIntervalRef.current);
+            setSyncCountdown(null);
+            setBuzzerWinner('OPPONENT');
+            setGameState('ANSWERING');
+            setTimeLeft(20);
+          }
+        })
+        .on('broadcast', { event: 'sync_next_question' }, ({ payload }) => {
+           if (payload.newRound) {
+              setFeedback(null);
+              setCurrentRoundIdx(payload.roundIdx);
+              setCurrentProblemIdx(0);
+              setRoundIntroTimer(ROUND_INTRO_TIME);
+              setGameState('ROUND_INTRO');
+           } else {
+              syncToProblem(payload.roundIdx, payload.probIdx);
+           }
+        })
+        .on('broadcast', { event: 'match_result' }, ({ payload }) => {
+          if (payload.playerId !== myUniqueId) {
+            // Chỉ render lại điểm khi có kết quả match_result (sau mỗi câu)
+            setOpponents(prev => prev.map(o => o.id === payload.playerId ? { ...o, score: (o.score + payload.points) } : o));
+            setFeedback({ ...payload.feedback, winner: 'OPPONENT', winnerName: payload.player });
+            setGameState('FEEDBACK');
+            setFeedbackTimer(FEEDBACK_TIME);
+          }
+        })
+        .on('broadcast', { event: 'teacher_game_over' }, () => setGameState('GAME_OVER'))
+        .subscribe(async (status) => {
+          if (status === 'SUBSCRIBED') await channel.track({ role: 'player', name: playerName });
+        });
+
+      channelRef.current = channel;
+      return () => { supabase.removeChannel(channel); };
+    }
+  }, [matchData.joinedRoom, currentTeacher.id, matchData.myId, playerName, syncToProblem]); // KHÔNG phụ thuộc vào currentQuestionKey
+
+  // Logic đếm ngược Intro
   useEffect(() => {
     if (gameState === 'ROUND_INTRO') {
       const timer = setInterval(() => {
@@ -156,81 +232,9 @@ const GameEngine: React.FC<GameEngineProps> = ({
       }, 100);
       return () => clearInterval(timer);
     }
-  }, [gameState, isMaster, matchData, syncToProblem, currentRoundIdx]);
+  }, [gameState, isMaster, matchData, currentRoundIdx, syncToProblem]);
 
-  useEffect(() => {
-    const roomCode = matchData.joinedRoom?.code || '';
-    const myUniqueId = matchData.myId || 'temp_id';
-    
-    if (roomCode !== 'ARENA_A' && matchData.joinedRoom) {
-      const channelName = roomCode === 'TEACHER_ROOM' 
-        ? `control_TEACHER_ROOM_${currentTeacher.id}` 
-        : `arena_${roomCode}_${currentTeacher.id}`;
-
-      const channel = supabase.channel(channelName, {
-        config: { presence: { key: myUniqueId } }
-      });
-
-      channel
-        .on('presence', { event: 'sync' }, () => {
-          const state = channel.presenceState();
-          const keys = Object.keys(state).sort();
-          setIsMaster(keys[0] === myUniqueId);
-          
-          const others = keys.filter(k => k !== myUniqueId).map(k => ({
-             id: k,
-             name: (state[k][0] as any)?.name || k.split('_')[0] || "Đối thủ",
-             score: (state[k][0] as any)?.score || 0
-          }));
-          setOpponents(others);
-        })
-        .on('broadcast', { event: 'start_first_problem' }, ({ payload }) => {
-          syncToProblem(payload.roundIdx, 0);
-        })
-        .on('broadcast', { event: 'buzzer_signal' }, ({ payload }) => {
-          // XỬ LÝ NHẤN CHUÔNG: Khóa ngay lập tức nếu đối thủ nhấn trước
-          if (payload.playerId !== myUniqueId && payload.questionKey === currentQuestionKey && !buzzerLockedRef.current) {
-            buzzerLockedRef.current = true;
-            if (syncIntervalRef.current) clearInterval(syncIntervalRef.current);
-            setSyncCountdown(null);
-            setBuzzerWinner('OPPONENT');
-            setGameState('ANSWERING');
-            setTimeLeft(20); // Đối thủ có 20s trả lời
-          }
-        })
-        .on('broadcast', { event: 'sync_next_question' }, ({ payload }) => {
-           if (payload.newRound) {
-              setFeedback(null);
-              setCurrentRoundIdx(payload.roundIdx);
-              setCurrentProblemIdx(0);
-              setRoundIntroTimer(ROUND_INTRO_TIME);
-              setGameState('ROUND_INTRO');
-           } else syncToProblem(payload.roundIdx, payload.probIdx);
-        })
-        .on('broadcast', { event: 'match_result' }, ({ payload }) => {
-          if (payload.playerId !== myUniqueId) {
-            setOpponents(prev => prev.map(o => o.id === payload.playerId ? { ...o, score: (o.score + payload.points) } : o));
-            setFeedback({ ...payload.feedback, winner: 'OPPONENT', winnerName: payload.player });
-            setGameState('FEEDBACK');
-            setFeedbackTimer(FEEDBACK_TIME);
-          }
-        })
-        .on('broadcast', { event: 'teacher_game_over' }, () => setGameState('GAME_OVER'))
-        .subscribe(async (status) => {
-          if (status === 'SUBSCRIBED') await channel.track({ role: 'player', name: playerName, score: score });
-        });
-
-      channelRef.current = channel;
-      return () => { supabase.removeChannel(channel); };
-    }
-  }, [matchData.joinedRoom, currentTeacher.id, matchData.myId, playerName, isMaster, syncToProblem, currentQuestionKey]);
-
-  useEffect(() => {
-    if (channelRef.current && matchData.joinedRoom?.code !== 'ARENA_A') {
-      channelRef.current.track({ role: 'player', name: playerName, score: score });
-    }
-  }, [score, playerName, matchData]);
-
+  // Logic Feedback và chuyển câu
   useEffect(() => {
     if (gameState === 'FEEDBACK') {
       const timer = setInterval(() => {
@@ -267,6 +271,7 @@ const GameEngine: React.FC<GameEngineProps> = ({
     }
   }, [gameState, isMaster, matchData, currentRoundIdx, currentProblemIdx, rounds, currentRound, syncToProblem]);
 
+  // Logic Timer câu hỏi
   useEffect(() => {
     if (((gameState as any) === 'WAITING_FOR_BUZZER' || (gameState as any) === 'ANSWERING') && timeLeft > 0 && !isWhiteboardActive) {
       const t = setInterval(() => setTimeLeft(p => Math.max(0, p - 1)), 1000);
@@ -402,7 +407,7 @@ const GameEngine: React.FC<GameEngineProps> = ({
                     channelRef.current.send({ 
                       type: 'broadcast', 
                       event: 'buzzer_signal', 
-                      payload: { playerId: matchData.myId, player: playerName, questionKey: currentQuestionKey } 
+                      payload: { playerId: matchData.myId, player: playerName, questionKey: currentQuestionKeyRef.current } 
                     });
                     setBuzzerWinner('YOU');
                     setGameState('ANSWERING');
