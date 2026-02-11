@@ -136,8 +136,8 @@ const AdminPanel: React.FC<AdminPanelProps> = (props) => {
   };
 
   const handleStartLiveMatch = () => {
-    if (!rounds || rounds.length === 0) {
-      notify("Dữ liệu bộ đề chưa sẵn sàng!", "error");
+    if (!rounds || rounds.length === 0 || !rounds[0]?.problems) {
+      notify("Dữ liệu bộ đề rỗng hoặc chưa tải!", "error");
       return;
     }
     
@@ -167,7 +167,10 @@ const AdminPanel: React.FC<AdminPanelProps> = (props) => {
   };
 
   const handleNextLiveQuestion = () => {
-    const currentProblems = rounds[liveRoundIdx]?.problems || [];
+    if (!rounds || rounds.length === 0) return;
+    
+    const currentRound = rounds[liveRoundIdx];
+    const currentProblems = currentRound?.problems || [];
     let nextProb = liveProblemIdx + 1;
     let nextRound = liveRoundIdx;
     
@@ -215,7 +218,9 @@ const AdminPanel: React.FC<AdminPanelProps> = (props) => {
   };
 
   if (adminTab === 'CONTROL') {
-    const totalQInCurrentRound = rounds[liveRoundIdx]?.problems?.length || 0;
+    // Luôn kiểm tra rounds tồn tại trước khi truy cập
+    const currentRound = (rounds && rounds[liveRoundIdx]) ? rounds[liveRoundIdx] : null;
+    const totalQInCurrentRound = currentRound?.problems?.length || 0;
     const answeredCount = Object.values(connectedStudents).filter(s => s.answered).length;
     const totalConnected = Object.keys(connectedStudents).length;
 
@@ -254,7 +259,6 @@ const AdminPanel: React.FC<AdminPanelProps> = (props) => {
          </header>
 
          <div className="grid grid-cols-12 gap-8 items-start flex-1 min-h-0">
-            {/* TRUNG TÂM CHỈ HUY: CHỈ HIỆN SỐ, KHÔNG HIỆN NỘI DUNG */}
             <div className="col-span-12 lg:col-span-8 h-full">
                <div className="bg-slate-900 rounded-[4rem] border-[12px] border-slate-800 shadow-2xl overflow-hidden relative h-full flex flex-col">
                   {isWhiteboardActive ? (
@@ -279,14 +283,6 @@ const AdminPanel: React.FC<AdminPanelProps> = (props) => {
                                   <div className="text-2xl font-black text-white italic">{answeredCount} / {totalConnected}</div>
                                </div>
                             </div>
-                            
-                            {/* Thanh tiến trình học sinh trả lời */}
-                            <div className="w-full max-w-md mt-12 bg-white/5 h-4 rounded-full overflow-hidden p-1">
-                               <div 
-                                 className="h-full bg-gradient-to-r from-blue-500 to-emerald-500 rounded-full transition-all duration-700"
-                                 style={{ width: `${totalConnected > 0 ? (answeredCount / totalConnected) * 100 : 0}%` }}
-                               ></div>
-                            </div>
                          </div>
                        ) : (
                          <div className="flex flex-col items-center opacity-40">
@@ -299,11 +295,10 @@ const AdminPanel: React.FC<AdminPanelProps> = (props) => {
                </div>
             </div>
 
-            {/* DANH SÁCH HỌC SINH & THÔNG TIN ĐỀ */}
             <div className="col-span-12 lg:col-span-4 flex flex-col gap-8 h-full min-h-0">
-               <div className="bg-white p-8 rounded-[3.5rem] border-4 border-slate-50 shadow-xl flex flex-col h-2/3 min-h-0">
+               <div className="bg-white p-8 rounded-[3.5rem] border-4 border-slate-50 shadow-xl flex flex-col h-full min-h-0">
                   <h4 className="text-xl font-black text-slate-800 uppercase italic mb-6 flex justify-between items-center border-b-2 border-slate-50 pb-4">
-                    <span>👥 DANH SÁCH LỚP</span>
+                    <span>👥 LỚP HỌC</span>
                     <span className="bg-blue-600 text-white px-4 py-1 rounded-xl text-xs shadow-lg">{totalConnected}</span>
                   </h4>
                   <div className="flex-1 overflow-y-auto no-scrollbar space-y-3">
@@ -315,23 +310,11 @@ const AdminPanel: React.FC<AdminPanelProps> = (props) => {
                            <div className="flex-1">
                               <div className="font-black text-slate-700 uppercase italic text-sm">{s.name}</div>
                               <div className="text-[9px] font-black uppercase opacity-40 tracking-widest mt-1">
-                                {s.answered ? (s.isCorrect ? 'CHÍNH XÁC' : 'SAI RỒI') : 'ĐANG SUY NGHĨ...'}
+                                {s.answered ? (s.isCorrect ? 'ĐÃ PHẢN HỒI' : 'CHƯA TRẢ LỜI') : 'ĐANG SUY NGHĨ...'}
                               </div>
                            </div>
                         </div>
                      ))}
-                  </div>
-               </div>
-
-               <div className="bg-blue-600 p-8 rounded-[3.5rem] shadow-2xl flex flex-col h-1/3 min-h-0 relative overflow-hidden group">
-                  <div className="absolute top-0 right-0 p-8 opacity-10 text-9xl rotate-12 transition-transform group-hover:scale-110">📚</div>
-                  <h4 className="text-sm font-black text-blue-100 uppercase italic mb-4 tracking-widest relative z-10">THÔNG TIN BỘ ĐỀ</h4>
-                  <div className="relative z-10 space-y-4">
-                     <div className="text-2xl font-black text-white italic uppercase truncate drop-shadow-md">{loadedSetTitle || currentTitle || 'Dạy Live'}</div>
-                     <div className="flex gap-4">
-                        <div className="bg-white/20 backdrop-blur-md px-4 py-2 rounded-xl text-white font-black text-xs italic border border-white/20">KHỐI {currentGrade}</div>
-                        <div className="bg-white/20 backdrop-blur-md px-4 py-2 rounded-xl text-white font-black text-xs italic border border-white/20">{rounds.length} VÒNG</div>
-                     </div>
                   </div>
                </div>
             </div>
@@ -340,7 +323,6 @@ const AdminPanel: React.FC<AdminPanelProps> = (props) => {
     );
   }
 
-  // PHẦN SOẠN THẢO VẪN GIỮ NGUYÊN
   return (
     <div className="bg-[#f8fafc] min-h-full flex flex-col gap-4 relative no-scrollbar text-left">
       {status && <div className={`fixed top-6 left-1/2 -translate-x-1/2 px-10 py-4 rounded-full font-black text-xs uppercase shadow-2xl z-[10000] animate-in slide-in-from-top-4 ${status.type === 'success' ? 'bg-emerald-600' : 'bg-red-600'} text-white`}>{status.text}</div>}
