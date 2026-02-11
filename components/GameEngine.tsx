@@ -34,7 +34,12 @@ const GameEngine: React.FC<GameEngineProps> = ({
   const [score, setScore] = useState(0);
   const [opponentScores, setOpponentScores] = useState<Record<string, OpponentData>>({});
   
-  const [timeLeft, setTimeLeft] = useState(DEFAULT_TIME);
+  const rounds = matchData.rounds;
+  const currentRound = rounds[currentRoundIdx];
+  const initialProblem = currentRound?.problems[currentProblemIdx];
+
+  // Khởi tạo timeLeft bằng timeLimit của câu hỏi hiện tại hoặc DEFAULT_TIME
+  const [timeLeft, setTimeLeft] = useState(initialProblem?.timeLimit || DEFAULT_TIME);
   const [feedbackTimer, setFeedbackTimer] = useState(FEEDBACK_TIME);
   const [roundIntroTimer, setRoundIntroTimer] = useState(ROUND_INTRO_TIME);
   
@@ -64,8 +69,6 @@ const GameEngine: React.FC<GameEngineProps> = ({
     currentQuestionKeyRef.current = `R${currentRoundIdx}P${currentProblemIdx}`;
   }, [gameState, currentRoundIdx, currentProblemIdx]);
 
-  const rounds = matchData.rounds;
-  const currentRound = rounds[currentRoundIdx];
   const currentProblem = currentRound?.problems[currentProblemIdx];
 
   const syncToProblem = useCallback((roundIdx: number, probIdx: number) => {
