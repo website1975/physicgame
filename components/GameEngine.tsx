@@ -270,7 +270,8 @@ const GameEngine: React.FC<GameEngineProps> = ({
       winner: 'YOU' 
     };
     
-    setScore(s => Math.max(0, s + points));
+    // Đã sửa: Cho phép điểm số âm để đồng bộ với màn hình đối thủ
+    setScore(s => s + points);
     setFeedback(fb); 
     setGameState('FEEDBACK'); 
     setFeedbackTimer(FEEDBACK_TIME);
