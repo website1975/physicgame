@@ -51,7 +51,8 @@ const GameEngine: React.FC<GameEngineProps> = ({
   
   const channelRef = useRef<any>(null);
   const gameStateRef = useRef(gameState);
-  const lastProcessedQuestionKey = useRef("");
+  const buzzerLockedRef = useRef(false); // Quan trọng: Khóa chuông để tránh xử lý 2 lần
+  const currentQuestionKey = `R${currentRoundIdx}P${currentProblemIdx}`;
   const syncIntervalRef = useRef<any>(null);
 
   useEffect(() => { 
@@ -62,7 +63,6 @@ const GameEngine: React.FC<GameEngineProps> = ({
   const currentRound = rounds[currentRoundIdx];
   const currentProblem = currentRound?.problems[currentProblemIdx];
 
-  // Tính toán bảng xếp hạng
   const leaderboard = useMemo(() => {
     const allPlayers = [
       { id: matchData.myId || 'me', name: playerName, score: score, isMe: true },
@@ -73,9 +73,8 @@ const GameEngine: React.FC<GameEngineProps> = ({
 
   const syncToProblem = useCallback((roundIdx: number, probIdx: number) => {
     const qKey = `R${roundIdx}P${probIdx}`;
-    if (lastProcessedQuestionKey.current === qKey && gameStateRef.current === 'STARTING_ROUND') return;
+    if (gameStateRef.current === 'STARTING_ROUND' && currentQuestionKey === qKey) return;
     
-    lastProcessedQuestionKey.current = qKey;
     if (syncIntervalRef.current) clearInterval(syncIntervalRef.current);
 
     setUserAnswer(''); 
@@ -83,6 +82,7 @@ const GameEngine: React.FC<GameEngineProps> = ({
     setBuzzerWinner(null); 
     setIsHelpUsed(false);
     setSyncCountdown(null);
+    buzzerLockedRef.current = false; // Mở khóa chuông cho câu mới
     
     setGameState('STARTING_ROUND');
     setCurrentRoundIdx(roundIdx);
@@ -109,26 +109,7 @@ const GameEngine: React.FC<GameEngineProps> = ({
         }
       }, 1000);
     }
-  }, [rounds, setGameState, matchData]);
-
-  useEffect(() => {
-    if (isMaster && matchData.joinedRoom?.code !== 'ARENA_A') {
-      const heartbeat = setInterval(() => {
-        if (channelRef.current) {
-          channelRef.current.send({
-            type: 'broadcast',
-            event: 'heartbeat_sync',
-            payload: {
-              roundIdx: currentRoundIdx,
-              probIdx: currentProblemIdx,
-              phase: gameStateRef.current
-            }
-          });
-        }
-      }, 3000);
-      return () => clearInterval(heartbeat);
-    }
-  }, [isMaster, matchData, currentRoundIdx, currentProblemIdx, gameState]);
+  }, [rounds, setGameState, matchData, currentQuestionKey]);
 
   const submitAnswer = useCallback((timeout = false) => {
     if (gameStateRef.current === 'FEEDBACK') return;
@@ -206,14 +187,15 @@ const GameEngine: React.FC<GameEngineProps> = ({
         .on('broadcast', { event: 'start_first_problem' }, ({ payload }) => {
           syncToProblem(payload.roundIdx, 0);
         })
-        .on('broadcast', { event: 'heartbeat_sync' }, ({ payload }) => {
-          if (!isMaster) {
-            const qKeyMaster = `R${payload.roundIdx}P${payload.probIdx}`;
-            if (qKeyMaster !== lastProcessedQuestionKey.current) syncToProblem(payload.roundIdx, payload.probIdx);
-            else if ((gameStateRef.current === 'STARTING_ROUND' || gameStateRef.current === 'ROUND_INTRO') && payload.phase !== gameStateRef.current) {
-               setSyncCountdown(null);
-               setGameState(payload.phase);
-            }
+        .on('broadcast', { event: 'buzzer_signal' }, ({ payload }) => {
+          // XỬ LÝ NHẤN CHUÔNG: Khóa ngay lập tức nếu đối thủ nhấn trước
+          if (payload.playerId !== myUniqueId && payload.questionKey === currentQuestionKey && !buzzerLockedRef.current) {
+            buzzerLockedRef.current = true;
+            if (syncIntervalRef.current) clearInterval(syncIntervalRef.current);
+            setSyncCountdown(null);
+            setBuzzerWinner('OPPONENT');
+            setGameState('ANSWERING');
+            setTimeLeft(20); // Đối thủ có 20s trả lời
           }
         })
         .on('broadcast', { event: 'sync_next_question' }, ({ payload }) => {
@@ -233,13 +215,6 @@ const GameEngine: React.FC<GameEngineProps> = ({
             setFeedbackTimer(FEEDBACK_TIME);
           }
         })
-        .on('broadcast', { event: 'buzzer_signal' }, ({ payload }) => {
-          if (payload.playerId !== myUniqueId && gameStateRef.current === 'WAITING_FOR_BUZZER') {
-            setBuzzerWinner('OPPONENT');
-            setGameState('ANSWERING');
-            setTimeLeft(20);
-          }
-        })
         .on('broadcast', { event: 'teacher_game_over' }, () => setGameState('GAME_OVER'))
         .subscribe(async (status) => {
           if (status === 'SUBSCRIBED') await channel.track({ role: 'player', name: playerName, score: score });
@@ -248,7 +223,7 @@ const GameEngine: React.FC<GameEngineProps> = ({
       channelRef.current = channel;
       return () => { supabase.removeChannel(channel); };
     }
-  }, [matchData.joinedRoom, currentTeacher.id, matchData.myId, playerName, isMaster, syncToProblem]);
+  }, [matchData.joinedRoom, currentTeacher.id, matchData.myId, playerName, isMaster, syncToProblem, currentQuestionKey]);
 
   useEffect(() => {
     if (channelRef.current && matchData.joinedRoom?.code !== 'ARENA_A') {
@@ -422,8 +397,13 @@ const GameEngine: React.FC<GameEngineProps> = ({
                <h3 className="text-2xl font-black text-slate-800 uppercase italic mb-8">NHẤN CHUÔNG GIÀNH QUYỀN</h3>
                <button 
                 onClick={() => {
-                  if (!buzzerWinner && channelRef.current) {
-                    channelRef.current.send({ type: 'broadcast', event: 'buzzer_signal', payload: { playerId: matchData.myId, player: playerName } });
+                  if (!buzzerWinner && channelRef.current && !buzzerLockedRef.current) {
+                    buzzerLockedRef.current = true;
+                    channelRef.current.send({ 
+                      type: 'broadcast', 
+                      event: 'buzzer_signal', 
+                      payload: { playerId: matchData.myId, player: playerName, questionKey: currentQuestionKey } 
+                    });
                     setBuzzerWinner('YOU');
                     setGameState('ANSWERING');
                     setTimeLeft(20);
