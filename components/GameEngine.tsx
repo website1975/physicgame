@@ -125,7 +125,7 @@ const GameEngine: React.FC<GameEngineProps> = ({
           if (payload.playerId !== myUniqueId && (gameStateRef.current === 'WAITING_FOR_BUZZER')) {
             setBuzzerWinner('OPPONENT');
             setGameState('ANSWERING');
-            setTimeLeft(20); // Thời gian suy nghĩ sau khi bấm chuông
+            // Không reset timeLeft về 20, để thời gian chạy tiếp từ mốc hiện tại
           }
         })
         .on('broadcast', { event: 'match_result' }, ({ payload }) => {
@@ -275,7 +275,7 @@ const GameEngine: React.FC<GameEngineProps> = ({
           <div className="text-8xl mb-8">🏆</div>
           <h2 className="text-4xl font-black text-slate-800 uppercase italic mb-8">KẾT THÚC TRẬN</h2>
           <div className="text-6xl font-black text-blue-600 italic mb-12">{score}đ</div>
-          <button onClick={onExit} className="w-full py-6 bg-slate-900 text-white rounded-3xl font-black uppercase italic text-xl shadow-xl hover:scale-105 active:scale-95 transition-all">RỜI ARENA 🚪</button>
+          <button onClick={onExit} className="w-full py-6 bg-slate-900 text-white rounded-3xl font-black uppercase italic shadow-xl text-xl hover:scale-105 active:scale-95 transition-all">RỜI ARENA 🚪</button>
         </div>
       </div>
     );
@@ -357,7 +357,7 @@ const GameEngine: React.FC<GameEngineProps> = ({
                     });
                     setBuzzerWinner('YOU');
                     setGameState('ANSWERING');
-                    setTimeLeft(20);
+                    // Không reset timeLeft về 20, để thời gian chạy tiếp từ mốc hiện tại
                   }
                 }}
                 className="w-48 h-48 bg-red-600 rounded-full border-[12px] border-red-800 shadow-[0_12px_0_#991b1b,0_20px_40px_rgba(220,38,38,0.4)] hover:scale-105 active:translate-y-4 transition-all flex items-center justify-center"
