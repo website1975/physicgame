@@ -10,7 +10,7 @@ import { supabase } from '../services/supabaseService';
 
 const DEFAULT_TIME = 40;
 const FEEDBACK_TIME = 15; 
-const ROUND_INTRO_TIME = 5; // Thời gian giới thiệu vòng cho Arena tự do
+const ROUND_INTRO_TIME = 5; 
 
 interface GameEngineProps {
   gameState: GameState;
@@ -63,8 +63,9 @@ const GameEngine: React.FC<GameEngineProps> = ({
 
   const currentProblem = rounds[currentRoundIdx]?.problems[currentProblemIdx];
 
-  // --- HÀM ĐỒNG BỘ CÂU HỎI ---
+  // --- HÀM ĐỒNG BỘ CÂU HỎI (QUAN TRỌNG) ---
   const syncToProblem = useCallback((roundIdx: number, probIdx: number, forceAnswering: boolean = false) => {
+    console.log(`Syncing: Round ${roundIdx}, Problem ${probIdx}, Force: ${forceAnswering}`);
     setUserAnswer(''); 
     setFeedback(null); 
     setBuzzerWinner('YOU'); 
@@ -76,7 +77,6 @@ const GameEngine: React.FC<GameEngineProps> = ({
     const targetProblem = rounds[roundIdx]?.problems[probIdx];
     setTimeLeft(targetProblem?.timeLimit || DEFAULT_TIME);
 
-    // Nếu là lệnh từ GV hoặc Arena đơn/PVP đã qua bước Intro
     if (forceAnswering || isArenaA || isTeacherRoom) {
       setGameState('ANSWERING');
     } else {
@@ -84,9 +84,9 @@ const GameEngine: React.FC<GameEngineProps> = ({
     }
   }, [isArenaA, isTeacherRoom, rounds, setGameState]);
 
-  // --- LOGIC TỰ ĐỘNG CHO PHÒNG ĐƠN / PVP (KHÔNG PHẢI PHÒNG GV) ---
+  // --- LOGIC TỰ ĐỘNG CHO ARENA (KHÔNG PHẢI PHÒNG GV) ---
   useEffect(() => {
-    if (isTeacherRoom) return; // Bỏ qua logic tự động nếu là phòng GV
+    if (isTeacherRoom) return;
 
     if (gameState === 'ROUND_INTRO') {
       const timer = setInterval(() => {
@@ -128,7 +128,7 @@ const GameEngine: React.FC<GameEngineProps> = ({
     }
   }, [gameState, isTeacherRoom, currentRoundIdx, currentProblemIdx, currentRound, rounds, syncToProblem]);
 
-  // --- KẾT NỐI REALTIME ---
+  // --- KẾT NỐI REALTIME (LIVE) ---
   useEffect(() => {
     const channelName = isTeacherRoom 
       ? `room_TEACHER_LIVE_${currentTeacher.id}` 
@@ -141,7 +141,6 @@ const GameEngine: React.FC<GameEngineProps> = ({
 
       channel
         .on('broadcast', { event: 'teacher_next_question' }, ({ payload }) => {
-          // QUAN TRỌNG: GV ra lệnh chuyển câu - HS thoát ngay lập tức mọi trạng thái chờ/feedback
           syncToProblem(payload.nextRoundIndex || 0, payload.nextIndex, true);
         })
         .on('broadcast', { event: 'teacher_toggle_whiteboard' }, ({ payload }) => {
@@ -166,8 +165,8 @@ const GameEngine: React.FC<GameEngineProps> = ({
 
       channelRef.current = channel;
 
-      // Khởi tạo cho phòng GV (nhảy thẳng vào trả lời câu 1)
-      if (isTeacherRoom && gameStateRef.current === 'ROUND_INTRO') {
+      // FIX QUAN TRỌNG: Luôn khởi tạo cho phòng GV khi bắt đầu mount
+      if (isTeacherRoom) {
         syncToProblem(currentRoundIdx, currentProblemIdx, true);
       }
 
@@ -229,7 +228,7 @@ const GameEngine: React.FC<GameEngineProps> = ({
     );
   }
 
-  // Màn hình giới thiệu vòng (Chỉ cho Arena đơn/PVP)
+  // Màn hình giới thiệu vòng (Arena cá nhân)
   if (gameState === 'ROUND_INTRO' && !isTeacherRoom) {
     return (
       <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-6 text-center">
