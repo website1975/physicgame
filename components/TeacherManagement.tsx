@@ -36,8 +36,8 @@ const TeacherArenaManager: React.FC<TeacherArenaManagerProps> = ({
 
   useEffect(() => {
     if (gameState === 'WAITING_FOR_PLAYERS' && targetTeacher) {
-      const channelName = `control_TEACHER_ROOM_${targetTeacher.id}`;
-      const channel = supabase.channel(channelName, { 
+      const LIVE_CHANNEL_NAME = `room_TEACHER_LIVE_${targetTeacher.id}`;
+      const channel = supabase.channel(LIVE_CHANNEL_NAME, { 
         config: { presence: { key: `${playerName}_${uniqueId}` } } 
       });
 
