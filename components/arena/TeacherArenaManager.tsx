@@ -27,44 +27,68 @@ const TeacherArenaManager: React.FC<TeacherArenaManagerProps> = ({
     setError('');
     try {
       const teacher = await fetchTeacherByMaGV(roomCodeInput);
-      if (!teacher) { setError('Mã GV không tồn tại!'); return; }
+      if (!teacher) { setError('Mã Giáo Viên không tồn tại!'); return; }
       setTargetTeacher(teacher);
       setGameState('WAITING_FOR_PLAYERS');
-    } catch (e) { setError('Lỗi hệ thống'); } 
+    } catch (e) { setError('Lỗi kết nối hệ thống'); } 
     finally { setLoading(false); }
   };
 
   useEffect(() => {
     if (gameState === 'WAITING_FOR_PLAYERS' && targetTeacher) {
-      const channelName = `control_TEACHER_ROOM_${targetTeacher.id}`;
-      const channel = supabase.channel(channelName, { config: { presence: { key: `${playerName}_${uniqueId}` } } });
+      const LIVE_CHANNEL_NAME = `room_TEACHER_LIVE_${targetTeacher.id}`;
+      const channel = supabase.channel(LIVE_CHANNEL_NAME, { 
+        config: { presence: { key: `${playerName}_${uniqueId}` } } 
+      });
 
       channel
         .on('broadcast', { event: 'teacher_start_game' }, ({ payload }) => {
           if (matchStartedRef.current) return;
           matchStartedRef.current = true;
-          onStartMatch({ setId: payload.setId, title: payload.title, rounds: payload.rounds, joinedRoom, opponents: [{ id: 'class', name: 'Cả lớp' }], startIndex: payload.currentQuestionIndex || 0, myId: uniqueId });
+          onStartMatch({ 
+            setId: payload.setId, 
+            title: payload.title, 
+            rounds: payload.rounds, 
+            joinedRoom, 
+            opponents: [{ id: 'class', name: 'Cả lớp' }], 
+            startIndex: payload.currentQuestionIndex || 0, 
+            myId: uniqueId 
+          });
         })
         .subscribe(async (status) => {
-          if (status === 'SUBSCRIBED') await channel.track({ online: true });
+          if (status === 'SUBSCRIBED') await channel.track({ online: true, role: 'student' });
         });
 
       return () => { supabase.removeChannel(channel); };
     }
-  }, [gameState, targetTeacher, uniqueId]);
+  }, [gameState, targetTeacher, uniqueId, playerName, onStartMatch, joinedRoom]);
 
   if (gameState === 'ENTER_CODE') {
     return (
       <div className="min-h-screen p-8 flex flex-col items-center justify-center bg-slate-950">
-        <div className="bg-white rounded-[4rem] p-12 shadow-2xl max-w-md w-full text-center">
-           <div className="text-6xl mb-6">🔑</div>
-           <h2 className="text-3xl font-black text-slate-800 uppercase italic mb-4">MÃ PHÒNG GIÁO VIÊN</h2>
-           <input type="text" className="w-full p-6 bg-slate-50 border-4 border-slate-100 rounded-3xl font-black text-center text-3xl uppercase mb-8" placeholder="MÃ GV..." value={roomCodeInput} onChange={e => setRoomCodeInput(e.target.value.toUpperCase())} />
-           <div className="grid grid-cols-2 gap-4">
-              <button onClick={() => setGameState('ROOM_SELECTION')} className="py-5 bg-slate-100 text-slate-400 rounded-2xl font-black uppercase italic">Hủy</button>
-              <button onClick={handleJoin} disabled={loading} className="py-5 bg-slate-900 text-white rounded-2xl font-black uppercase italic shadow-lg">{loading ? '...' : 'VÀO PHÒNG'}</button>
+        <div className="bg-white rounded-[4.5rem] p-14 shadow-2xl max-w-md w-full text-center border-b-[15px] border-blue-600 animate-in zoom-in duration-500">
+           <div className="text-7xl mb-8">🔑</div>
+           <h2 className="text-4xl font-black text-slate-800 uppercase italic mb-6 tracking-tighter">PHÒNG LIVE</h2>
+           <p className="text-slate-400 font-bold uppercase text-[10px] mb-8 tracking-widest italic">Vui lòng nhập Mã Giáo Viên của bạn</p>
+           
+           <div className="relative mb-10">
+              <input 
+                type="text" 
+                className="w-full p-8 bg-slate-50 border-4 border-slate-100 rounded-3xl font-black text-center text-4xl uppercase outline-none focus:border-blue-500 transition-all shadow-inner" 
+                placeholder="---" 
+                maxLength={10}
+                value={roomCodeInput} 
+                onChange={e => setRoomCodeInput(e.target.value.toUpperCase())} 
+              />
            </div>
-           {error && <p className="mt-4 text-red-500 font-bold text-xs">{error}</p>}
+
+           <div className="grid grid-cols-2 gap-4">
+              <button onClick={() => setGameState('ROOM_SELECTION')} className="py-6 bg-slate-100 text-slate-400 rounded-3xl font-black uppercase italic hover:bg-slate-200 transition-all">Hủy</button>
+              <button onClick={handleJoin} disabled={loading || !roomCodeInput} className="py-6 bg-blue-600 text-white rounded-3xl font-black uppercase italic shadow-xl hover:scale-105 active:scale-95 transition-all disabled:opacity-50">
+                {loading ? 'ĐANG KẾT NỐI...' : 'VÀO PHÒNG 🚀'}
+              </button>
+           </div>
+           {error && <p className="mt-6 text-red-500 font-bold text-sm bg-red-50 py-3 rounded-2xl border border-red-100">{error}</p>}
         </div>
       </div>
     );
@@ -73,16 +97,24 @@ const TeacherArenaManager: React.FC<TeacherArenaManagerProps> = ({
   if (gameState === 'WAITING_FOR_PLAYERS') {
     return (
       <div className="min-h-screen flex items-center justify-center p-6 bg-slate-950">
-        <div className="bg-white rounded-[4rem] p-12 shadow-2xl max-w-4xl w-full border-b-[12px] border-purple-600 flex flex-col items-center">
-             <h2 className="text-3xl font-black text-slate-800 uppercase italic mb-8">PHÒNG LIVE GIÁO VIÊN</h2>
-             <div className="w-full py-12 bg-slate-950 rounded-[3rem] text-white flex flex-col items-center gap-10">
-                <div className="flex items-center gap-3">
-                   <div className="w-6 h-6 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
-                   <span className="font-black italic uppercase text-xl text-white animate-pulse">ĐANG ĐỢI GIÁO VIÊN KHỞI CHẠY...</span>
+        <div className="bg-white rounded-[4.5rem] p-14 shadow-2xl max-w-3xl w-full border-b-[15px] border-purple-600 flex flex-col items-center animate-in slide-in-from-bottom-10">
+             <div className="w-24 h-24 bg-purple-100 rounded-[2rem] flex items-center justify-center text-5xl mb-8 shadow-xl">🏫</div>
+             <h2 className="text-4xl font-black text-slate-800 uppercase italic mb-10 tracking-tighter">PHÒNG CHỜ ARENA</h2>
+             
+             <div className="w-full py-16 bg-slate-950 rounded-[3.5rem] text-white flex flex-col items-center gap-12 relative overflow-hidden">
+                <div className="absolute inset-0 bg-gradient-to-tr from-purple-900/20 to-transparent pointer-events-none"></div>
+                <div className="flex items-center gap-5 relative z-10">
+                   <div className="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin shadow-[0_0_15px_rgba(59,130,246,0.5)]"></div>
+                   <span className="font-black italic uppercase text-2xl text-white animate-pulse tracking-widest">ĐỢI GIÁO VIÊN KHỞI CHẠY...</span>
                 </div>
-                <p className="text-slate-400 text-xs font-black uppercase italic">Mã GV: {targetTeacher?.magv}</p>
+                
+                <div className="bg-white/5 px-10 py-5 rounded-2xl border border-white/10 flex flex-col items-center relative z-10">
+                   <span className="text-[10px] font-black text-slate-500 uppercase italic mb-1">GIÁO VIÊN ĐIỀU PHỐI:</span>
+                   <div className="text-2xl font-black text-blue-400 italic">@{targetTeacher?.magv}@</div>
+                </div>
              </div>
-             <button onClick={() => { setJoinedRoom(null); setGameState('ROOM_SELECTION'); }} className="mt-8 px-10 py-4 bg-slate-100 text-slate-400 rounded-2xl font-black uppercase text-xs italic">Thoát</button>
+             
+             <button onClick={() => { setJoinedRoom(null); setGameState('ROOM_SELECTION'); }} className="mt-12 px-14 py-5 bg-slate-100 text-slate-400 rounded-3xl font-black uppercase text-xs italic hover:bg-red-50 hover:text-red-500 transition-all">Thoát phòng</button>
         </div>
       </div>
     );
