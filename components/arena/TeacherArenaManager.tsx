@@ -45,6 +45,8 @@ const TeacherArenaManager: React.FC<TeacherArenaManagerProps> = ({
         .on('broadcast', { event: 'teacher_start_game' }, ({ payload }) => {
           if (matchStartedRef.current) return;
           matchStartedRef.current = true;
+          
+          console.log("Teacher Start Game Signal Received");
           onStartMatch({ 
             setId: payload.setId, 
             title: payload.title, 
@@ -56,7 +58,9 @@ const TeacherArenaManager: React.FC<TeacherArenaManagerProps> = ({
           });
         })
         .subscribe(async (status) => {
-          if (status === 'SUBSCRIBED') await channel.track({ online: true, role: 'student' });
+          if (status === 'SUBSCRIBED') {
+             await channel.track({ online: true, role: 'student' });
+          }
         });
 
       return () => { supabase.removeChannel(channel); };
