@@ -251,10 +251,26 @@ const GameEngine: React.FC<GameEngineProps> = ({
     
     const correct = (currentProblem?.correctAnswer || "").trim().toUpperCase();
     const isPerfect = userAnswer.trim().toUpperCase() === correct;
-    const points = isPerfect ? (isHelpUsed ? 60 : 100) : 0;
-    const fb = { isCorrect: isPerfect, text: isPerfect ? `CHÍNH XÁC! (+${points}đ)` : `SAI RỜI! Đáp án: ${correct}`, winner: 'YOU' };
     
-    if (isPerfect) setScore(s => s + points);
+    // Logic tính điểm mới: 
+    // - Không trợ giúp: Đúng +100, Sai 0
+    // - Có trợ giúp: Đúng +60, Sai -40
+    let points = 0;
+    if (isPerfect) {
+      points = isHelpUsed ? 60 : 100;
+    } else {
+      points = isHelpUsed ? -40 : 0;
+    }
+
+    const fb = { 
+      isCorrect: isPerfect, 
+      text: isPerfect 
+        ? `CHÍNH XÁC! (${points >= 0 ? '+' : ''}${points}đ)` 
+        : `SAI RỜI! (${points}đ). Đáp án: ${correct}`, 
+      winner: 'YOU' 
+    };
+    
+    setScore(s => Math.max(0, s + points));
     setFeedback(fb); 
     setGameState('FEEDBACK'); 
     setFeedbackTimer(FEEDBACK_TIME);
@@ -302,7 +318,7 @@ const GameEngine: React.FC<GameEngineProps> = ({
 
   return (
     <div className="min-h-screen bg-slate-100 flex flex-col p-3 overflow-y-auto no-scrollbar relative text-left">
-      <ConfirmModal isOpen={showHelpConfirm} title="Sử dụng Trợ giúp?" message="Bạn chỉ nhận được tối đa 60% số điểm nếu trả lời đúng!" onConfirm={() => { setIsHelpUsed(true); setShowHelpConfirm(false); }} onCancel={() => setShowHelpConfirm(false)} />
+      <ConfirmModal isOpen={showHelpConfirm} title="Sử dụng Trợ giúp?" message="Bạn chỉ nhận được tối đa 60% số điểm nếu trả lời đúng, và bị trừ 40đ nếu trả lời sai!" onConfirm={() => { setIsHelpUsed(true); setShowHelpConfirm(false); }} onCancel={() => setShowHelpConfirm(false)} />
       
       <header className="bg-white px-5 py-3 rounded-[2rem] shadow-md mb-4 flex items-center justify-between border-slate-200 border-b-4 relative z-50 shrink-0 gap-4 overflow-x-auto no-scrollbar">
         <div className="flex items-center gap-2 shrink-0">
@@ -340,6 +356,22 @@ const GameEngine: React.FC<GameEngineProps> = ({
         <div className="lg:col-span-5 bg-white rounded-[2.5rem] p-6 shadow-xl flex flex-col h-fit relative min-h-[400px]">
           {((gameState as any) === 'ANSWERING' && (buzzerWinner === 'YOU' || isArenaA || isTeacherRoom)) ? (
             <div className="flex flex-col animate-in zoom-in w-full h-auto">
+               <div className="flex justify-between items-center mb-4">
+                  <div className="text-[10px] font-black text-slate-400 uppercase italic tracking-widest">NHẬP ĐÁP ÁN:</div>
+                  {!isHelpUsed && currentProblem?.challenge !== DisplayChallenge.NORMAL && (
+                    <button 
+                      onClick={() => setShowHelpConfirm(true)}
+                      className="bg-amber-100 text-amber-600 px-4 py-2 rounded-xl border border-amber-200 font-black text-[10px] uppercase italic hover:bg-amber-200 transition-all flex items-center gap-2 shadow-sm"
+                    >
+                      <span>💡</span> TRỢ GIÚP (60% ĐIỂM)
+                    </button>
+                  )}
+                  {isHelpUsed && (
+                    <div className="bg-emerald-50 text-emerald-600 px-4 py-2 rounded-xl border border-emerald-100 font-black text-[10px] uppercase italic flex items-center gap-2">
+                      <span>✨</span> ĐÃ KÍCH HOẠT TRỢ GIÚP
+                    </div>
+                  )}
+               </div>
                <AnswerInput problem={currentProblem} value={userAnswer} onChange={setUserAnswer} onSubmit={submitAnswer} disabled={(gameState as any) === 'FEEDBACK'} />
                <button onClick={submitAnswer} disabled={!userAnswer} className={`w-full py-5 rounded-[1.5rem] font-black italic text-lg mt-6 shadow-lg transition-all active:scale-95 shrink-0 border-b-6 ${userAnswer ? 'bg-blue-600 text-white border-blue-800' : 'bg-slate-100 text-slate-300 border-slate-200'}`}>XÁC NHẬN ĐÁP ÁN ✅</button>
             </div>
@@ -357,7 +389,6 @@ const GameEngine: React.FC<GameEngineProps> = ({
                     });
                     setBuzzerWinner('YOU');
                     setGameState('ANSWERING');
-                    // Không reset timeLeft về 20, để thời gian chạy tiếp từ mốc hiện tại
                   }
                 }}
                 className="w-48 h-48 bg-red-600 rounded-full border-[12px] border-red-800 shadow-[0_12px_0_#991b1b,0_20px_40px_rgba(220,38,38,0.4)] hover:scale-105 active:translate-y-4 transition-all flex items-center justify-center"
