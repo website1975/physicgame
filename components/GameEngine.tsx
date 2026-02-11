@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { GameState, Teacher, Round, QuestionType, DisplayChallenge, MatchData } from '../types';
 import ProblemCard from './ProblemCard';
@@ -9,7 +10,7 @@ import { supabase } from '../services/supabaseService';
 
 const DEFAULT_TIME = 40;
 const FEEDBACK_TIME = 15; 
-const ROUND_INTRO_TIME = 10; 
+const ROUND_INTRO_TIME = 3; // Reduced for smoother transition
 
 interface GameEngineProps {
   gameState: GameState;
@@ -39,7 +40,6 @@ const GameEngine: React.FC<GameEngineProps> = ({
 
   const [timeLeft, setTimeLeft] = useState(initialProblem?.timeLimit || DEFAULT_TIME);
   const [feedbackTimer, setFeedbackTimer] = useState(FEEDBACK_TIME);
-  const [roundIntroTimer, setRoundIntroTimer] = useState(ROUND_INTRO_TIME);
   
   const [userAnswer, setUserAnswer] = useState('');
   const [feedback, setFeedback] = useState<any>(null);
@@ -53,6 +53,9 @@ const GameEngine: React.FC<GameEngineProps> = ({
   const isTeacherRoom = roomCode === 'TEACHER_ROOM';
   const isArenaA = roomCode === 'ARENA_A';
   const myUniqueId = matchData.myId || 'temp_id';
+
+  // CRITICAL: Presence key must match the format expected by AdminPanel (name_id)
+  const myPresenceKey = `${playerName}_${myUniqueId}`;
 
   const channelRef = useRef<any>(null);
   const gameStateRef = useRef(gameState);
@@ -75,11 +78,22 @@ const GameEngine: React.FC<GameEngineProps> = ({
     const targetProblem = rounds[roundIdx]?.problems[probIdx];
     setTimeLeft(targetProblem?.timeLimit || DEFAULT_TIME);
 
+    // In Teacher and Solo rooms, we go straight to answering
     const nextState = (isArenaA || isTeacherRoom) ? 'ANSWERING' : 'WAITING_FOR_BUZZER';
     if (isArenaA || isTeacherRoom) setBuzzerWinner('YOU');
     
     setGameState(nextState);
   }, [isArenaA, isTeacherRoom, rounds, setGameState]);
+
+  // Handle automatic transition from ROUND_INTRO to ANSWERING
+  useEffect(() => {
+    if (gameState === 'ROUND_INTRO') {
+      const timer = setTimeout(() => {
+        syncToProblem(currentRoundIdx, currentProblemIdx);
+      }, ROUND_INTRO_TIME * 1000);
+      return () => clearTimeout(timer);
+    }
+  }, [gameState, currentRoundIdx, currentProblemIdx, syncToProblem]);
 
   useEffect(() => {
     const channelName = isTeacherRoom 
@@ -88,7 +102,7 @@ const GameEngine: React.FC<GameEngineProps> = ({
 
     if (!isArenaA && matchData.joinedRoom) {
       const channel = supabase.channel(channelName, {
-        config: { presence: { key: myUniqueId } }
+        config: { presence: { key: myPresenceKey } }
       });
 
       channel
@@ -128,7 +142,7 @@ const GameEngine: React.FC<GameEngineProps> = ({
       channelRef.current = channel;
       return () => { supabase.removeChannel(channel); };
     }
-  }, [isArenaA, isTeacherRoom, matchData.joinedRoom, myUniqueId, syncToProblem, currentTeacher.id]);
+  }, [isArenaA, isTeacherRoom, matchData.joinedRoom, myUniqueId, myPresenceKey, syncToProblem, currentTeacher.id, setGameState]);
 
   useEffect(() => {
     if ((gameState === 'ANSWERING' || gameState === 'WAITING_FOR_BUZZER') && timeLeft > 0 && !isWhiteboardActive) {
@@ -188,6 +202,7 @@ const GameEngine: React.FC<GameEngineProps> = ({
 
   return (
     <div className="min-h-screen bg-slate-100 flex flex-col p-3 overflow-hidden relative text-left">
+      <ConfirmModal isOpen={showExitConfirm} title="Thoát trận đấu?" message="Kết quả hiện tại sẽ không được lưu lại!" onConfirm={onExit} onCancel={() => setShowExitConfirm(false)} isDestructive={true} />
       <ConfirmModal isOpen={showHelpConfirm} title="Sử dụng Trợ giúp?" message="Bạn chỉ nhận được tối đa 60% số điểm nếu trả lời đúng, và bị trừ 40đ nếu trả lời sai!" onConfirm={() => { setIsHelpUsed(true); setShowHelpConfirm(false); }} onCancel={() => setShowHelpConfirm(false)} />
       
       <header className="bg-white px-5 py-3 rounded-[2rem] shadow-md mb-4 flex items-center justify-between border-slate-200 border-b-4 relative z-50 shrink-0 gap-4">
@@ -220,7 +235,18 @@ const GameEngine: React.FC<GameEngineProps> = ({
         </div>
 
         <div className="lg:col-span-5 bg-white rounded-[2.5rem] p-6 shadow-xl flex flex-col h-full relative overflow-y-auto no-scrollbar">
-          {gameState === 'ANSWERING' ? (
+          {gameState === 'ROUND_INTRO' ? (
+             <div className="flex-1 flex flex-col items-center justify-center text-center p-10 animate-in fade-in">
+                <div className="text-6xl mb-6">📢</div>
+                <h3 className="text-3xl font-black text-slate-800 uppercase italic mb-4">VÒNG {currentRoundIdx + 1}</h3>
+                <p className="text-slate-500 font-bold italic leading-relaxed">{currentRound?.description || 'Chuẩn bị bắt đầu...'}</p>
+                <div className="mt-8 flex items-center gap-3">
+                   <div className="w-2 h-2 bg-blue-600 rounded-full animate-bounce"></div>
+                   <div className="w-2 h-2 bg-blue-600 rounded-full animate-bounce [animation-delay:0.2s]"></div>
+                   <div className="w-2 h-2 bg-blue-600 rounded-full animate-bounce [animation-delay:0.4s]"></div>
+                </div>
+             </div>
+          ) : gameState === 'ANSWERING' ? (
             <div className="flex flex-col animate-in zoom-in w-full h-auto">
                <div className="flex justify-between items-center mb-4">
                   <div className="text-[10px] font-black text-slate-400 uppercase italic tracking-widest">NHẬP ĐÁP ÁN:</div>
@@ -250,7 +276,6 @@ const GameEngine: React.FC<GameEngineProps> = ({
           ) : null}
         </div>
       </div>
-      <ConfirmModal isOpen={showExitConfirm} title="Thoát trận đấu?" message="Kết quả hiện tại sẽ không được lưu lại!" onConfirm={onExit} onCancel={() => setShowExitConfirm(false)} isDestructive={true} />
     </div>
   );
 };
