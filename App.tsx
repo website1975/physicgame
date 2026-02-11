@@ -1,12 +1,33 @@
 
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { GoogleGenAI } from "@google/genai";
-// Fix: Added MatchData to the types import
-import { GameState, Round, Teacher, GameSettings, AdminTab, MatchData } from './types';
+import { GameState, Round, Teacher, GameSettings, AdminTab } from './types';
 import { loginTeacher, fetchTeacherByMaGV, supabase, fetchAllExamSets, fetchSetData, saveExamSet, updateExamSet, deleteExamSet, assignSetToRoom, getVisitorCount, incrementVisitorCount } from './services/supabaseService';
 import TeacherPortal from './components/TeacherPortal';
 import StudentArenaFlow from './components/StudentArenaFlow';
 import GameEngine from './components/GameEngine';
+
+// Hàm getSafeEnv tối ưu để đọc Key từ mọi môi trường (Vercel, Vite, Local)
+const getSafeEnv = (key: string): string | undefined => {
+  try {
+    const fromProcess = (process.env as any)[key] || (process.env as any)[`VITE_${key}`];
+    if (fromProcess) return fromProcess;
+    const fromMeta = (import.meta as any).env?.[key] || (import.meta as any).env?.[`VITE_${key}`];
+    if (fromMeta) return fromMeta;
+  } catch (e) {}
+  return undefined;
+};
+
+// Khởi tạo process.env giả lập nếu chưa có
+if (typeof (window as any).process === 'undefined') {
+  (window as any).process = { env: {} };
+}
+
+// Thiết lập Key toàn cục ngay lập tức
+const globalKey = getSafeEnv('API_KEY');
+if (globalKey) {
+  (process.env as any).API_KEY = globalKey;
+}
 
 const App: React.FC = () => {
   const [gameState, setGameState] = useState<GameState>('LOBBY');
@@ -17,7 +38,7 @@ const App: React.FC = () => {
   const [currentTeacher, setCurrentTeacher] = useState<Teacher | null>(null);
   const [errorMsg, setErrorMsg] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [apiStatus, setApiStatus] = useState<'checking' | 'online' | 'offline' | 'quota_exceeded'>('checking');
+  const [apiStatus, setApiStatus] = useState<'checking' | 'online' | 'offline'>('checking');
   const [totalQuests, setTotalQuests] = useState<number>(0);
   const [visitorCount, setVisitorCount] = useState<number>(0);
   
@@ -33,47 +54,28 @@ const App: React.FC = () => {
   const [matchData, setMatchData] = useState<{ setId: string, title: string, rounds: Round[], opponentName?: string, joinedRoom?: any, startIndex?: number, myId?: string } | null>(null);
 
   const [liveSessionKey, setLiveSessionKey] = useState<number>(Date.now());
-  const isCheckingRef = useRef(false);
 
-  // Fix: Create GoogleGenAI instance right before the call and add thinkingConfig to disable thinking for the health check
   const checkAI = useCallback(async () => {
-    if (isCheckingRef.current) return;
-    isCheckingRef.current = true;
     setApiStatus('checking');
-
     try {
-      const apiKey = process.env.API_KEY;
+      // Thử lấy lại key một lần nữa nếu biến process.env chưa kịp nạp
+      const apiKey = process.env.API_KEY || getSafeEnv('API_KEY');
       if (!apiKey) {
         setApiStatus('offline');
-        isCheckingRef.current = false;
         return;
       }
-
-      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-      const checkPromise = ai.models.generateContent({ 
+      const ai = new GoogleGenAI({ apiKey });
+      const response = await ai.models.generateContent({ 
         model: 'gemini-3-flash-preview', 
         contents: 'ping', 
-        config: { 
-          maxOutputTokens: 1,
-          thinkingConfig: { thinkingBudget: 0 } // Disabling thinking for simple health check ping
-        } 
+        config: { maxOutputTokens: 1 } 
       });
-
-      const timeoutPromise = new Promise((_, reject) => 
-        setTimeout(() => reject(new Error("Timeout")), 8000)
-      );
-
-      await Promise.race([checkPromise, timeoutPromise]);
-      setApiStatus('online');
-    } catch (e: any) { 
-      console.warn("AI Status check failed:", e);
-      if (e.message?.includes('429') || e.message?.toLowerCase().includes('quota')) {
-        setApiStatus('quota_exceeded');
-      } else {
-        setApiStatus('offline'); 
+      if (response.text) {
+        setApiStatus('online');
       }
-    } finally {
-      isCheckingRef.current = false;
+    } catch (e) { 
+      console.error("AI Check failed:", e);
+      setApiStatus('offline'); 
     }
   }, []);
 
@@ -99,12 +101,9 @@ const App: React.FC = () => {
   };
 
   useEffect(() => { 
-    const timer = setTimeout(() => {
-      checkAI(); 
-      fetchGlobalStats();
-      handleVisitorTracking();
-    }, 500);
-    return () => clearTimeout(timer);
+    checkAI(); 
+    fetchGlobalStats();
+    handleVisitorTracking();
   }, [checkAI]);
 
   const refreshSets = async (tId: string) => {
@@ -137,16 +136,6 @@ const App: React.FC = () => {
     }
   };
 
-  const handleStartMatch = (data: MatchData) => {
-    setMatchData(data);
-    // Nếu là phòng giáo viên, vào thẳng trạng thái trả lời (ANSWERING), không Intro
-    if (data.joinedRoom?.code === 'TEACHER_ROOM') {
-      setGameState('ANSWERING');
-    } else {
-      setGameState('ROUND_INTRO');
-    }
-  };
-
   return (
     <div className="min-h-screen bg-slate-950 text-slate-900">
       {gameState === 'LOBBY' && (
@@ -154,6 +143,7 @@ const App: React.FC = () => {
           <div className="bg-white rounded-[4rem] p-12 shadow-2xl max-w-2xl w-full text-center border-b-[12px] border-blue-600 animate-in zoom-in duration-500 relative overflow-hidden">
             <div className="absolute top-8 right-10 flex flex-col items-end gap-2">
                <div className="flex items-center gap-3">
+                  {/* Visitor Counter */}
                   <div className="flex items-center gap-2 bg-slate-50 px-3 py-1.5 rounded-full border border-slate-100 shadow-sm">
                      <span className="text-sm">👤 :</span>
                      <span className="text-[10px] font-black text-slate-600 uppercase italic tracking-wider whitespace-nowrap">
@@ -161,19 +151,15 @@ const App: React.FC = () => {
                      </span>
                   </div>
 
+                  {/* AI Status */}
                   {apiStatus === 'online' ? (
                     <div className="flex items-center gap-2 bg-emerald-50 px-3 py-1.5 rounded-full border border-emerald-100 shadow-sm">
                        <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse shadow-[0_0_8px_#10b981]"></div>
                        <span className="text-[9px] font-black text-emerald-600 uppercase italic tracking-wider">AI READY ✨</span>
                     </div>
-                  ) : apiStatus === 'quota_exceeded' ? (
-                    <div onClick={checkAI} className="flex items-center gap-2 bg-amber-50 px-3 py-1.5 rounded-full border border-amber-100 shadow-sm cursor-pointer hover:bg-amber-100 transition-colors">
-                       <div className="w-2 h-2 bg-amber-500 rounded-full"></div>
-                       <span className="text-[9px] font-black text-amber-600 uppercase italic tracking-wider">QUOTA BUSY ⌛</span>
-                    </div>
                   ) : (
                     <div onClick={checkAI} className="flex items-center gap-2 bg-red-50 px-3 py-1.5 rounded-full border border-red-100 shadow-sm cursor-pointer hover:bg-red-100 transition-colors">
-                       <div className={`w-2 h-2 bg-red-500 rounded-full ${apiStatus === 'checking' ? 'animate-pulse' : ''}`}></div>
+                       <div className={`w-2 h-2 bg-red-500 rounded-full ${apiStatus === 'checking' ? 'animate-spin' : ''}`}></div>
                        <span className="text-[9px] font-black text-red-600 uppercase italic tracking-wider">
                          {apiStatus === 'checking' ? 'CHECKING...' : 'AI OFFLINE'}
                        </span>
@@ -181,6 +167,7 @@ const App: React.FC = () => {
                   )}
                </div>
                
+               {/* Quest Counter */}
                <div className="flex items-center gap-2 bg-blue-50 px-3 py-1 rounded-full border border-blue-100 shadow-sm">
                   <span className="text-sm">📚</span>
                   <span className="text-[9px] font-black text-blue-600 uppercase italic tracking-wider">
@@ -199,12 +186,6 @@ const App: React.FC = () => {
               <button disabled={!playerName} onClick={() => setGameState('STUDENT_SETUP')} className="py-6 bg-blue-600 text-white font-black rounded-3xl uppercase italic shadow-xl text-xl hover:scale-105 active:scale-95 transition-all">Học sinh 🎒</button>
               <button disabled={!playerName} onClick={() => setGameState('TEACHER_LOGIN')} className="py-6 bg-purple-600 text-white font-black rounded-3xl uppercase italic shadow-xl text-xl hover:scale-105 active:scale-95 transition-all">Giáo viên 👨‍🏫</button>
             </div>
-            
-            {apiStatus === 'quota_exceeded' && (
-              <p className="mt-6 text-[10px] text-amber-600 font-bold uppercase italic animate-pulse">
-                Lưu ý: AI đang tạm nghỉ do quá tải yêu cầu. Vui lòng sử dụng các đề có sẵn hoặc thử lại sau ít phút!
-              </p>
-            )}
           </div>
         </div>
       )}
@@ -281,11 +262,11 @@ const App: React.FC = () => {
       {(['ROOM_SELECTION', 'ENTER_CODE', 'SET_SELECTION', 'WAITING_FOR_PLAYERS', 'KEYWORD_SELECTION'].includes(gameState)) && currentTeacher && (
         <StudentArenaFlow 
           gameState={gameState} setGameState={setGameState} playerName={playerName} studentGrade={studentGrade!} currentTeacher={currentTeacher}
-          onStartMatch={handleStartMatch} joinedRoom={joinedRoom} setJoinedRoom={setJoinedRoom} availableSets={availableSets} setAvailableSets={setAvailableSets}
+          onStartMatch={(data) => { setMatchData(data); setGameState('ROUND_INTRO'); }} joinedRoom={joinedRoom} setJoinedRoom={setJoinedRoom} availableSets={availableSets} setAvailableSets={setAvailableSets}
         />
       )}
 
-      {matchData && ['ROUND_INTRO', 'STARTING_ROUND', 'STARTING_ROUND_REVEAL', 'WAITING_FOR_BUZZER', 'ANSWERING', 'FEEDBACK', 'GAME_OVER'].includes(gameState) && (
+      {matchData && ['ROUND_INTRO', 'STARTING_ROUND', 'WAITING_FOR_BUZZER', 'ANSWERING', 'FEEDBACK', 'GAME_OVER'].includes(gameState) && (
         <GameEngine gameState={gameState} setGameState={setGameState} playerName={playerName} currentTeacher={currentTeacher!} matchData={matchData} onExit={() => { setMatchData(null); setGameState('ROOM_SELECTION'); }} />
       )}
     </div>
