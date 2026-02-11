@@ -82,6 +82,7 @@ const GameEngine: React.FC<GameEngineProps> = ({
     setCurrentProblemIdx(probIdx);
     
     const targetProblem = rounds[roundIdx]?.problems[probIdx];
+    // SỬ DỤNG THỜI GIAN THỰC CỦA CÂU HỎI
     setTimeLeft(targetProblem?.timeLimit || DEFAULT_TIME);
 
     const nextState = (isArenaA || isTeacherRoom) ? 'ANSWERING' : 'WAITING_FOR_BUZZER';
@@ -121,7 +122,7 @@ const GameEngine: React.FC<GameEngineProps> = ({
           if (payload.playerId !== myUniqueId && (gameStateRef.current === 'WAITING_FOR_BUZZER')) {
             setBuzzerWinner('OPPONENT');
             setGameState('ANSWERING');
-            setTimeLeft(20);
+            setTimeLeft(20); // Thời gian suy nghĩ sau khi bấm chuông
           }
         })
         .on('broadcast', { event: 'match_result' }, ({ payload }) => {
@@ -225,10 +226,22 @@ const GameEngine: React.FC<GameEngineProps> = ({
       const t = setInterval(() => setTimeLeft(p => Math.max(0, p - 1)), 1000);
       return () => clearInterval(t);
     }
-    if (timeLeft === 0 && !isWhiteboardActive && (gameState as any) === 'ANSWERING') {
-      if (buzzerWinner === 'YOU' || isArenaA) submitAnswer();
+
+    if (timeLeft === 0 && !isWhiteboardActive) {
+      if ((gameState as any) === 'ANSWERING') {
+        if (buzzerWinner === 'YOU' || isArenaA) submitAnswer();
+      } else if ((gameState as any) === 'WAITING_FOR_BUZZER') {
+        // TỰ ĐỘNG CHUYỂN CÂU KHI HẾT THỜI GIAN LÀM BÀI THỰC TẾ
+        setFeedback({ 
+          isCorrect: false, 
+          text: `HẾT THỜI GIAN! Bạn đã bỏ lỡ ${currentProblem?.timeLimit || DEFAULT_TIME} giây làm bài.`, 
+          winner: null 
+        });
+        setGameState('FEEDBACK');
+        setFeedbackTimer(FEEDBACK_TIME);
+      }
     }
-  }, [gameState, timeLeft, buzzerWinner, isWhiteboardActive, isArenaA]);
+  }, [gameState, timeLeft, buzzerWinner, isWhiteboardActive, isArenaA, currentProblem]);
 
   const submitAnswer = () => {
     if (gameStateRef.current === 'FEEDBACK') return;
@@ -288,16 +301,13 @@ const GameEngine: React.FC<GameEngineProps> = ({
     <div className="min-h-screen bg-slate-100 flex flex-col p-3 overflow-y-auto no-scrollbar relative text-left">
       <ConfirmModal isOpen={showHelpConfirm} title="Sử dụng Trợ giúp?" message="Bạn chỉ nhận được tối đa 60% số điểm nếu trả lời đúng!" onConfirm={() => { setIsHelpUsed(true); setShowHelpConfirm(false); }} onCancel={() => setShowHelpConfirm(false)} />
       
-      <header className="bg-white px-5 py-3 rounded-[2rem] shadow-md mb-4 flex items-center justify-between border-b-4 border-slate-200 relative z-50 shrink-0 gap-4 overflow-x-auto no-scrollbar">
-        {/* SCORE BOARD TRÊN HEADER */}
+      <header className="bg-white px-5 py-3 rounded-[2rem] shadow-md mb-4 flex items-center justify-between border-slate-200 border-b-4 relative z-50 shrink-0 gap-4 overflow-x-auto no-scrollbar">
         <div className="flex items-center gap-2 shrink-0">
-           {/* ĐIỂM CỦA BẠN */}
            <div className="bg-blue-600 text-white px-4 py-1.5 rounded-full shadow-sm border-b-4 border-blue-800 flex items-center gap-2">
               <span className="text-[8px] font-black uppercase italic opacity-70">BẠN</span>
               <span className="text-sm font-black italic">{score}đ</span>
            </div>
 
-           {/* ĐIỂM ĐỐI THỦ (HIỆN NỐI TIẾP) */}
            {!isArenaA && Object.values(opponentScores).map((opp, idx) => (
              <div key={idx} className="bg-slate-900 text-white px-4 py-1.5 rounded-full shadow-sm border-b-4 border-slate-950 flex items-center gap-2 animate-in slide-in-from-left duration-300">
                 <span className="text-[8px] font-black uppercase italic opacity-60 truncate max-w-[60px]">{opp.name}</span>
@@ -310,14 +320,12 @@ const GameEngine: React.FC<GameEngineProps> = ({
            )}
         </div>
 
-        {/* TIMER CENTER */}
-        <div className="flex flex-col items-center flex-1">
+        <div className="flex flex-col items-center flex-1 min-w-[100px]">
            <div className={`text-2xl md:text-3xl font-black italic tabular-nums leading-none flex items-center gap-2 ${timeLeft <= 5 ? 'text-red-500 animate-pulse' : 'text-slate-900'}`}>
               <span className="text-xs text-slate-300">⏱️</span> {timeLeft}s
            </div>
         </div>
 
-        {/* EXIT BUTTON */}
         <button onClick={() => setShowExitConfirm(true)} className="w-8 h-8 md:w-10 md:h-10 bg-red-50 text-red-500 rounded-xl flex items-center justify-center font-black shrink-0">✕</button>
       </header>
 
