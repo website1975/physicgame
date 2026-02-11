@@ -288,23 +288,37 @@ const GameEngine: React.FC<GameEngineProps> = ({
     <div className="min-h-screen bg-slate-100 flex flex-col p-3 overflow-y-auto no-scrollbar relative text-left">
       <ConfirmModal isOpen={showHelpConfirm} title="Sử dụng Trợ giúp?" message="Bạn chỉ nhận được tối đa 60% số điểm nếu trả lời đúng!" onConfirm={() => { setIsHelpUsed(true); setShowHelpConfirm(false); }} onCancel={() => setShowHelpConfirm(false)} />
       
-      <header className="bg-white px-5 py-3 rounded-[2rem] shadow-md mb-4 flex items-center justify-between border-b-4 border-slate-200 relative z-50 shrink-0">
-        <div className="flex items-center gap-3">
-           <div className="bg-blue-600 text-white px-5 py-2 rounded-[1.5rem] shadow-sm border-b-4 border-blue-800 flex flex-col items-center">
-              <div className="text-[8px] font-black uppercase italic opacity-80 leading-none mb-1">BẠN</div>
-              <div className="text-xl font-black leading-none">{score}đ</div>
+      <header className="bg-white px-5 py-3 rounded-[2rem] shadow-md mb-4 flex items-center justify-between border-b-4 border-slate-200 relative z-50 shrink-0 gap-4 overflow-x-auto no-scrollbar">
+        {/* SCORE BOARD TRÊN HEADER */}
+        <div className="flex items-center gap-2 shrink-0">
+           {/* ĐIỂM CỦA BẠN */}
+           <div className="bg-blue-600 text-white px-4 py-1.5 rounded-full shadow-sm border-b-4 border-blue-800 flex items-center gap-2">
+              <span className="text-[8px] font-black uppercase italic opacity-70">BẠN</span>
+              <span className="text-sm font-black italic">{score}đ</span>
            </div>
-           {matchData.setId === 'ai_custom' && (
-             <div className="hidden md:flex gap-2">
-                <span className="bg-slate-900 text-white text-[8px] font-black px-3 py-1.5 rounded-full border border-white/10 uppercase italic">Thách đấu AI ✨</span>
+
+           {/* ĐIỂM ĐỐI THỦ (HIỆN NỐI TIẾP) */}
+           {!isArenaA && Object.values(opponentScores).map((opp, idx) => (
+             <div key={idx} className="bg-slate-900 text-white px-4 py-1.5 rounded-full shadow-sm border-b-4 border-slate-950 flex items-center gap-2 animate-in slide-in-from-left duration-300">
+                <span className="text-[8px] font-black uppercase italic opacity-60 truncate max-w-[60px]">{opp.name}</span>
+                <span className="text-sm font-black italic text-emerald-400">{opp.score}đ</span>
              </div>
+           ))}
+
+           {matchData.setId === 'ai_custom' && (
+             <span className="bg-amber-100 text-amber-600 text-[8px] font-black px-3 py-1.5 rounded-full border border-amber-200 uppercase italic">Thách đấu AI ✨</span>
            )}
         </div>
-        <div className="flex flex-col items-center">
-           <div className="text-[8px] font-black text-slate-400 uppercase italic mb-0.5">TIME</div>
-           <div className={`text-3xl font-black italic tabular-nums leading-none ${timeLeft <= 5 ? 'text-red-500 animate-pulse' : 'text-slate-900'}`}>{timeLeft}s</div>
+
+        {/* TIMER CENTER */}
+        <div className="flex flex-col items-center flex-1">
+           <div className={`text-2xl md:text-3xl font-black italic tabular-nums leading-none flex items-center gap-2 ${timeLeft <= 5 ? 'text-red-500 animate-pulse' : 'text-slate-900'}`}>
+              <span className="text-xs text-slate-300">⏱️</span> {timeLeft}s
+           </div>
         </div>
-        <button onClick={() => setShowExitConfirm(true)} className="w-10 h-10 bg-red-50 text-red-500 rounded-xl flex items-center justify-center font-black">✕</button>
+
+        {/* EXIT BUTTON */}
+        <button onClick={() => setShowExitConfirm(true)} className="w-8 h-8 md:w-10 md:h-10 bg-red-50 text-red-500 rounded-xl flex items-center justify-center font-black shrink-0">✕</button>
       </header>
 
       <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-4 pb-10">
@@ -350,25 +364,6 @@ const GameEngine: React.FC<GameEngineProps> = ({
              <div className="flex flex-col animate-in zoom-in w-full h-auto">
                 <div className={`text-2xl font-black uppercase italic mb-3 ${feedback?.isCorrect ? 'text-emerald-500' : 'text-blue-500'}`}>{feedback?.isCorrect ? 'CHÍNH XÁC!' : 'SAI RỜI!'}</div>
                 
-                {/* BẢNG ĐIỂM ĐỐI THỦ TRONG FEEDBACK */}
-                {!isArenaA && (
-                  <div className="mb-6 bg-slate-900 rounded-2xl p-4 border-b-4 border-slate-950 shadow-lg animate-in slide-in-from-top duration-300">
-                    <h5 className="text-[10px] font-black text-slate-500 uppercase italic mb-3 tracking-widest border-b border-white/5 pb-2">BẢNG ĐIỂM HIỆN TẠI</h5>
-                    <div className="space-y-2">
-                       <div className="flex items-center justify-between">
-                          <span className="text-xs font-black text-white italic uppercase">{playerName} (BẠN)</span>
-                          <span className="text-xs font-black text-blue-400 italic">{score}đ</span>
-                       </div>
-                       {Object.values(opponentScores).map((opp, idx) => (
-                         <div key={idx} className="flex items-center justify-between border-t border-white/5 pt-2">
-                            <span className="text-xs font-black text-slate-300 italic uppercase">{opp.name}</span>
-                            <span className="text-xs font-black text-emerald-400 italic">{opp.score}đ</span>
-                         </div>
-                       ))}
-                    </div>
-                  </div>
-                )}
-
                 <div className="space-y-4 w-full h-auto">
                    <div className="bg-slate-50 p-5 rounded-2xl border-2 border-slate-100 italic font-bold text-slate-700"><LatexRenderer content={feedback?.text || ""} /></div>
                    <div className="bg-emerald-50/50 p-6 rounded-[1.5rem] border-2 border-emerald-100">
