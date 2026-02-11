@@ -179,8 +179,18 @@ const TeacherPortal: React.FC<TeacherPortalProps> = (props) => {
            </div>
          ) : (
            <div className="h-full">
+              {/* Fix: Pass only required props to AdminPanel based on AdminPanelProps definition */}
               <AdminPanel 
-                rounds={rounds} setRounds={setRounds} settings={settings} setSettings={setSettings} onStartGame={onStartGame} currentGameState={currentGameState} onNextQuestion={onNextQuestion} currentProblemIdx={0} totalProblems={rounds[0]?.problems?.length || 0} players={players} myPlayerId={myPlayerId} teacherId={teacherId} examSets={examSets} onSaveSet={onSaveSet} adminTab={adminTab as any} setAdminTab={setAdminTab as any} loadedSetTitle={loadedSetTitle} loadedSetTopic={loadedSetTopic} loadedSetId={loadedSetId} categories={categories} fullView={true} onResetToNew={onResetToNew} onLoadSet={onLoadSet} liveSessionKey={liveSessionKey}
+                rounds={rounds} 
+                setRounds={setRounds} 
+                teacherId={teacherId} 
+                onSaveSet={onSaveSet} 
+                adminTab={adminTab as any} 
+                setAdminTab={setAdminTab as any} 
+                loadedSetTitle={loadedSetTitle} 
+                loadedSetId={loadedSetId} 
+                onResetToNew={onResetToNew} 
+                onLoadSet={onLoadSet} 
               />
            </div>
          )}
