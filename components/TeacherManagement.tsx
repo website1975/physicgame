@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { Teacher } from '../types';
 import { getAllTeachers, createTeacher, updateTeacher, deleteTeacher } from '../services/supabaseService';
@@ -17,7 +18,7 @@ const TeacherManagement: React.FC = () => {
       const data = await getAllTeachers();
       setTeachers(data);
     } catch (e) {
-      console.error("Lỗi khi tải danh sách giáo viên", e);
+      alert("Lỗi khi tải danh sách giáo viên");
     } finally {
       setIsLoading(false);
     }
@@ -63,8 +64,8 @@ const TeacherManagement: React.FC = () => {
   };
 
   const filtered = teachers.filter(t => 
-    (t.tengv || "").toLowerCase().includes(searchTerm.toLowerCase()) || 
-    (t.magv || "").toLowerCase().includes(searchTerm.toLowerCase())
+    t.tengv.toLowerCase().includes(searchTerm.toLowerCase()) || 
+    t.magv.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
   return (
@@ -83,7 +84,7 @@ const TeacherManagement: React.FC = () => {
            <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-sm" onClick={() => setShowModal(false)}></div>
            <div className="bg-white rounded-[3rem] p-10 shadow-2xl max-w-lg w-full relative z-10 border-4 border-slate-100">
               <h3 className="text-3xl font-black text-slate-800 uppercase italic mb-8 text-center">{editingTeacher?.id ? 'Sửa thông tin' : 'Thêm giáo viên'}</h3>
-              <div className="space-y-4 mb-10 text-left">
+              <div className="space-y-4 mb-10">
                  <div>
                    <label className="text-[10px] font-black text-slate-400 uppercase italic mb-1 block">Mã Giáo Viên (Dùng để đăng nhập)</label>
                    <input 
