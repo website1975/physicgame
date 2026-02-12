@@ -2,34 +2,12 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { PhysicsProblem } from "../types";
 
-// Polyfill process nếu chưa tồn tại
-if (typeof (window as any).process === 'undefined') {
-  (window as any).process = { env: {} };
-}
-
-// Logic getSafeEnv tối ưu cho Vercel/Vite do người dùng cung cấp
-const getSafeEnv = (key: string): string | undefined => {
-  try {
-    const fromProcess = (process.env as any)[key] || (process.env as any)[`VITE_${key}`];
-    if (fromProcess) return fromProcess;
-    const fromMeta = (import.meta as any).env[key] || (import.meta as any).env[`VITE_${key}`];
-    if (fromMeta) return fromMeta;
-  } catch (e) {}
-  return undefined;
-};
-
-// Đảm bảo API_KEY được thiết lập trong process.env
-const apiKeyFromEnv = getSafeEnv('API_KEY');
-if (apiKeyFromEnv) {
-  (process.env as any).API_KEY = apiKeyFromEnv;
-}
-
 const SYSTEM_PROMPT = `Bạn là chuyên gia soạn đề Vật lý. Nhiệm vụ: Trích xuất văn bản thành JSON mảng đối tượng.
 QUY TẮC:
 1. TN: 4 options, correctAnswer là 'A', 'B', 'C' hoặc 'D'.
 2. DS: 4 options, correctAnswer là chuỗi 4 ký tự 'Đ' hoặc 'S' (VD: 'ĐSĐS').
-3. TL: correctAnswer là đáp án ngắn.
-4. Lời giải: Dùng $ $ cho công thức LaTeX.
+3. TL: correctAnswer là đáp án ngắn (số hoặc biểu thức đơn giản).
+4. Lời giải: Dùng $ $ cho công thức LaTeX. Giải thích ngắn gọn, dễ hiểu.
 KHÔNG trả về bất kỳ văn bản nào ngoài JSON.`;
 
 const safeParseJSON = (text: string) => {
@@ -46,33 +24,13 @@ const safeParseJSON = (text: string) => {
 };
 
 export const generateQuestionSet = async (topic: string, count: number): Promise<PhysicsProblem[]> => {
-  const apiKey = (process.env as any).API_KEY || "";
-  const ai = new GoogleGenAI({ apiKey });
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   const response = await ai.models.generateContent({
-    model: 'gemini-3-flash-preview', 
+    model: 'gemini-3-pro-preview', 
     contents: `Tạo ${count} câu hỏi chủ đề: ${topic}.`,
     config: {
       systemInstruction: SYSTEM_PROMPT,
       responseMimeType: "application/json",
-      responseSchema: {
-        type: Type.ARRAY,
-        items: {
-          type: Type.OBJECT,
-          properties: {
-            title: { type: Type.STRING },
-            content: { type: Type.STRING },
-            type: { type: Type.STRING, enum: ['TN', 'DS', 'TL'] },
-            difficulty: { type: Type.STRING, enum: ['Dễ', 'Trung bình', 'Khó'] },
-            challenge: { type: Type.STRING, enum: ['Mặc định', 'Ghi nhớ nhanh', 'Sắp xếp từ', 'Màn sương mờ', 'Kiến bò lung tung', 'Nước dâng ngập chữ', 'Vật thể nhiễu'] },
-            options: { type: Type.ARRAY, items: { type: Type.STRING } },
-            correctAnswer: { type: Type.STRING },
-            explanation: { type: Type.STRING },
-            timeLimit: { type: Type.NUMBER },
-            mechanic: { type: Type.STRING, enum: ['Pháo xạ kích', 'Nước dâng cao', 'Vũ trụ phiêu lưu', 'Nấm lùn phiêu lưu', 'Lật ô bí mật'] }
-          },
-          required: ["title", "content", "type", "correctAnswer", "explanation", "difficulty", "challenge"]
-        }
-      }
     }
   });
 
@@ -84,34 +42,39 @@ export const generateQuestionSet = async (topic: string, count: number): Promise
   }));
 };
 
-export const parseQuestionsFromText = async (rawText: string): Promise<PhysicsProblem[]> => {
-  const apiKey = (process.env as any).API_KEY || "";
-  const ai = new GoogleGenAI({ apiKey });
+export const generateMatchByKeywords = async (quantities: string[], formulas: string[]): Promise<PhysicsProblem[]> => {
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  const prompt = `Tạo bộ đề ôn tập gồm 5 câu hỏi Vật lý. 
+  Yêu cầu sử dụng các đại lượng: ${quantities.join(', ')}. 
+  Và áp dụng các công thức liên quan đến: ${formulas.join(', ')}.
+  Độ khó: Phân bổ từ Dễ đến Khó. 
+  Các câu hỏi phải có tính ứng dụng thực tế.`;
+
   const response = await ai.models.generateContent({
-    model: 'gemini-3-flash-preview',
+    model: 'gemini-3-pro-preview',
+    contents: prompt,
+    config: {
+      systemInstruction: SYSTEM_PROMPT,
+      responseMimeType: "application/json",
+    }
+  });
+
+  const data = safeParseJSON(response.text || '[]');
+  return data.map((item: any) => ({
+    ...item,
+    id: Math.random().toString(36).substring(7),
+    topic: "Ôn tập theo từ khóa"
+  }));
+};
+
+export const parseQuestionsFromText = async (rawText: string): Promise<PhysicsProblem[]> => {
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  const response = await ai.models.generateContent({
+    model: 'gemini-3-pro-preview',
     contents: `Trích xuất các câu hỏi từ văn bản này sang JSON: "${rawText}".`,
     config: {
       systemInstruction: SYSTEM_PROMPT,
       responseMimeType: "application/json",
-      responseSchema: {
-        type: Type.ARRAY,
-        items: {
-          type: Type.OBJECT,
-          properties: {
-            title: { type: Type.STRING },
-            content: { type: Type.STRING },
-            type: { type: Type.STRING, enum: ['TN', 'DS', 'TL'] },
-            difficulty: { type: Type.STRING, enum: ['Dễ', 'Trung bình', 'Khó'] },
-            challenge: { type: Type.STRING, enum: ['Mặc định', 'Ghi nhớ nhanh', 'Sắp xếp từ', 'Màn sương mờ', 'Kiến bò lung tung', 'Nước dâng ngập chữ', 'Vật thể nhiễu'] },
-            options: { type: Type.ARRAY, items: { type: Type.STRING } },
-            correctAnswer: { type: Type.STRING },
-            explanation: { type: Type.STRING },
-            timeLimit: { type: Type.NUMBER },
-            mechanic: { type: Type.STRING, enum: ['Pháo xạ kích', 'Nước dâng cao', 'Vũ trụ phiêu lưu', 'Nấm lùn phiêu lưu', 'Lật ô bí mật'] }
-          },
-          required: ["title", "content", "type", "correctAnswer", "explanation", "difficulty", "challenge"]
-        }
-      }
     }
   });
 
