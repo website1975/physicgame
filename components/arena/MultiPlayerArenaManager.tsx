@@ -46,20 +46,25 @@ const MultiPlayerArenaManager: React.FC<MultiPlayerArenaManagerProps> = ({
         const capacity = joinedRoom.capacity || 2;
         const isMaster = keys[0] === myPresenceKey;
 
+        // Nếu đủ người và là người dẫn đầu phòng (Master)
         if (playerInfos.length >= capacity && !matchStartedRef.current && isMaster && !heartbeatIntervalRef.current) {
           try {
+            // Lấy các bộ đề mà giáo viên đã gán cho phòng này (ARENA_B, C, D)
             const assignments = await getRoomAssignments(currentTeacher.id, joinedRoom.code);
             const validSets = [];
             for (const item of assignments) {
-               const data = await fetchSetData(item.set_id);
-               if (String(data.grade) === String(studentGrade)) validSets.push({ ...data, id: item.set_id });
+               try {
+                 const data = await fetchSetData(item.set_id);
+                 if (String(data.grade) === String(studentGrade)) {
+                   validSets.push({ ...data, id: item.set_id });
+                 }
+               } catch(e) {}
             }
 
+            // Nếu giáo viên chưa gán đề, báo lỗi hoặc dùng đề mặc định (ở đây ta ưu tiên đề gán)
             if (validSets.length > 0) {
               const selectedSet = validSets[Math.floor(Math.random() * validSets.length)];
               const allPlayersPayload = playerInfos.map(p => ({ id: p.id, name: p.name }));
-              
-              // Tạo mốc thời gian bắt đầu tuyệt đối (sau 4 giây để chắc chắn cả 2 đều nhận được)
               const syncStartTime = Date.now() + 4000;
 
               const sendSignal = () => {
@@ -78,7 +83,7 @@ const MultiPlayerArenaManager: React.FC<MultiPlayerArenaManagerProps> = ({
               };
 
               sendSignal();
-              heartbeatIntervalRef.current = setInterval(sendSignal, 500);
+              heartbeatIntervalRef.current = setInterval(sendSignal, 800);
 
               const checkStart = setInterval(() => {
                 if (Date.now() >= syncStartTime) {
@@ -92,10 +97,13 @@ const MultiPlayerArenaManager: React.FC<MultiPlayerArenaManagerProps> = ({
                     opponents, joinedRoom, myId: uniqueId, startIndex: 0 
                   });
                 }
-              }, 50);
+              }, 100);
+            } else {
+              // Có thể thông báo cho học sinh là chưa có đề gán
+              console.warn("Giáo viên chưa gán đề cho phòng này!");
             }
           } catch (e) {
-            console.error("Lỗi Master khởi tạo:", e);
+            console.error("Lỗi khởi tạo trận đấu:", e);
           }
         }
       })
@@ -106,7 +114,6 @@ const MultiPlayerArenaManager: React.FC<MultiPlayerArenaManagerProps> = ({
         if (heartbeatIntervalRef.current) clearInterval(heartbeatIntervalRef.current);
         const opponents = (payload.allPlayers || []).filter((p: any) => p.id !== uniqueId).map((p: any) => ({ id: p.id, name: p.name }));
         
-        // Đợi đến đúng thời điểm startTime mà Master quy định
         const checkStart = setInterval(() => {
           if (Date.now() >= payload.startTime) {
             clearInterval(checkStart);
@@ -115,7 +122,7 @@ const MultiPlayerArenaManager: React.FC<MultiPlayerArenaManagerProps> = ({
               opponents, joinedRoom, myId: uniqueId, startIndex: 0
             });
           }
-        }, 50);
+        }, 100);
       })
       .subscribe(async (status) => {
         if (status === 'SUBSCRIBED') {
@@ -133,29 +140,29 @@ const MultiPlayerArenaManager: React.FC<MultiPlayerArenaManagerProps> = ({
   return (
     <div className="min-h-screen flex items-center justify-center p-6 bg-slate-950">
       <div className="bg-white rounded-[4rem] p-12 shadow-2xl max-w-4xl w-full border-b-[12px] border-purple-600 flex flex-col items-center">
-           <div className="text-5xl mb-6">📡</div>
+           <div className="text-6xl mb-6">📡</div>
            <h2 className="text-3xl font-black text-slate-800 uppercase italic mb-8 text-center tracking-tighter">ARENA SYNC</h2>
-           <div className="w-full py-12 bg-slate-950 rounded-[3rem] text-white flex flex-col items-center gap-10">
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-6 px-10">
+           <div className="w-full py-12 bg-slate-900 rounded-[3rem] text-white flex flex-col items-center gap-10">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-8 px-10">
                  {presentPlayers.map((p, i) => (
-                   <div key={i} className="flex flex-col items-center gap-3 animate-in zoom-in">
-                      <div className="w-16 h-16 rounded-full bg-blue-600 border-4 border-white shadow-lg flex items-center justify-center text-2xl">👤</div>
-                      <div className="text-[10px] font-black uppercase italic text-white text-center">
+                   <div key={i} className="flex flex-col items-center gap-4 animate-in zoom-in">
+                      <div className="w-20 h-20 rounded-full bg-blue-600 border-4 border-white shadow-lg flex items-center justify-center text-3xl">👤</div>
+                      <div className="text-xs font-black uppercase italic text-white text-center">
                         {p.name === playerName ? 'BẠN' : p.name}
                       </div>
                    </div>
                  ))}
               </div>
               <div className="flex flex-col items-center gap-4">
-                 <div className="flex items-center gap-4 bg-white/5 px-8 py-4 rounded-full border border-white/10">
+                 <div className="flex items-center gap-4 bg-white/10 px-8 py-4 rounded-full border border-white/10">
                     <div className="w-5 h-5 border-3 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
                     <span className="font-black italic uppercase text-lg text-white tracking-widest">
-                      {presentPlayers.length >= (joinedRoom.capacity || 2) ? 'ĐANG ĐỒNG BỘ...' : 'ĐANG ĐỢI ĐỐI THỦ...'}
+                      {presentPlayers.length >= (joinedRoom.capacity || 2) ? 'ĐANG KẾT NỐI TRẬN ĐẤU...' : 'ĐANG ĐỢI ĐỐI THỦ...'}
                     </span>
                  </div>
               </div>
            </div>
-           <button onClick={() => { setJoinedRoom(null); setGameState('ROOM_SELECTION'); }} className="mt-10 px-12 py-5 bg-slate-100 text-slate-400 rounded-3xl font-black uppercase text-xs italic">Hủy</button>
+           <button onClick={() => { setJoinedRoom(null); setGameState('ROOM_SELECTION'); }} className="mt-10 px-12 py-5 bg-slate-100 text-slate-400 rounded-3xl font-black uppercase text-xs italic">Quay lại</button>
       </div>
     </div>
   );
