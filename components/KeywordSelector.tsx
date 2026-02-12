@@ -17,55 +17,55 @@ const KeywordSelector: React.FC<KeywordSelectorProps> = ({
   onToggleFormula
 }) => {
   return (
-    <div className="space-y-8">
+    <div className="space-y-10">
       <div>
-        <h3 className="text-sm font-black mb-4 text-slate-400 uppercase tracking-widest flex items-center gap-2">
-          <span className="w-6 h-6 bg-slate-100 rounded flex items-center justify-center text-slate-600 text-[10px]">1</span>
+        <h3 className="text-base font-black mb-6 text-slate-500 uppercase tracking-widest flex items-center gap-3 italic">
+          <span className="w-8 h-8 bg-slate-900 rounded-xl flex items-center justify-center text-white text-xs shadow-lg">1</span>
           Đại lượng cần tìm
         </h3>
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap gap-3">
           {ALL_QUANTITIES.map((q) => (
             <button
               key={q.symbol}
               onClick={() => onToggleQuantity(q.symbol)}
-              className={`px-4 py-2 rounded-xl border-2 transition-all text-sm font-bold flex items-center gap-2 ${
+              className={`px-6 py-3 rounded-2xl border-4 transition-all text-base font-black flex items-center gap-3 ${
                 selectedQuantities.includes(q.symbol)
-                  ? 'bg-blue-600 border-blue-600 text-white shadow-lg -translate-y-1'
-                  : 'bg-white border-slate-100 text-slate-600 hover:border-blue-200'
+                  ? 'bg-blue-600 border-blue-600 text-white shadow-xl -translate-y-1'
+                  : 'bg-white border-slate-100 text-slate-600 hover:border-blue-300'
               }`}
             >
-              <span className={selectedQuantities.includes(q.symbol) ? 'text-white' : 'text-blue-500'}>
+              <span className={selectedQuantities.includes(q.symbol) ? 'text-white' : 'text-blue-600'}>
                 <LatexRenderer content={`$${q.symbol}$`} />
               </span>
-              <span className="text-[10px] opacity-75 font-medium">{q.name}</span>
+              <span className="text-xs opacity-80 uppercase tracking-tighter">{q.name}</span>
             </button>
           ))}
         </div>
       </div>
 
       <div>
-        <h3 className="text-sm font-black mb-4 text-slate-400 uppercase tracking-widest flex items-center gap-2">
-          <span className="w-6 h-6 bg-slate-100 rounded flex items-center justify-center text-slate-600 text-[10px]">2</span>
+        <h3 className="text-base font-black mb-6 text-slate-500 uppercase tracking-widest flex items-center gap-3 italic">
+          <span className="w-8 h-8 bg-slate-900 rounded-xl flex items-center justify-center text-white text-xs shadow-lg">2</span>
           Công thức áp dụng
         </h3>
-        <div className="grid grid-cols-1 gap-3">
+        <div className="grid grid-cols-1 gap-4">
           {ALL_FORMULAS.map((f) => (
             <button
               key={f.id}
               onClick={() => onToggleFormula(f.id)}
-              className={`p-4 rounded-2xl border-2 text-left transition-all relative overflow-hidden group ${
+              className={`p-6 rounded-[2.5rem] border-4 text-left transition-all relative overflow-hidden group ${
                 selectedFormulas.includes(f.id)
-                  ? 'bg-indigo-600 border-indigo-600 text-white shadow-xl -translate-y-1'
-                  : 'bg-white border-slate-100 text-slate-600 hover:border-indigo-200 hover:bg-indigo-50/30'
+                  ? 'bg-indigo-600 border-indigo-600 text-white shadow-2xl -translate-y-1'
+                  : 'bg-white border-slate-100 text-slate-600 hover:border-indigo-300 hover:bg-indigo-50/50'
               }`}
             >
-              <div className={`mb-1 ${selectedFormulas.includes(f.id) ? 'text-white' : 'text-indigo-600'}`}>
-                <LatexRenderer content={`$${f.latex}$`} className="text-xl font-bold" />
+              <div className={`mb-2 ${selectedFormulas.includes(f.id) ? 'text-white' : 'text-indigo-600'}`}>
+                <LatexRenderer content={`$${f.latex}$`} className="text-3xl font-black" />
               </div>
-              <div className="text-xs font-bold opacity-60 uppercase tracking-tight">{f.name}</div>
+              <div className="text-sm font-black opacity-60 uppercase tracking-widest italic">{f.name}</div>
               {selectedFormulas.includes(f.id) && (
-                <div className="absolute right-4 top-1/2 -translate-y-1/2 text-white/20">
-                   <svg className="w-8 h-8" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" /></svg>
+                <div className="absolute right-8 top-1/2 -translate-y-1/2 text-white/30">
+                   <svg className="w-12 h-12" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" /></svg>
                 </div>
               )}
             </button>
