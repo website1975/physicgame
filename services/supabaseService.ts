@@ -1,6 +1,6 @@
 
 import { createClient } from '@supabase/supabase-js';
-import { PhysicsProblem, QuestionType, Round, Teacher } from '../types';
+import { PhysicsProblem, QuestionType, Round, Teacher, Difficulty, DisplayChallenge, InteractiveMechanic } from '../types';
 
 const supabaseUrl = 'https://ktottoplusantmadclpg.supabase.co';
 const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imt0b3R0b3BsdXNhbnRtYWRjbHBnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjgzMDM1MzYsImV4cCI6MjA4Mzg3OTUzNn0.VAPgXcqd24N1Cguv99hq4bVkstxm3jTObQCHC13FgB8';
@@ -22,7 +22,6 @@ export const incrementVisitorCount = async (): Promise<number> => {
     const newValue = current + 1;
     const { error } = await supabase.from('app_stats').update({ value: newValue }).eq('key', 'visitor_count');
     if (error) {
-      // Nếu chưa có row thì insert mới
       await supabase.from('app_stats').insert([{ key: 'visitor_count', value: 1 }]);
       return 1;
     }
@@ -68,6 +67,246 @@ export const fetchTeacherByMaGV = async (maGV: string): Promise<Teacher | null> 
   } as Teacher;
 };
 
+const inferMetadata = (set: any) => {
+    if (!set) return null;
+    
+    let grade = set.grade || set.GRADE;
+    let subject = set.subject || set.SUBJECT || set.monday || set.MonDay;
+    let topic = set.topic || set.TOPIC;
+    let title = set.title || set.TITLE;
+    
+    // Tính toán lại từ data JSON nếu các cột count bị thiếu trong DB
+    let rCount = set.round_count || set.roundCount;
+    let qCount = set.question_count || set.questionCount;
+
+    if (set.data && Array.isArray(set.data)) {
+        if (!rCount) rCount = set.data.length;
+        if (!qCount) {
+            let count = 0;
+            set.data.forEach((r: any) => { count += (r.problems?.length || 0); });
+            qCount = count;
+        }
+    }
+
+    return {
+        ...set,
+        title: title || `Bộ đề mới`,
+        topic: topic || "Chưa phân loại",
+        grade: String(grade || "10"),
+        subject: subject || "Vật lý",
+        round_count: rCount || 0,
+        question_count: qCount || 0
+    };
+};
+
+export const fetchAllExamSets = async (teacherId: string) => {
+  const { data, error } = await supabase
+    .from('exam_sets')
+    .select('*') 
+    .eq('teacher_id', teacherId)
+    .order('id', { ascending: false });
+
+  if (error) throw error;
+  return (data || []).map(set => inferMetadata(set));
+};
+
+export const saveExamSet = async (teacherId: string, title: string, rounds: Round[], topic: string, grade: string, subject: string) => {
+  // PAYLOAD SIÊU TỐI GIẢN - CHỈ GỬI CỘT CƠ BẢN NHẤT
+  // Đã loại bỏ 'round_count' và 'question_count' vì lỗi PGRST204 báo không tìm thấy cột
+  const payload: any = { 
+    teacher_id: teacherId, 
+    title: title, 
+    topic: topic, 
+    data: rounds, 
+    grade: grade
+  };
+
+  // Thử thêm subject nếu có
+  if (subject) payload.subject = subject;
+
+  console.log("[Supabase] ĐANG THỬ LƯU VỚI PAYLOAD TỐI GIẢN:", payload);
+
+  const { data, error } = await supabase
+    .from('exam_sets')
+    .insert([payload])
+    .select();
+
+  if (error) {
+    console.error("[Supabase] LỖI LƯU ĐỀ:", error);
+    const detailMsg = `LỖI ${error.code}: ${error.message}\n${error.hint || ''}`;
+    alert(detailMsg);
+    throw new Error(detailMsg);
+  }
+
+  if (!data || data.length === 0) {
+    throw new Error("Lưu thành công nhưng không nhận được phản hồi từ Database.");
+  }
+
+  return data[0].id;
+};
+
+export const updateExamSet = async (setId: string, title: string, rounds: Round[], topic: string, grade: string, teacherId: string) => {
+  const payload: any = { 
+    title, 
+    topic, 
+    data: rounds, 
+    grade
+  };
+
+  const { data, error } = await supabase
+    .from('exam_sets')
+    .update(payload)
+    .eq('id', setId)
+    .select();
+
+  if (error) {
+    const detailMsg = `LỖI CẬP NHẬT: ${error.message}`;
+    alert(detailMsg);
+    throw new Error(detailMsg);
+  }
+
+  return setId;
+};
+
+export const deleteExamSet = async (setId: string) => {
+  const { error } = await supabase.from('exam_sets').delete().eq('id', setId);
+  if (error) throw error;
+  return true;
+};
+
+export const fetchSetData = async (setId: string): Promise<{ rounds: Round[], topic: string, grade: string, created_at: string, title: string, subject: string }> => {
+  const { data, error } = await supabase.from('exam_sets').select('*').eq('id', setId).single();
+  if (error) throw error;
+  const processed = inferMetadata(data);
+  return { 
+    rounds: processed.data || [], 
+    topic: processed.topic, 
+    grade: processed.grade,
+    title: processed.title,
+    subject: processed.subject,
+    created_at: processed.created_at || new Date().toISOString()
+  };
+};
+
+export const assignSetToRoom = async (teacherId: string, roomCode: string, setId: string) => {
+  const { error } = await supabase.from('room_assignments').upsert({ 
+    teacher_id: teacherId, 
+    room_code: roomCode, 
+    set_id: setId, 
+    assigned_at: new Date().toISOString() 
+  }, { onConflict: 'teacher_id,room_code,set_id' });
+  if (error) throw error;
+  return true;
+};
+
+export const getLatestRoomAssignment = async (teacherId: string, roomCode: string): Promise<string | null> => {
+  const { data, error } = await supabase.from('room_assignments')
+    .select('set_id')
+    .eq('teacher_id', teacherId)
+    .eq('room_code', roomCode)
+    .order('assigned_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error || !data) return null;
+  return data.set_id;
+};
+
+export const getRoomAssignmentsWithMeta = async (teacherId: string, roomCode: string): Promise<any[]> => {
+  const { data: assignments, error: assignError } = await supabase
+    .from('room_assignments')
+    .select('set_id, assigned_at')
+    .eq('teacher_id', teacherId)
+    .eq('room_code', roomCode);
+  
+  if (assignError || !assignments || assignments.length === 0) return [];
+  
+  const setIds = assignments.map(a => a.set_id);
+
+  const { data: sets, error: setsError } = await supabase
+    .from('exam_sets')
+    .select('*')
+    .eq('teacher_id', teacherId) 
+    .in('id', setIds);
+
+  if (setsError || !sets) return [];
+
+  return assignments.map(assign => {
+      const setRaw = sets.find(s => s.id === assign.set_id);
+      if (!setRaw) return null;
+      return {
+          ...inferMetadata(setRaw),
+          assigned_at: assign.assigned_at
+      };
+  }).filter(Boolean);
+};
+
+export const getRoomAssignments = async (teacherId: string, roomCode: string): Promise<{set_id: string, assigned_at: string}[]> => {
+  const { data, error } = await supabase.from('room_assignments')
+    .select('set_id, assigned_at')
+    .eq('teacher_id', teacherId)
+    .eq('room_code', roomCode)
+    .order('assigned_at', { ascending: true });
+  if (error || !data) return [];
+  return data.map(row => ({ set_id: row.set_id, assigned_at: row.assigned_at }));
+};
+
+export const getSetAssignments = async (teacherId: string, setId: string): Promise<string[]> => {
+  const { data, error } = await supabase.from('room_assignments').select('room_code').eq('teacher_id', teacherId).eq('set_id', setId);
+  if (error || !data) return [];
+  return data.map(row => row.room_code);
+};
+
+export const removeRoomAssignment = async (teacherId: string, roomCode: string, setId: string) => {
+  const { error } = await supabase.from('room_assignments').delete()
+    .eq('teacher_id', teacherId)
+    .eq('room_code', roomCode)
+    .eq('set_id', setId);
+  if (error) throw error;
+  return true;
+};
+
+export const updateExamSetTitle = async (setId: string, newTitle: string) => {
+  const { error } = await supabase.from('exam_sets').update({ title: newTitle }).eq('id', setId);
+  if (error) throw error;
+  return true;
+};
+
+export const fetchQuestionsLibrary = async (teacherId: string, grade?: string, type?: QuestionType): Promise<PhysicsProblem[]> => {
+  let query = supabase.from('exam_sets').select('data, topic').eq('teacher_id', teacherId).order('id', { ascending: false }).limit(10);
+  if (grade) query = query.eq('grade', grade);
+  
+  const { data, error } = await query;
+  if (error) throw error;
+
+  const library: PhysicsProblem[] = [];
+  const seenContent = new Set<string>();
+
+  data.forEach(set => {
+    const rounds = set.data || [];
+    rounds.forEach((r: any) => {
+      const probs = r.problems || [];
+      probs.forEach((p: any) => {
+        const key = `${p.type}_${p.content}`;
+        if ((!type || p.type === type) && !seenContent.has(key)) {
+          library.push({ ...p, topic: set.topic });
+          seenContent.add(key);
+        }
+      });
+    });
+  });
+  return library;
+};
+
+export const uploadQuestionImage = async (file: File): Promise<string> => {
+  const fileExt = file.name.split('.').pop();
+  const fileName = `${Math.random().toString(36).substring(2)}_${Date.now()}.${fileExt}`;
+  const filePath = `questions/${fileName}`;
+  const { error: uploadError } = await supabase.storage.from('forum_attachments').upload(filePath, file);
+  if (uploadError) throw uploadError;
+  const { data } = supabase.storage.from('forum_attachments').getPublicUrl(filePath);
+  return data.publicUrl;
+};
+
 export const getAllTeachers = async (): Promise<Teacher[]> => {
   const { data, error } = await supabase.from('giaovien').select('*').order('tengv', { ascending: true });
   if (error) throw error;
@@ -105,143 +344,19 @@ export const deleteTeacher = async (id: string) => {
   return true;
 };
 
-export const fetchAllExamSets = async (teacherId: string) => {
-  const { data, error } = await supabase
-    .from('exam_sets')
-    .select('*')
-    .eq('teacher_id', teacherId)
-    .order('created_at', { ascending: false });
-
-  if (error) throw error;
-  
-  return data.map((set: any) => {
-    const rounds = set.data || [];
-    let qCount = 0;
-    rounds.forEach((r: any) => { qCount += (r.problems?.length || 0); });
-    return { 
-      ...set, 
-      question_count: qCount, 
-      round_count: rounds.length, 
-      topic: set.topic || 'Chưa phân loại', 
-      grade: set.grade || '10',
-      is_legacy: false 
-    };
-  });
-};
-
-export const saveExamSet = async (teacherId: string, title: string, rounds: Round[], topic: string, grade: string, subject: string) => {
-  const { data, error } = await supabase.from('exam_sets').insert([{ teacher_id: teacherId, title, topic, data: rounds, grade, subject, created_at: new Date().toISOString() }]).select().single();
-  if (error) throw error;
-  return data.id;
-};
-
-export const updateExamSet = async (setId: string, title: string, rounds: Round[], topic: string, grade: string, teacherId: string) => {
-  const { error } = await supabase.from('exam_sets').update({ title, topic, data: rounds, grade, teacher_id: teacherId }).eq('id', setId);
-  if (error) throw error;
-  return setId;
-};
-
-export const deleteExamSet = async (setId: string) => {
-  const { error } = await supabase.from('exam_sets').delete().eq('id', setId);
-  if (error) throw error;
-  return true;
-};
-
-export const fetchSetData = async (setId: string): Promise<{ rounds: Round[], topic: string, grade: string, created_at: string, title: string }> => {
-  const { data, error } = await supabase.from('exam_sets').select('data, topic, grade, created_at, title').eq('id', setId).single();
-  if (error) throw error;
-  return { 
-    rounds: data?.data || [], 
-    topic: data?.topic || 'Khác', 
-    grade: data?.grade || '10',
-    title: data?.title || 'Bộ đề không tên',
-    created_at: data?.created_at || new Date().toISOString()
-  };
-};
-
-export const assignSetToRoom = async (teacherId: string, roomCode: string, setId: string) => {
-  const { error } = await supabase.from('room_assignments').insert({ 
-    teacher_id: teacherId, 
-    room_code: roomCode, 
-    set_id: setId, 
-    assigned_at: new Date().toISOString() 
-  });
-  if (error && error.code !== '23505') throw error; 
-  return true;
-};
-
-export const getRoomAssignments = async (teacherId: string, roomCode: string): Promise<{set_id: string, assigned_at: string}[]> => {
-  const { data, error } = await supabase.from('room_assignments')
-    .select('set_id, assigned_at')
-    .eq('teacher_id', teacherId)
-    .eq('room_code', roomCode)
-    .order('assigned_at', { ascending: true });
-  if (error || !data) return [];
-  return data.map(row => ({ set_id: row.set_id, assigned_at: row.assigned_at }));
-};
-
-export const getSetAssignments = async (teacherId: string, setId: string): Promise<string[]> => {
-  const { data, error } = await supabase.from('room_assignments').select('room_code').eq('teacher_id', teacherId).eq('set_id', setId);
-  if (error || !data) return [];
-  return data.map(row => row.room_code);
-};
-
-export const removeRoomAssignment = async (teacherId: string, roomCode: string, setId: string) => {
-  const { error } = await supabase.from('room_assignments').delete()
-    .eq('teacher_id', teacherId)
-    .eq('room_code', roomCode)
-    .eq('set_id', setId);
-  if (error) throw error;
-  return true;
-};
-
-export const updateExamSetTitle = async (setId: string, newTitle: string) => {
-  const { error } = await supabase.from('exam_sets').update({ title: newTitle }).eq('id', setId);
-  if (error) throw error;
-  return true;
-};
-
-export const fetchQuestionsLibrary = async (teacherId: string, grade?: string, type?: QuestionType): Promise<PhysicsProblem[]> => {
-  let query = supabase.from('exam_sets').select('data, topic').eq('teacher_id', teacherId);
-  if (grade) query = query.eq('grade', grade);
-  
-  const { data, error } = await query;
-  if (error) throw error;
-
-  const library: PhysicsProblem[] = [];
-  const seenContent = new Set<string>();
-
-  data.forEach(set => {
-    const rounds = set.data || [];
-    rounds.forEach((r: any) => {
-      const probs = r.problems || [];
-      probs.forEach((p: any) => {
-        const key = `${p.type}_${p.content}`;
-        if ((!type || p.type === type) && !seenContent.has(key)) {
-          library.push({ ...p, topic: set.topic });
-          seenContent.add(key);
+export const createSampleExamSet = async (teacherId: string) => {
+  const sampleRounds: Round[] = [
+    {
+      number: 1,
+      description: "Vòng khởi động!",
+      problems: [
+        {
+          id: 's1', title: 'Năng lượng', content: 'Tính thế năng của vật khối lượng $m = 2kg$ ở độ cao $h = 5m$. Lấy $g = 10 m/s^2$.',
+          difficulty: Difficulty.EASY, type: QuestionType.SHORT_ANSWER, challenge: DisplayChallenge.NORMAL,
+          correctAnswer: '100', topic: 'Năng lượng', explanation: '$W_t = mgh = 2.10.5 = 100J$', grade: '10'
         }
-      });
-    });
-  });
-  return library;
-};
-
-export const uploadQuestionImage = async (file: File): Promise<string> => {
-  const fileExt = file.name.split('.').pop();
-  const fileName = `${Math.random().toString(36).substring(2)}_${Date.now()}.${fileExt}`;
-  const filePath = `questions/${fileName}`;
-  const { error: uploadError } = await supabase.storage.from('forum_attachments').upload(filePath, file);
-  if (uploadError) throw uploadError;
-  const { data } = supabase.storage.from('forum_attachments').getPublicUrl(filePath);
-  return data.publicUrl;
-};
-
-export const standardizeLegacySets = async (teacherId: string, maGV: string) => {
-  const { error } = await supabase
-    .from('exam_sets')
-    .update({ teacher_id: teacherId })
-    .eq('teacher_id', maGV);
-  if (error) throw error;
-  return true;
+      ]
+    }
+  ];
+  return await saveExamSet(teacherId, "Bộ đề mẫu: Năng lượng", sampleRounds, "Cơ học", "10", "Vật lý");
 };
