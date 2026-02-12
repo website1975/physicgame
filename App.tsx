@@ -2,12 +2,11 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { GoogleGenAI } from "@google/genai";
 import { GameState, Round, Teacher, GameSettings, AdminTab } from './types';
-import { loginTeacher, fetchTeacherByMaGV, supabase, fetchAllExamSets, fetchSetData, saveExamSet, updateExamSet, deleteExamSet, assignSetToRoom, getVisitorCount, incrementVisitorCount } from './services/supabaseService';
+import { loginTeacher, fetchTeacherByMaGV, supabase, fetchAllExamSets, fetchSetData, saveExamSet, updateExamSet, deleteExamSet, getVisitorCount, incrementVisitorCount } from './services/supabaseService';
 import TeacherPortal from './components/TeacherPortal';
 import StudentArenaFlow from './components/StudentArenaFlow';
 import GameEngine from './components/GameEngine';
 
-// Hàm getSafeEnv tối ưu để đọc Key từ mọi môi trường (Vercel, Vite, Local)
 const getSafeEnv = (key: string): string | undefined => {
   try {
     const fromProcess = (process.env as any)[key] || (process.env as any)[`VITE_${key}`];
@@ -18,12 +17,10 @@ const getSafeEnv = (key: string): string | undefined => {
   return undefined;
 };
 
-// Khởi tạo process.env giả lập nếu chưa có
 if (typeof (window as any).process === 'undefined') {
   (window as any).process = { env: {} };
 }
 
-// Thiết lập Key toàn cục ngay lập tức
 const globalKey = getSafeEnv('API_KEY');
 if (globalKey) {
   (process.env as any).API_KEY = globalKey;
@@ -38,46 +35,20 @@ const App: React.FC = () => {
   const [currentTeacher, setCurrentTeacher] = useState<Teacher | null>(null);
   const [errorMsg, setErrorMsg] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [apiStatus, setApiStatus] = useState<'checking' | 'online' | 'offline'>('checking');
   const [totalQuests, setTotalQuests] = useState<number>(0);
   const [visitorCount, setVisitorCount] = useState<number>(0);
   
   const [activeCategory, setActiveCategory] = useState('Tất cả');
+  const [searchLibrary, setSearchLibrary] = useState('');
   const [adminTab, setAdminTab] = useState<AdminTab>('EDITOR');
   const [examSets, setExamSets] = useState<any[]>([]);
   const [loadedSetTitle, setLoadedSetTitle] = useState<string | null>(null);
   const [loadedSetId, setLoadedSetId] = useState<string | null>(null);
+  const [loadedSetTopic, setLoadedSetTopic] = useState<string | null>(null);
   const [rounds, setRounds] = useState<Round[]>([{ number: 1, problems: [], description: '' }]);
-  const [settings, setSettings] = useState<GameSettings>({ autoNext: true, autoNextDelay: 20, maxPlayers: 2 });
   const [joinedRoom, setJoinedRoom] = useState<any>(null);
   const [availableSets, setAvailableSets] = useState<any[]>([]);
-  const [matchData, setMatchData] = useState<{ setId: string, title: string, rounds: Round[], opponentName?: string, joinedRoom?: any, startIndex?: number, myId?: string } | null>(null);
-
-  const [liveSessionKey, setLiveSessionKey] = useState<number>(Date.now());
-
-  const checkAI = useCallback(async () => {
-    setApiStatus('checking');
-    try {
-      // Thử lấy lại key một lần nữa nếu biến process.env chưa kịp nạp
-      const apiKey = process.env.API_KEY || getSafeEnv('API_KEY');
-      if (!apiKey) {
-        setApiStatus('offline');
-        return;
-      }
-      const ai = new GoogleGenAI({ apiKey });
-      const response = await ai.models.generateContent({ 
-        model: 'gemini-3-flash-preview', 
-        contents: 'ping', 
-        config: { maxOutputTokens: 1 } 
-      });
-      if (response.text) {
-        setApiStatus('online');
-      }
-    } catch (e) { 
-      console.error("AI Check failed:", e);
-      setApiStatus('offline'); 
-    }
-  }, []);
+  const [matchData, setMatchData] = useState<{ setId: string, title: string, rounds: Round[], opponents?: { id: string, name: string }[], joinedRoom?: any, startIndex?: number, myId?: string } | null>(null);
 
   const handleVisitorTracking = async () => {
     const isNewSession = !sessionStorage.getItem('visitor_tracked');
@@ -95,16 +66,13 @@ const App: React.FC = () => {
     try {
       const { count } = await supabase.from('exam_sets').select('*', { count: 'exact', head: true });
       if (count !== null) setTotalQuests(count);
-    } catch (e) {
-      console.error("Lỗi lấy thống kê:", e);
-    }
+    } catch (e) { console.error("Lỗi thống kê:", e); }
   };
 
   useEffect(() => { 
-    checkAI(); 
     fetchGlobalStats();
     handleVisitorTracking();
-  }, [checkAI]);
+  }, []);
 
   const refreshSets = async (tId: string) => {
     setIsLoading(true);
@@ -120,19 +88,47 @@ const App: React.FC = () => {
     if (gameState === 'ADMIN' && currentTeacher) refreshSets(currentTeacher.id);
   }, [gameState, currentTeacher?.id]);
 
-  const handleLiveNow = async (id: string, title: string) => {
+  const handleLoadSet = async (id: string, title: string) => {
     try {
       setIsLoading(true);
       const data = await fetchSetData(id);
       setRounds(data.rounds);
       setLoadedSetId(id);
       setLoadedSetTitle(title);
-      setLiveSessionKey(Date.now());
-      setAdminTab('CONTROL');
+      setLoadedSetTopic(data.topic);
+      return true;
     } catch (e) {
-      console.error("Lỗi nạp đề Live:", e);
+      return false;
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const handleSaveSet = async (title: string, asNew: boolean, topic: string, grade: string) => {
+    if (!currentTeacher) return;
+    try {
+      console.log("[App] Bắt đầu quá trình lưu...");
+      let finalId = loadedSetId;
+      
+      if (asNew || !loadedSetId) {
+        console.log("[App] Đang gọi saveExamSet (Tạo mới)");
+        finalId = await saveExamSet(currentTeacher.id, title, rounds, topic, grade, currentTeacher.monday);
+        setLoadedSetId(finalId);
+      } else {
+        console.log("[App] Đang gọi updateExamSet (Cập nhật)");
+        await updateExamSet(loadedSetId, title, rounds, topic, grade, currentTeacher.id);
+      }
+      
+      setLoadedSetTitle(title);
+      setLoadedSetTopic(topic);
+      
+      console.log("[App] Lưu thành công, đang làm mới danh sách...");
+      await refreshSets(currentTeacher.id);
+      
+      alert(`Đã lưu thành công bộ đề: ${title}\nVui lòng kiểm tra tab 'Kho đề của tôi'!`);
+    } catch (err: any) {
+      console.error("[App] LỖI TRONG QUÁ TRÌNH LƯU:", err);
+      alert("Lỗi khi lưu bộ đề: " + (err.message || "Lỗi không xác định"));
     }
   };
 
@@ -143,44 +139,20 @@ const App: React.FC = () => {
           <div className="bg-white rounded-[4rem] p-12 shadow-2xl max-w-2xl w-full text-center border-b-[12px] border-blue-600 animate-in zoom-in duration-500 relative overflow-hidden">
             <div className="absolute top-8 right-10 flex flex-col items-end gap-2">
                <div className="flex items-center gap-3">
-                  {/* Visitor Counter */}
                   <div className="flex items-center gap-2 bg-slate-50 px-3 py-1.5 rounded-full border border-slate-100 shadow-sm">
                      <span className="text-sm">👤 :</span>
-                     <span className="text-[10px] font-black text-slate-600 uppercase italic tracking-wider whitespace-nowrap">
-                       {visitorCount}
-                     </span>
+                     <span className="text-[10px] font-black text-slate-600 uppercase italic tracking-wider whitespace-nowrap">{visitorCount}</span>
                   </div>
-
-                  {/* AI Status */}
-                  {apiStatus === 'online' ? (
-                    <div className="flex items-center gap-2 bg-emerald-50 px-3 py-1.5 rounded-full border border-emerald-100 shadow-sm">
-                       <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse shadow-[0_0_8px_#10b981]"></div>
-                       <span className="text-[9px] font-black text-emerald-600 uppercase italic tracking-wider">AI READY ✨</span>
-                    </div>
-                  ) : (
-                    <div onClick={checkAI} className="flex items-center gap-2 bg-red-50 px-3 py-1.5 rounded-full border border-red-100 shadow-sm cursor-pointer hover:bg-red-100 transition-colors">
-                       <div className={`w-2 h-2 bg-red-500 rounded-full ${apiStatus === 'checking' ? 'animate-spin' : ''}`}></div>
-                       <span className="text-[9px] font-black text-red-600 uppercase italic tracking-wider">
-                         {apiStatus === 'checking' ? 'CHECKING...' : 'AI OFFLINE'}
-                       </span>
-                    </div>
-                  )}
                </div>
-               
-               {/* Quest Counter */}
                <div className="flex items-center gap-2 bg-blue-50 px-3 py-1 rounded-full border border-blue-100 shadow-sm">
                   <span className="text-sm">📚</span>
-                  <span className="text-[9px] font-black text-blue-600 uppercase italic tracking-wider">
-                    Hệ thống : {totalQuests} Đề
-                  </span>
+                  <span className="text-[9px] font-black text-blue-600 uppercase italic tracking-wider">Hệ thống : {totalQuests} Đề</span>
                </div>
             </div>
-
             <div className="text-left ml-2 md:ml-4">
               <h1 className="text-2xl md:text-3xl lg:text-4xl font-black text-slate-800 mb-1 uppercase italic tracking-tighter">PhysiQuest</h1>
               <p className="text-slate-400 font-bold uppercase text-[6px] md:text-[8px] mb-8 tracking-[0.2em] ml-0.5">Hệ Thống Đấu Trường Vật Lý</p>
             </div>
-            
             <input type="text" placeholder="Tên thi đấu..." className="w-full p-6 bg-slate-50 border-4 border-slate-100 rounded-3xl font-black text-center text-2xl mb-8 outline-none focus:border-blue-500 transition-all" value={playerName} onChange={e => setPlayerName(e.target.value)} />
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <button disabled={!playerName} onClick={() => setGameState('STUDENT_SETUP')} className="py-6 bg-blue-600 text-white font-black rounded-3xl uppercase italic shadow-xl text-xl hover:scale-105 active:scale-95 transition-all">Học sinh 🎒</button>
@@ -204,14 +176,7 @@ const App: React.FC = () => {
                     <p className="text-[10px] font-black text-slate-400 uppercase mb-3 italic">Chọn khối lớp của bạn:</p>
                     <div className="flex gap-2">
                       {['10', '11', '12'].map(g => (
-                        <button 
-                          key={g} 
-                          onClick={() => setStudentGrade(g as any)} 
-                          className={`flex-1 py-4 rounded-2xl font-black italic transition-all border-4 
-                            ${studentGrade === g 
-                              ? 'bg-blue-600 text-white border-blue-400 shadow-[0_0_15px_rgba(37,99,235,0.6)] scale-105' 
-                              : 'bg-slate-50 text-slate-300 border-slate-100'}`}
-                        >K{g}</button>
+                        <button key={g} onClick={() => setStudentGrade(g as any)} className={`flex-1 py-4 rounded-2xl font-black italic transition-all border-4 ${studentGrade === g ? 'bg-blue-600 text-white border-blue-400 shadow-lg scale-105' : 'bg-slate-50 text-slate-300 border-slate-100'}`}>K{g}</button>
                       ))}
                     </div>
                  </div>
@@ -236,32 +201,37 @@ const App: React.FC = () => {
 
       {gameState === 'ADMIN' && currentTeacher && (
         <TeacherPortal 
-          adminTab={adminTab} setAdminTab={setAdminTab} playerName={currentTeacher.tengv} teacherId={currentTeacher.id} 
-          teacherMaGV={currentTeacher.magv} teacherSubject={currentTeacher.monday} teacherRole={currentTeacher.role} onLogout={() => setGameState('LOBBY')}
-          topicInput="" setTopicInput={() => {}} isGenerating={false} onGenerateSet={() => {}} 
-          examSets={examSets} searchLibrary="" setSearchLibrary={() => {}} 
-          activeCategory={activeCategory} setActiveCategory={setActiveCategory} categories={[]} 
-          onLoadSet={async (id, title) => { const data = await fetchSetData(id); setRounds(data.rounds); setLoadedSetId(id); setLoadedSetTitle(title); return true; }}
+          adminTab={adminTab} 
+          setAdminTab={setAdminTab} 
+          playerName={currentTeacher.tengv} 
+          teacherId={currentTeacher.id} 
+          teacherMaGV={currentTeacher.magv} 
+          teacherSubject={currentTeacher.monday} 
+          teacherRole={currentTeacher.role} 
+          onLogout={() => setGameState('LOBBY')}
+          examSets={examSets} 
+          searchLibrary={searchLibrary} 
+          setSearchLibrary={setSearchLibrary} 
+          activeCategory={activeCategory} 
+          setActiveCategory={setActiveCategory} 
+          onLoadSet={handleLoadSet}
           onDeleteSet={async (id) => { await deleteExamSet(id); refreshSets(currentTeacher.id); return true; }}
-          onDistribute={async (setId, title, roomCode) => { await assignSetToRoom(currentTeacher.id, roomCode, setId); }}
-          onStartGame={() => setGameState('ROOM_SELECTION')} rounds={rounds} setRounds={setRounds} settings={settings} setSettings={setSettings}
-          currentGameState={gameState} onNextQuestion={() => {}} players={[]} myPlayerId={playerName}
-          onSaveSet={async (title, asNew, topic, grade) => {
-            if (asNew) await saveExamSet(currentTeacher.id, title, rounds, topic, grade, currentTeacher.monday);
-            else await updateExamSet(loadedSetId!, title, rounds, topic, grade, currentTeacher.id);
-            refreshSets(currentTeacher.id);
-          }}
-          loadedSetTitle={loadedSetTitle} loadedSetTopic={null} loadedSetId={loadedSetId}
-          onResetToNew={() => { setRounds([{ number: 1, problems: [], description: '' }]); setLoadedSetId(null); setLoadedSetTitle(null); }}
-          onRefreshSets={() => refreshSets(currentTeacher.id)} isLoadingSets={isLoading}
-          onLive={handleLiveNow}
-          liveSessionKey={liveSessionKey}
+          rounds={rounds} 
+          setRounds={setRounds} 
+          onSaveSet={handleSaveSet}
+          loadedSetTitle={loadedSetTitle} 
+          loadedSetId={loadedSetId}
+          loadedSetTopic={loadedSetTopic}
+          onResetToNew={() => { setRounds([{ number: 1, problems: [], description: '' }]); setLoadedSetId(null); setLoadedSetTitle(null); setLoadedSetTopic(null); }}
+          onRefreshSets={() => refreshSets(currentTeacher.id)} 
+          isLoadingSets={isLoading}
+          onLive={() => {}}
         />
       )}
 
-      {(['ROOM_SELECTION', 'ENTER_CODE', 'SET_SELECTION', 'WAITING_FOR_PLAYERS', 'KEYWORD_SELECTION'].includes(gameState)) && currentTeacher && (
+      {(['ROOM_SELECTION', 'SET_SELECTION', 'WAITING_FOR_PLAYERS', 'KEYWORD_SELECTION'].includes(gameState)) && (
         <StudentArenaFlow 
-          gameState={gameState} setGameState={setGameState} playerName={playerName} studentGrade={studentGrade!} currentTeacher={currentTeacher}
+          gameState={gameState} setGameState={setGameState} playerName={playerName} studentGrade={studentGrade!} currentTeacher={currentTeacher!}
           onStartMatch={(data) => { setMatchData(data); setGameState('ROUND_INTRO'); }} joinedRoom={joinedRoom} setJoinedRoom={setJoinedRoom} availableSets={availableSets} setAvailableSets={setAvailableSets}
         />
       )}
