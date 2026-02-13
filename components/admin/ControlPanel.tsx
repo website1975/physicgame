@@ -33,12 +33,10 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
   const channelRef = useRef<any>(null);
   const heartbeatRef = useRef<any>(null);
 
-  // Lấy bộ đề mới nhất được gán cho phòng LIVE
   const refreshAssignedSet = async () => {
     try {
       const sets = await getRoomAssignmentsWithMeta(teacherId, 'TEACHER_LIVE');
       if (sets && sets.length > 0) {
-        // Ưu tiên bộ đề vừa mới được gán nhất
         const sorted = [...sets].sort((a, b) => new Date(b.assigned_at).getTime() - new Date(a.assigned_at).getTime());
         setAssignedSet(sorted[0]);
       } else { 
@@ -53,7 +51,6 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
     refreshAssignedSet(); 
   }, [teacherId, loadedSetId, liveSessionKey]);
 
-  // Cơ chế giữ nhịp (Heartbeat) để đảm bảo HS luôn ở đúng câu hỏi
   useEffect(() => {
     if (currentQuestionIdx >= 0 && assignedSet && channelRef.current) {
       if (heartbeatRef.current) clearInterval(heartbeatRef.current);
@@ -68,7 +65,7 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
             active: isWhiteboardActive 
           }
         });
-      }, 3000); // Mỗi 3 giây đồng bộ 1 lần
+      }, 3000);
     }
     return () => { if (heartbeatRef.current) clearInterval(heartbeatRef.current); };
   }, [currentQuestionIdx, assignedSet, isWhiteboardActive]);
@@ -84,14 +81,15 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
         setStudentRegistry(prev => {
           const next = { ...prev };
           onlineKeys.forEach(key => {
-            const [name, uid] = key.split('::');
+            const parts = key.split('::');
+            const name = parts[0];
+            const uid = parts[1] || 'temp';
             if (!next[key]) {
               next[key] = { name, uniqueId: uid, score: 0, progress: 'Đã kết nối', lastStatus: 'Online', isOnline: true };
             } else { 
               next[key].isOnline = true; 
             }
           });
-          // Đánh dấu HS offline
           Object.keys(next).forEach(key => { if (!onlineKeys.includes(key)) next[key].isOnline = false; });
           return next;
         });
@@ -108,7 +106,6 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
         setStudentRegistry(prev => ({ ...prev, [key]: { ...prev[key], ...payload, isOnline: true } }));
       })
       .on('broadcast', { event: 'request_sync' }, () => {
-        // Phản hồi yêu cầu đồng bộ từ máy HS mới vào
         if (currentQuestionIdx >= 0 && assignedSet) {
           channel.send({
             type: 'broadcast',
@@ -132,7 +129,7 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
     });
   };
 
-  const studentsList = Object.values(studentRegistry).sort((a,b) => {
+  const studentsList = Object.values(studentRegistry).sort((a, b) => {
     if (a.isOnline !== b.isOnline) return a.isOnline ? -1 : 1;
     return b.score - a.score;
   });
@@ -193,7 +190,7 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
              }} 
              className={`px-8 py-5 rounded-2xl font-black italic shadow-lg border-b-4 transition-all ${isWhiteboardActive ? 'bg-slate-900 text-white border-slate-950' : 'bg-slate-100 text-slate-400 border-slate-200'}`}
            >
-             {isWhiteboardActive ? '🎨 ẨN BẢNG GIẢNG' : '🎨 MỞ BẢNG GIẢNG'}
+             {isWhiteboardActive ? '🎨 ẨN BẢNG GIẢNG' : '🎨 MỞ BẢNG TRẮNG'}
            </button>
         </div>
       </header>
@@ -227,7 +224,7 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
 
          <div className="col-span-4 bg-white rounded-[3.5rem] border-4 border-slate-50 shadow-2xl flex flex-col overflow-hidden">
             <div className="p-6 bg-slate-900 text-white flex justify-between items-center shrink-0">
-               <span className="text-[10px] font-black uppercase italic tracking-widest">LỚP HỌC TRỰC TUYẾN ({studentsList.filter(s=>s.isOnline).length})</span>
+               <span className="text-[10px] font-black uppercase italic tracking-widest">LỚP HỌC TRỰC TUYẾN ({studentsList.filter((s) => s.isOnline).length})</span>
                <button onClick={() => channelRef.current?.send({ type: 'broadcast', event: 'teacher_ping' })} className="text-[9px] font-bold text-blue-400 uppercase hover:underline">Làm mới 🔄</button>
             </div>
             <div className="flex-1 overflow-y-auto no-scrollbar">
