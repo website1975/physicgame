@@ -83,20 +83,42 @@ const ExamLibrary: React.FC<ExamLibraryProps> = ({
   const handleToggleRoom = async (roomCode: string) => {
     if (!distributeTarget || isToggling) return;
     const setId = distributeTarget.id;
-    const isCurrentlyAssigned = distributeTarget.assignedRooms.includes(roomCode);
-    const newAssignedRooms = isCurrentlyAssigned ? distributeTarget.assignedRooms.filter(c => c !== roomCode) : [...distributeTarget.assignedRooms, roomCode];
     
+    // Kiểm tra xem phòng này hoặc các mã tương đương đã được gán chưa
+    const isCurrentlyAssigned = distributeTarget.assignedRooms.some(r => 
+      r === roomCode || (roomCode === 'TEACHER_LIVE' && r === 'TEACHER_ROOM')
+    );
+    
+    // Nếu đang gán và bấm vào để bỏ gán: Xóa SẠCH các mã liên quan
+    const newAssignedRooms = isCurrentlyAssigned 
+      ? distributeTarget.assignedRooms.filter(c => c !== 'TEACHER_LIVE' && c !== 'TEACHER_ROOM' && c !== roomCode) 
+      : [...distributeTarget.assignedRooms, roomCode];
+    
+    // Cập nhật giao diện ngay lập tức (Optimistic UI)
     setDistributeTarget(prev => prev ? { ...prev, assignedRooms: newAssignedRooms } : null);
     setSetAssignments(prev => ({ ...prev, [setId]: newAssignedRooms }));
 
     setIsToggling(true);
     try {
-      if (isCurrentlyAssigned) await removeRoomAssignment(teacherId, roomCode, setId);
-      else await assignSetToRoom(teacherId, roomCode, setId);
+      if (isCurrentlyAssigned) {
+        // Xóa mã được yêu cầu
+        await removeRoomAssignment(teacherId, roomCode, setId);
+        
+        // Nếu là phòng LIVE, thực hiện xóa bổ sung các mã cũ/mã kỹ thuật để dọn sạch DB
+        if (roomCode === 'TEACHER_LIVE' || roomCode === 'TEACHER_ROOM') {
+          await removeRoomAssignment(teacherId, 'TEACHER_LIVE', setId);
+          await removeRoomAssignment(teacherId, 'TEACHER_ROOM', setId);
+        }
+      } else {
+        // Gán mới
+        await assignSetToRoom(teacherId, roomCode, setId);
+      }
     } catch (e) {
-      alert("Lỗi khi cập nhật phòng.");
-      fetchAllAssignments();
-    } finally { setIsToggling(false); }
+      console.error("Lỗi cập nhật gán phòng:", e);
+      fetchAllAssignments(); // Tải lại nếu lỗi
+    } finally { 
+      setIsToggling(false); 
+    }
   };
 
   const handleRename = async () => {
@@ -109,7 +131,6 @@ const ExamLibrary: React.FC<ExamLibraryProps> = ({
   };
 
   const getFriendlyRoomName = (code: string) => {
-    // Map các mã cũ hoặc mã kỹ thuật về tên tiếng Việt
     if (code === 'TEACHER_ROOM' || code === 'TEACHER_LIVE') return 'Phòng GV LIVE';
     const room = arenaRooms.find(r => r.code === code);
     return room ? room.name : code;
@@ -148,7 +169,9 @@ const ExamLibrary: React.FC<ExamLibraryProps> = ({
             <p className="text-slate-400 font-bold text-center mb-10 uppercase text-xs italic">Chọn các phòng để triển khai bộ đề:</p>
             <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-10 max-h-[50vh] overflow-y-auto no-scrollbar p-1">
               {arenaRooms.map(room => {
-                const isAssigned = distributeTarget.assignedRooms.includes(room.code);
+                const isAssigned = distributeTarget.assignedRooms.some(r => 
+                  r === room.code || (room.code === 'TEACHER_LIVE' && r === 'TEACHER_ROOM')
+                );
                 return (
                   <button
                     key={room.id}
@@ -186,7 +209,6 @@ const ExamLibrary: React.FC<ExamLibraryProps> = ({
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-8 overflow-y-auto no-scrollbar pb-20">
         {filteredExamSets.length > 0 ? filteredExamSets.map(set => {
           const rawRooms = setAssignments[set.id] || [];
-          // Lọc trùng: Nếu có cả TEACHER_ROOM và TEACHER_LIVE thì chỉ hiện 1 nhãn
           const uniqueDisplayRooms = Array.from(new Set(rawRooms.map(code => getFriendlyRoomName(code))));
           
           return (
