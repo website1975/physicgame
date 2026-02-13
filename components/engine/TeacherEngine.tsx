@@ -51,6 +51,15 @@ const TeacherEngine: React.FC<TeacherEngineProps> = ({ gameState, setGameState, 
     });
   };
 
+  const sendCheckin = () => {
+    if (!channelRef.current) return;
+    channelRef.current.send({
+      type: 'broadcast',
+      event: 'student_checkin',
+      payload: { name: playerName, uniqueId, grade: studentGrade }
+    });
+  };
+
   useEffect(() => {
     if (gameState === 'ROUND_INTRO') setGameState('ANSWERING');
   }, [gameState]);
@@ -62,6 +71,10 @@ const TeacherEngine: React.FC<TeacherEngineProps> = ({ gameState, setGameState, 
     });
 
     channel
+      .on('broadcast', { event: 'teacher_presence_ping' }, () => {
+        // GV vừa vào, mình phải báo danh lại ngay
+        sendCheckin();
+      })
       .on('broadcast', { event: 'teacher_next_question' }, ({ payload }) => {
         moveToQuestion(payload.nextIndex);
       })
@@ -77,13 +90,8 @@ const TeacherEngine: React.FC<TeacherEngineProps> = ({ gameState, setGameState, 
       .subscribe(async (status) => {
         if (status === 'SUBSCRIBED') {
           await channel.track({ online: true, grade: studentGrade });
-          // Báo danh ngay lập tức để GV thấy HS trong danh sách
-          channel.send({
-            type: 'broadcast',
-            event: 'student_checkin',
-            payload: { name: playerName, uniqueId, grade: studentGrade }
-          });
-          reportStatus("Vừa vào phòng");
+          sendCheckin();
+          reportStatus("Sẵn sàng");
         }
       });
 
@@ -106,22 +114,10 @@ const TeacherEngine: React.FC<TeacherEngineProps> = ({ gameState, setGameState, 
     
     const newScore = score + points;
     setScore(newScore);
-    setFeedback({ isCorrect: isPerfect, text: isPerfect ? 'CHÍNH XÁC! ✨' : `SAI RỒI! Đáp án là: ${correct}` });
+    setFeedback({ isCorrect: isPerfect, text: isPerfect ? 'CHÍNH XÁC! ✨' : `RẤT TIẾC! Đáp án đúng là: ${correct}` });
     setGameState('FEEDBACK');
 
-    // Báo kết quả về GV
-    channelRef.current?.send({
-      type: 'broadcast',
-      event: 'student_report',
-      payload: { 
-        name: playerName,
-        uniqueId: uniqueId,
-        score: newScore, 
-        isCorrect: isPerfect,
-        isFinished: true,
-        progress: `Đã xong câu ${currentProblemIdx + 1}`
-      }
-    });
+    reportStatus(undefined, isPerfect, true);
   };
 
   const handleBuzz = () => {
@@ -132,7 +128,7 @@ const TeacherEngine: React.FC<TeacherEngineProps> = ({ gameState, setGameState, 
       event: 'student_buzzer',
       payload: { name: playerName, uniqueId }
     });
-    reportStatus("Đã giành quyền 🔔");
+    reportStatus("GIÀNH QUYỀN 🔔");
   };
 
   const moveToQuestion = (index: number) => {
@@ -143,10 +139,11 @@ const TeacherEngine: React.FC<TeacherEngineProps> = ({ gameState, setGameState, 
       setHasBuzzed(false);
       setIsHelpUsed(false);
       setTimeLeft(currentRound.problems[index].timeLimit || 40);
-      setGameState('ANSWERING'); // Ép buộc quay lại màn hình làm bài
       
-      // Báo cho GV biết HS đã sẵn sàng câu mới
-      setTimeout(() => reportStatus("Đang làm bài..."), 300);
+      // QUAN TRỌNG: Ép buộc HS thoát khỏi màn hình Feedback quay lại làm bài
+      setGameState('ANSWERING');
+      
+      setTimeout(() => reportStatus("Đang trả lời..."), 300);
     } else {
       setGameState('GAME_OVER');
     }
@@ -236,7 +233,7 @@ const TeacherEngine: React.FC<TeacherEngineProps> = ({ gameState, setGameState, 
            ) : (
              <div className="flex flex-col h-full animate-in slide-in-from-right">
                 <div className={`text-4xl font-black uppercase italic mb-6 ${feedback?.isCorrect ? 'text-emerald-500' : 'text-rose-500'}`}>
-                   {feedback?.isCorrect ? '✨ XUẤT SẮC!' : '💥 CỐ GẮNG HƠN!'}
+                   {feedback?.isCorrect ? '✨ CHÍNH XÁC!' : '💥 RẤT TIẾC!'}
                 </div>
                 <div className="bg-slate-50 p-8 rounded-[2.5rem] border-2 border-slate-100 italic font-bold text-slate-700 mb-8 shadow-inner">
                    <LatexRenderer content={feedback?.text || ""} />
@@ -249,7 +246,7 @@ const TeacherEngine: React.FC<TeacherEngineProps> = ({ gameState, setGameState, 
                 </div>
                 
                 <div className="mt-8 bg-blue-600 text-white p-6 rounded-3xl text-center font-black uppercase italic animate-pulse shadow-lg border-b-8 border-blue-800">
-                   ⏳ Chờ thầy chuyển câu hỏi mới...
+                   ⏳ Đợi thầy chuyển câu tiếp theo...
                 </div>
              </div>
            )}
