@@ -69,15 +69,12 @@ export const fetchTeacherByMaGV = async (maGV: string): Promise<Teacher | null> 
 
 const inferMetadata = (set: any) => {
     if (!set) return null;
-    
     let grade = set.grade || set.GRADE;
     let subject = set.subject || set.SUBJECT || set.monday || set.MonDay;
     let topic = set.topic || set.TOPIC;
     let title = set.title || set.TITLE;
-    
     let rCount = set.round_count || set.roundCount;
     let qCount = set.question_count || set.questionCount;
-
     if (set.data && Array.isArray(set.data)) {
         if (!rCount) rCount = set.data.length;
         if (!qCount) {
@@ -86,7 +83,6 @@ const inferMetadata = (set: any) => {
             qCount = count;
         }
     }
-
     return {
         ...set,
         title: title || `Bộ đề mới`,
@@ -99,53 +95,22 @@ const inferMetadata = (set: any) => {
 };
 
 export const fetchAllExamSets = async (teacherId: string) => {
-  const { data, error } = await supabase
-    .from('exam_sets')
-    .select('*') 
-    .eq('teacher_id', teacherId)
-    .order('id', { ascending: false });
-
+  const { data, error } = await supabase.from('exam_sets').select('*').eq('teacher_id', teacherId).order('id', { ascending: false });
   if (error) throw error;
   return (data || []).map(set => inferMetadata(set));
 };
 
 export const saveExamSet = async (teacherId: string, title: string, rounds: Round[], topic: string, grade: string, subject: string) => {
-  const payload: any = { 
-    teacher_id: teacherId, 
-    title: title, 
-    topic: topic, 
-    data: rounds, 
-    grade: grade
-  };
-
+  const payload: any = { teacher_id: teacherId, title: title, topic: topic, data: rounds, grade: grade };
   if (subject) payload.subject = subject;
-
-  const { data, error } = await supabase
-    .from('exam_sets')
-    .insert([payload])
-    .select();
-
-  if (error) {
-    const detailMsg = `LỖI ${error.code}: ${error.message}`;
-    throw new Error(detailMsg);
-  }
-
+  const { data, error } = await supabase.from('exam_sets').insert([payload]).select();
+  if (error) throw new Error(`LỖI ${error.code}: ${error.message}`);
   return data[0].id;
 };
 
 export const updateExamSet = async (setId: string, title: string, rounds: Round[], topic: string, grade: string, teacherId: string) => {
-  const payload: any = { 
-    title, 
-    topic, 
-    data: rounds, 
-    grade
-  };
-
-  const { error } = await supabase
-    .from('exam_sets')
-    .update(payload)
-    .eq('id', setId);
-
+  const payload: any = { title, topic, data: rounds, grade };
+  const { error } = await supabase.from('exam_sets').update(payload).eq('id', setId);
   if (error) throw error;
   return setId;
 };
@@ -181,80 +146,32 @@ export const assignSetToRoom = async (teacherId: string, roomCode: string, setId
   return true;
 };
 
-export const getLatestRoomAssignment = async (teacherId: string, roomCode: string): Promise<string | null> => {
-  const { data, error } = await supabase.from('room_assignments')
-    .select('set_id')
-    .eq('teacher_id', teacherId)
-    .eq('room_code', roomCode)
-    .order('assigned_at', { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  if (error || !data) return null;
-  return data.set_id;
-};
-
-export const getRoomAssignmentsWithMeta = async (teacherId: string, roomCode: string): Promise<any[]> => {
-  const { data: assignments, error: assignError } = await supabase
-    .from('room_assignments')
-    .select('set_id, assigned_at')
-    .eq('teacher_id', teacherId)
-    .eq('room_code', roomCode);
-  
-  if (assignError || !assignments || assignments.length === 0) return [];
-  
-  const setIds = assignments.map(a => a.set_id);
-
-  const { data: sets, error: setsError } = await supabase
-    .from('exam_sets')
-    .select('*')
-    .eq('teacher_id', teacherId) 
-    .in('id', setIds);
-
-  if (setsError || !sets) return [];
-
-  return assignments.map(assign => {
-      const setRaw = sets.find(s => s.id === assign.set_id);
-      if (!setRaw) return null;
-      return {
-          ...inferMetadata(setRaw),
-          assigned_at: assign.assigned_at
-      };
-  }).filter(Boolean);
-};
-
-export const getRoomAssignments = async (teacherId: string, roomCode: string): Promise<{set_id: string, assigned_at: string}[]> => {
-  const { data, error } = await supabase.from('room_assignments')
-    .select('set_id, assigned_at')
-    .eq('teacher_id', teacherId)
-    .eq('room_code', roomCode)
-    .order('assigned_at', { ascending: true });
-  if (error || !data) return [];
-  return data.map(row => ({ set_id: row.set_id, assigned_at: row.assigned_at }));
-};
-
 export const getSetAssignments = async (teacherId: string, setId: string): Promise<string[]> => {
   const { data, error } = await supabase.from('room_assignments').select('room_code').eq('teacher_id', teacherId).eq('set_id', setId);
   if (error || !data) return [];
   return data.map(row => row.room_code);
 };
 
-/**
- * Xóa bản ghi gán phòng. 
- * Đã sửa đổi để đảm bảo xóa sạch mọi bản ghi khớp với teacher, room và set.
- */
+export const getRoomAssignmentsWithMeta = async (teacherId: string, roomCode: string): Promise<any[]> => {
+  const { data: assignments, error: assignError } = await supabase.from('room_assignments').select('set_id, assigned_at').eq('teacher_id', teacherId).eq('room_code', roomCode);
+  if (assignError || !assignments || assignments.length === 0) return [];
+  const setIds = assignments.map(a => a.set_id);
+  const { data: sets, error: setsError } = await supabase.from('exam_sets').select('*').eq('teacher_id', teacherId).in('id', setIds);
+  if (setsError || !sets) return [];
+  return assignments.map(assign => {
+      const setRaw = sets.find(s => s.id === assign.set_id);
+      if (!setRaw) return null;
+      return { ...inferMetadata(setRaw), assigned_at: assign.assigned_at };
+  }).filter(Boolean);
+};
+
 export const removeRoomAssignment = async (teacherId: string, roomCode: string, setId: string) => {
-  console.log(`[Supabase] Đang thực hiện xóa gán: Set ${setId} khỏi Room ${roomCode} cho GV ${teacherId}`);
-  const { error } = await supabase.from('room_assignments')
-    .delete()
-    .match({
-      teacher_id: teacherId,
-      room_code: roomCode,
-      set_id: setId
-    });
-    
-  if (error) {
-    console.error("[Supabase] Lỗi khi xóa gán phòng:", error);
-    throw error;
+  // Logic dọn dẹp triệt để mã phòng GV
+  if (roomCode.includes('TEACHER')) {
+    await supabase.from('room_assignments').delete().match({ teacher_id: teacherId, room_code: 'TEACHER_LIVE', set_id: setId });
+    await supabase.from('room_assignments').delete().match({ teacher_id: teacherId, room_code: 'TEACHER_ROOM', set_id: setId });
+  } else {
+    await supabase.from('room_assignments').delete().match({ teacher_id: teacherId, room_code: roomCode, set_id: setId });
   }
   return true;
 };
@@ -268,13 +185,10 @@ export const updateExamSetTitle = async (setId: string, newTitle: string) => {
 export const fetchQuestionsLibrary = async (teacherId: string, grade?: string, type?: QuestionType): Promise<PhysicsProblem[]> => {
   let query = supabase.from('exam_sets').select('data, topic').eq('teacher_id', teacherId).order('id', { ascending: false }).limit(10);
   if (grade) query = query.eq('grade', grade);
-  
   const { data, error } = await query;
   if (error) throw error;
-
   const library: PhysicsProblem[] = [];
   const seenContent = new Set<string>();
-
   data.forEach(set => {
     const rounds = set.data || [];
     rounds.forEach((r: any) => {
@@ -316,11 +230,7 @@ export const getAllTeachers = async (): Promise<Teacher[]> => {
 
 export const createTeacher = async (teacher: Omit<Teacher, 'id'>) => {
   const { data, error } = await supabase.from('giaovien').insert([{
-    magv: teacher.magv,
-    tengv: teacher.tengv,
-    monday: teacher.monday,
-    pass: teacher.pass,
-    role: teacher.role
+    magv: teacher.magv, tengv: teacher.tengv, monday: teacher.monday, pass: teacher.pass, role: teacher.role
   }]).select().single();
   if (error) throw error;
   return data;
