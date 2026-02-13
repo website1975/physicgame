@@ -20,7 +20,6 @@ const TeacherEngine: React.FC<TeacherEngineProps> = ({ gameState, setGameState, 
   const uniqueId = matchData.myId || 'temp';
   const studentGrade = (matchData as any).grade || '10';
   
-  // State quản lý đồng bộ: Index câu hỏi và Version để cưỡng bức render
   const [syncState, setSyncState] = useState({
     index: matchData.startIndex || 0,
     version: Date.now() 
@@ -37,7 +36,6 @@ const TeacherEngine: React.FC<TeacherEngineProps> = ({ gameState, setGameState, 
   const rounds = matchData.rounds || [];
   const channelRef = useRef<any>(null);
   
-  // Ref để truy cập state mới nhất bên trong các hàm callback (tránh Stale Closures)
   const lastStateRef = useRef({
     index: syncState.index,
     gameState: gameState,
@@ -64,31 +62,21 @@ const TeacherEngine: React.FC<TeacherEngineProps> = ({ gameState, setGameState, 
     if (gameState === 'ROUND_INTRO') setGameState('ANSWERING');
   }, [gameState, setGameState]);
 
-  // Xử lý lệnh từ giáo viên
   const handleTeacherCommand = (payload: any) => {
     const { type, index, active } = payload;
     
-    // 1. Lệnh Bảng trắng
     if (type === 'WHITEBOARD') {
       setIsWhiteboardActive(!!active);
       return;
     }
 
-    // 2. Lệnh chuyển câu, Reset hoặc Đồng bộ
     if (['MOVE', 'RESET', 'START', 'SYNC'].includes(type)) {
       const targetIndex = index !== undefined ? index : 0;
-      
-      // Kiểm tra xem có thực sự cần cập nhật không
       const isNewQuestion = targetIndex !== lastStateRef.current.index;
       const needsStateReset = lastStateRef.current.gameState === 'FEEDBACK' || type === 'RESET' || type === 'START';
 
       if (isNewQuestion || needsStateReset) {
-        console.log(`[SYNC-COMMAND] Nhảy sang câu: ${targetIndex}, Type: ${type}`);
-        
-        // Cập nhật State và Version để cưỡng bức Render
         setSyncState({ index: targetIndex, version: Date.now() });
-        
-        // Reset các trạng thái làm bài
         setUserAnswer('');
         setFeedback(null);
         setHasBuzzed(false);
@@ -98,15 +86,12 @@ const TeacherEngine: React.FC<TeacherEngineProps> = ({ gameState, setGameState, 
         if (newProb) {
           setTimeLeft(newProb.timeLimit || 40);
         }
-        
-        // Thông báo cho GV là HS đã nhảy câu thành công
         setTimeout(() => reportProgress("Đang theo bài giảng..."), 200);
       }
     }
   };
 
   useEffect(() => {
-    // FIX: Tên kênh phải khớp hoàn toàn với ControlPanel của GV
     const channelName = `room_TEACHER_LIVE_${currentTeacher.id}`;
     const channel = supabase.channel(channelName, {
       config: {
@@ -130,20 +115,14 @@ const TeacherEngine: React.FC<TeacherEngineProps> = ({ gameState, setGameState, 
       })
       .subscribe((status) => {
         if (status === 'SUBSCRIBED') {
-          console.log("[LIVE-ENGINE] Đã kết nối kênh GV:", channelName);
-          // Gửi yêu cầu đồng bộ ngay khi vừa vào Engine
           channel.send({ type: 'broadcast', event: 'request_sync' });
-          // Track presence để GV thấy HS online
           channel.track({ online: true, in_game: true });
         }
       });
 
     channelRef.current = channel;
-    return () => { 
-      console.log("[LIVE-ENGINE] Ngắt kết nối kênh GV");
-      supabase.removeChannel(channel); 
-    };
-  }, [currentTeacher.id, uniqueId]); // Chỉ phụ thuộc vào ID giáo viên và ID học sinh
+    return () => { supabase.removeChannel(channel); };
+  }, [currentTeacher.id, uniqueId]);
 
   useEffect(() => {
     if (gameState === 'ANSWERING' && timeLeft > 0 && !isWhiteboardActive) {
@@ -198,7 +177,6 @@ const TeacherEngine: React.FC<TeacherEngineProps> = ({ gameState, setGameState, 
         </div>
       </header>
       
-      {/* KEY CỦA DIV BAO QUANH LÀ CHỐT CHẶN CUỐI CÙNG ĐỂ BUỘC RENDER LẠI */}
       <div key={`live-arena-render-${syncState.index}-${syncState.version}`} className="flex-1 grid grid-cols-12 gap-8 min-h-0 relative">
         {isWhiteboardActive && (
           <div className="absolute inset-0 z-50 bg-slate-950 rounded-[3.5rem] p-4 shadow-2xl animate-in zoom-in">
