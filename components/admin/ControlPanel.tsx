@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { Round, Teacher, QuestionType } from '../../types';
-import { supabase, getLatestRoomAssignment, fetchSetData, assignSetToRoom } from '../../services/supabaseService';
+import { supabase, fetchSetData, assignSetToRoom } from '../../services/supabaseService';
 import Whiteboard from '../Whiteboard';
 
 interface ControlPanelProps {
@@ -20,14 +20,15 @@ interface StudentSessionInfo {
   lastStatus: string;
   isOnline: boolean;
   buzzedAt?: number;
+  grade?: string; 
 }
 
 const ControlPanel: React.FC<ControlPanelProps> = ({ 
   teacherId, teacherMaGV, loadedSetId, loadedSetTitle, rounds, liveSessionKey 
 }) => {
   const [studentRegistry, setStudentRegistry] = useState<Record<string, StudentSessionInfo>>({});
-  const [activeSetInfo, setActiveSetInfo] = useState<{ id: string, title: string } | null>(null);
   const [currentQuestionIdx, setCurrentQuestionIdx] = useState(-1);
+  const [currentSetGrade, setCurrentSetGrade] = useState<string | null>(null);
   const [isStarting, setIsStarting] = useState(false);
   const [isWhiteboardActive, setIsWhiteboardActive] = useState(false);
   const channelRef = useRef<any>(null);
@@ -36,7 +37,11 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
     setStudentRegistry({});
     setCurrentQuestionIdx(-1);
     setIsWhiteboardActive(false);
-  }, [liveSessionKey, teacherId]);
+    
+    if (loadedSetId) {
+       fetchSetData(loadedSetId).then(data => setCurrentSetGrade(data.grade));
+    }
+  }, [liveSessionKey, teacherId, loadedSetId]);
 
   useEffect(() => {
     if (channelRef.current) supabase.removeChannel(channelRef.current);
@@ -51,8 +56,9 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
         setStudentRegistry(prev => {
           const next = { ...prev };
           onlineKeys.forEach(key => {
+            const presenceData = state[key][0] as any;
             const name = key.split('::')[0];
-            if (!next[key]) next[key] = { name, score: 0, progress: 'Đang chờ...', lastStatus: '-', isOnline: true };
+            if (!next[key]) next[key] = { name, score: 0, progress: 'Đang chờ...', lastStatus: '-', isOnline: true, grade: presenceData.grade };
             else next[key].isOnline = true;
           });
           Object.keys(next).forEach(key => { if (!onlineKeys.includes(key)) next[key].isOnline = false; });
@@ -91,6 +97,7 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
             payload: { 
               setId: loadedSetId, 
               title: loadedSetTitle || '', 
+              grade: currentSetGrade,
               currentQuestionIndex: currentQuestionIdx,
               isWhiteboardActive 
             }
@@ -101,7 +108,7 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
 
     channelRef.current = channel;
     return () => { if (channelRef.current) supabase.removeChannel(channelRef.current); };
-  }, [teacherId, liveSessionKey, currentQuestionIdx, loadedSetId, loadedSetTitle, isWhiteboardActive]);
+  }, [teacherId, liveSessionKey, currentQuestionIdx, loadedSetId, loadedSetTitle, isWhiteboardActive, currentSetGrade]);
 
   const handleStartGame = async () => {
     if (!loadedSetId) { alert("Chọn bộ đề trước khi bắt đầu!"); return; }
@@ -112,7 +119,12 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
       channelRef.current?.send({
         type: 'broadcast',
         event: 'teacher_start_game',
-        payload: { setId: loadedSetId, title: loadedSetTitle || '', currentQuestionIndex: 0 }
+        payload: { 
+          setId: loadedSetId, 
+          title: loadedSetTitle || '', 
+          grade: currentSetGrade,
+          currentQuestionIndex: 0 
+        }
       });
     } catch (err) { alert("Lỗi kết nối"); } finally { setIsStarting(false); }
   };
@@ -120,14 +132,14 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
   const handleNextQuestion = () => {
     const nextIdx = currentQuestionIdx + 1;
     setCurrentQuestionIdx(nextIdx);
-    resetBuzzers();
+    resetBuzzers(); // Tự động reset chuông khi qua câu mới
     channelRef.current?.send({ type: 'broadcast', event: 'teacher_next_question', payload: { nextIndex: nextIdx } });
   };
 
   const handlePrevQuestion = () => {
     const prevIdx = Math.max(0, currentQuestionIdx - 1);
     setCurrentQuestionIdx(prevIdx);
-    resetBuzzers();
+    resetBuzzers(); // Tự động reset chuông khi quay lại
     channelRef.current?.send({ type: 'broadcast', event: 'teacher_next_question', payload: { nextIndex: prevIdx } });
   };
 
@@ -138,11 +150,14 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
   };
 
   const resetBuzzers = () => {
+    // 1. Cập nhật local UI cho Giáo viên
     setStudentRegistry(prev => {
       const next = { ...prev };
       Object.keys(next).forEach(k => delete next[k].buzzedAt);
       return next;
     });
+    // 2. Broadcast tín hiệu reset tới toàn bộ học sinh
+    channelRef.current?.send({ type: 'broadcast', event: 'teacher_reset_buzzers', payload: {} });
   };
 
   const studentsList = Object.values(studentRegistry).sort((a, b) => {
@@ -162,29 +177,29 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
            </div>
            <div>
               <h3 className="text-2xl font-black text-slate-800 uppercase italic leading-none">QUẢN LÝ TIẾT DẠY</h3>
-              <p className="text-xs font-bold text-slate-400 mt-2 uppercase italic truncate max-w-xs">{loadedSetTitle || "Chưa gán đề"}</p>
+              <p className="text-xs font-bold text-slate-400 mt-2 uppercase italic truncate max-w-xs">{loadedSetTitle || "Chưa gán đề"} (K{currentSetGrade})</p>
            </div>
         </div>
 
         <div className="flex items-center gap-3">
            {currentQuestionIdx >= 0 && (
               <div className="flex gap-2 mr-4">
-                 <button onClick={handlePrevQuestion} className="w-12 h-12 bg-slate-100 text-slate-400 rounded-xl flex items-center justify-center hover:bg-slate-200 transition-all">◀</button>
-                 <button onClick={handleNextQuestion} className="w-12 h-12 bg-slate-100 text-slate-400 rounded-xl flex items-center justify-center hover:bg-slate-200 transition-all">▶</button>
+                 <button onClick={handlePrevQuestion} className="w-12 h-12 bg-slate-100 text-slate-400 rounded-xl flex items-center justify-center hover:bg-slate-200 transition-all text-xs">◀</button>
+                 <button onClick={handleNextQuestion} className="w-12 h-12 bg-slate-100 text-slate-400 rounded-xl flex items-center justify-center hover:bg-slate-200 transition-all text-xs">▶</button>
               </div>
            )}
            <button onClick={toggleWhiteboard} className={`px-8 py-5 rounded-2xl font-black uppercase italic shadow-lg transition-all flex items-center gap-3 border-b-4 ${isWhiteboardActive ? 'bg-emerald-600 text-white border-emerald-800' : 'bg-slate-800 text-white border-slate-950'}`}>
-              <span className="text-xl">🎨</span> {isWhiteboardActive ? 'ĐANG GIẢNG BÀI' : 'BẬT BẢNG TRẮNG'}
+              <span className="text-xl">🎨</span> {isWhiteboardActive ? 'ĐANG GIẢNG BÀI' : 'MỞ BẢNG TRẮNG'}
            </button>
            {currentQuestionIdx === -1 ? (
-             <button onClick={handleStartGame} disabled={isStarting || !loadedSetId} className="px-10 py-5 bg-blue-600 text-white rounded-2xl font-black uppercase italic shadow-xl border-b-8 border-blue-800 hover:scale-105 transition-all">PHÁT ĐỀ 🚀</button>
+             <button onClick={handleStartGame} disabled={isStarting || !loadedSetId} className="px-10 py-5 bg-blue-600 text-white rounded-2xl font-black uppercase italic shadow-xl border-b-8 border-blue-800 hover:scale-105 transition-all">PHÁT ĐỀ K{currentSetGrade} 🚀</button>
            ) : (
              <button onClick={resetBuzzers} className="px-8 py-5 bg-amber-500 text-white rounded-2xl font-black uppercase italic shadow-xl border-b-8 border-amber-700">RESET CHUÔNG 🔔</button>
            )}
         </div>
       </header>
 
-      <div className="flex-1 grid grid-cols-12 gap-6 min-h-0">
+      <div className="flex-1 grid grid-cols-12 gap-6 min-h-0 overflow-hidden">
          <div className="col-span-12 lg:col-span-8 flex flex-col gap-6">
             <div className="flex-1 bg-white rounded-[3.5rem] border-4 border-slate-50 shadow-2xl overflow-hidden relative">
                {isWhiteboardActive ? (
@@ -192,10 +207,10 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
                ) : (
                  <div className="h-full flex flex-col items-center justify-center text-center p-12 bg-slate-50/50">
                     <div className="text-[8rem] opacity-10 mb-6">📺</div>
-                    <h4 className="text-2xl font-black text-slate-300 uppercase italic tracking-widest">Màn hình đang hiển thị Câu {currentQuestionIdx + 1}</h4>
+                    <h4 className="text-2xl font-black text-slate-300 uppercase italic tracking-widest">Màn hình Câu {currentQuestionIdx + 1}</h4>
                     {currentQuestionIdx >= 0 && (
                        <div className="mt-8 px-8 py-4 bg-white rounded-3xl border-2 border-slate-100 shadow-sm max-w-lg">
-                          <p className="font-bold text-slate-500 italic">"Học sinh đang giải bài trên thiết bị của họ. Bạn có thể bấm 'Bật bảng trắng' để dừng lại giảng giải bất cứ lúc nào."</p>
+                          <p className="font-bold text-slate-500 italic">"Học sinh khối {currentSetGrade} đang nhận bài. HS các khối khác sẽ tiếp tục chờ lệnh mới."</p>
                        </div>
                     )}
                  </div>
@@ -216,7 +231,7 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
                        {s.buzzedAt && <div className="absolute -top-1 -right-1 bg-amber-500 text-white w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-black shadow-md border-2 border-white animate-bounce">🔔</div>}
                     </div>
                     <div className="flex-1 min-w-0">
-                       <div className="font-black text-slate-800 uppercase italic text-xs truncate">{s.name}</div>
+                       <div className="font-black text-slate-800 uppercase italic text-xs truncate">{s.name} <span className="text-[8px] opacity-40">K{s.grade}</span></div>
                        <div className="text-[9px] font-bold text-slate-400 uppercase italic mt-0.5">{s.progress}</div>
                     </div>
                     <div className="text-right">
