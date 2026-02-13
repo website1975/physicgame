@@ -39,6 +39,23 @@ const TeacherEngine: React.FC<TeacherEngineProps> = ({ gameState, setGameState, 
     }
   }, [gameState]);
 
+  // Sync Báo cáo trạng thái khi có thay đổi quan trọng
+  const reportStatus = (statusStr?: string, isCorrect?: boolean) => {
+    if (!channelRef.current) return;
+    channelRef.current.send({
+      type: 'broadcast',
+      event: 'student_report',
+      payload: { 
+        name: playerName,
+        uniqueId: uniqueId,
+        score: score, 
+        isCorrect: isCorrect,
+        status: statusStr,
+        progress: `Câu ${currentProblemIdx + 1}/${currentRound?.problems?.length || 0}`
+      }
+    });
+  };
+
   useEffect(() => {
     const channelName = `room_TEACHER_LIVE_${currentTeacher.id}`;
     const channel = supabase.channel(channelName, { 
@@ -52,11 +69,18 @@ const TeacherEngine: React.FC<TeacherEngineProps> = ({ gameState, setGameState, 
       .on('broadcast', { event: 'teacher_toggle_whiteboard' }, ({ payload }) => {
         setIsWhiteboardActive(payload.active);
       })
+      .on('broadcast', { event: 'teacher_reset_question' }, ({ payload }) => {
+        moveToQuestion(payload.index);
+      })
       .on('broadcast', { event: 'teacher_reset_buzzers' }, () => {
         setHasBuzzed(false);
       })
       .subscribe(async (status) => {
-        if (status === 'SUBSCRIBED') await channel.track({ online: true });
+        if (status === 'SUBSCRIBED') {
+          await channel.track({ online: true });
+          // Khi mới vào, báo cáo đang sẵn sàng
+          reportStatus("Đang chờ lệnh...");
+        }
       });
 
     channelRef.current = channel;
@@ -71,7 +95,7 @@ const TeacherEngine: React.FC<TeacherEngineProps> = ({ gameState, setGameState, 
   }, [gameState, timeLeft, isWhiteboardActive]);
 
   const submitAnswer = () => {
-    if (gameState !== 'ANSWERING') return;
+    if (gameState !== 'ANSWERING' || !hasBuzzed) return;
     const correct = (currentProblem?.correctAnswer || "").trim().toUpperCase();
     const isPerfect = userAnswer.trim().toUpperCase() === correct;
     const points = isPerfect ? (isHelpUsed ? 60 : 100) : 0;
@@ -81,6 +105,7 @@ const TeacherEngine: React.FC<TeacherEngineProps> = ({ gameState, setGameState, 
     setFeedback({ isCorrect: isPerfect, text: isPerfect ? 'CHÍNH XÁC! ✨' : `SAI RỒI! Đáp án là: ${correct}` });
     setGameState('FEEDBACK');
 
+    // Gửi báo cáo kết quả (status để trống để GV biết đã nộp bài)
     channelRef.current?.send({
       type: 'broadcast',
       event: 'student_report',
@@ -102,6 +127,8 @@ const TeacherEngine: React.FC<TeacherEngineProps> = ({ gameState, setGameState, 
       event: 'student_buzzer',
       payload: { name: playerName, uniqueId }
     });
+    // Báo cho GV biết đã giành quyền
+    reportStatus("Đã giành quyền 🔔");
   };
 
   const moveToQuestion = (index: number) => {
@@ -109,10 +136,12 @@ const TeacherEngine: React.FC<TeacherEngineProps> = ({ gameState, setGameState, 
       setCurrentProblemIdx(index);
       setUserAnswer('');
       setFeedback(null);
-      setHasBuzzed(false); // Quan trọng: Reset chuông cho câu hỏi mới
+      setHasBuzzed(false);
       setIsHelpUsed(false);
       setTimeLeft(currentRound.problems[index].timeLimit || 40);
       setGameState('ANSWERING');
+      // Báo ngay cho GV là đang làm bài câu mới
+      setTimeout(() => reportStatus("Đang làm bài..."), 500);
     } else {
       setGameState('GAME_OVER');
     }
@@ -176,7 +205,7 @@ const TeacherEngine: React.FC<TeacherEngineProps> = ({ gameState, setGameState, 
                       <button 
                         onClick={handleBuzz}
                         disabled={hasBuzzed}
-                        className={`px-6 py-2 rounded-xl font-black uppercase italic text-[10px] shadow-lg transition-all ${hasBuzzed ? 'bg-amber-100 text-amber-600 border-2 border-amber-200' : 'bg-amber-500 text-white border-b-4 border-amber-700 hover:scale-105 active:translate-y-1 active:border-b-0'}`}
+                        className={`px-6 py-2 rounded-xl font-black uppercase italic text-[10px] shadow-lg transition-all ${hasBuzzed ? 'bg-amber-100 text-amber-600 border-2 border-amber-200 cursor-default' : 'bg-amber-500 text-white border-b-4 border-amber-700 hover:scale-105 active:translate-y-1 active:border-b-0'}`}
                       >
                         {hasBuzzed ? '🔔 ĐÃ GIÀNH QUYỀN' : '🛎️ GIÀNH QUYỀN'}
                       </button>
@@ -185,13 +214,19 @@ const TeacherEngine: React.FC<TeacherEngineProps> = ({ gameState, setGameState, 
                 <div className="flex-1 overflow-y-auto no-scrollbar">
                    <AnswerInput problem={currentProblem} value={userAnswer} onChange={setUserAnswer} onSubmit={submitAnswer} disabled={false} />
                 </div>
-                <button 
-                  onClick={submitAnswer} 
-                  disabled={!userAnswer} 
-                  className={`w-full py-6 rounded-3xl font-black italic text-xl mt-8 shadow-xl border-b-[10px] transition-all ${userAnswer ? 'bg-blue-600 text-white border-blue-800' : 'bg-slate-100 text-slate-300 border-slate-200'}`}
-                >
-                  XÁC NHẬN ✅
-                </button>
+                {!hasBuzzed ? (
+                   <div className="mt-8 bg-amber-50 p-6 rounded-3xl border-2 border-amber-200 text-center animate-pulse">
+                      <p className="text-amber-700 font-black uppercase italic text-xs">Hãy nhấn chuông để giành quyền trả lời!</p>
+                   </div>
+                ) : (
+                  <button 
+                    onClick={submitAnswer} 
+                    disabled={!userAnswer} 
+                    className={`w-full py-6 rounded-3xl font-black italic text-xl mt-8 shadow-xl border-b-[10px] transition-all ${userAnswer ? 'bg-blue-600 text-white border-blue-800' : 'bg-slate-100 text-slate-300 border-slate-200'}`}
+                  >
+                    XÁC NHẬN ✅
+                  </button>
+                )}
              </div>
            ) : (
              <div className="flex flex-col h-full animate-in slide-in-from-right">
