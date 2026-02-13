@@ -26,11 +26,19 @@ const TeacherEngine: React.FC<TeacherEngineProps> = ({ gameState, setGameState, 
   const [feedback, setFeedback] = useState<any>(null);
   const [isWhiteboardActive, setIsWhiteboardActive] = useState(false);
   const [hasBuzzed, setHasBuzzed] = useState(false);
+  const [isHelpUsed, setIsHelpUsed] = useState(false);
   
   const rounds = matchData.rounds || [];
   const currentRound = rounds[currentRoundIdx];
   const currentProblem = currentRound?.problems[currentProblemIdx];
   const channelRef = useRef<any>(null);
+
+  // Tự động chuyển sang ANSWERING nếu đang ở ROUND_INTRO trong luồng Teacher Live
+  useEffect(() => {
+    if (gameState === 'ROUND_INTRO') {
+      setGameState('ANSWERING');
+    }
+  }, [gameState]);
 
   useEffect(() => {
     const channelName = `room_TEACHER_LIVE_${currentTeacher.id}`;
@@ -64,7 +72,7 @@ const TeacherEngine: React.FC<TeacherEngineProps> = ({ gameState, setGameState, 
     if (gameState !== 'ANSWERING') return;
     const correct = (currentProblem?.correctAnswer || "").trim().toUpperCase();
     const isPerfect = userAnswer.trim().toUpperCase() === correct;
-    const points = isPerfect ? 100 : 0;
+    const points = isPerfect ? (isHelpUsed ? 60 : 100) : 0;
     
     const newScore = score + points;
     setScore(newScore);
@@ -95,11 +103,12 @@ const TeacherEngine: React.FC<TeacherEngineProps> = ({ gameState, setGameState, 
   };
 
   const moveToQuestion = (index: number) => {
-    if (index < currentRound.problems.length) {
+    if (index < (currentRound?.problems?.length || 0)) {
       setCurrentProblemIdx(index);
       setUserAnswer('');
       setFeedback(null);
       setHasBuzzed(false);
+      setIsHelpUsed(false);
       setTimeLeft(currentRound.problems[index].timeLimit || 40);
       setGameState('ANSWERING');
     } else {
@@ -129,7 +138,7 @@ const TeacherEngine: React.FC<TeacherEngineProps> = ({ gameState, setGameState, 
         </div>
         <div className="flex items-center gap-4">
            <div className="bg-slate-50 px-4 py-2 rounded-xl border border-slate-100 font-black italic text-slate-400 text-xs">
-              Câu {currentProblemIdx + 1} / {currentRound.problems.length}
+              Câu {currentProblemIdx + 1} / {currentRound?.problems?.length || 0}
            </div>
            <div className={`text-3xl font-black italic ${timeLeft <= 5 ? 'text-red-500 animate-pulse' : 'text-slate-900'}`}>{timeLeft}s</div>
            <button onClick={onExit} className="w-10 h-10 bg-red-50 text-red-500 rounded-xl font-black text-xs hover:bg-red-500 hover:text-white transition-all">✕</button>
@@ -147,20 +156,29 @@ const TeacherEngine: React.FC<TeacherEngineProps> = ({ gameState, setGameState, 
         )}
 
         <div className="lg:col-span-7 overflow-y-auto no-scrollbar h-full">
-           <ProblemCard problem={currentProblem} />
+           <ProblemCard problem={currentProblem} isPaused={gameState !== 'ANSWERING' || isWhiteboardActive} isHelpUsed={isHelpUsed} />
         </div>
         <div className="lg:col-span-5 bg-white rounded-[3.5rem] p-10 shadow-2xl flex flex-col border-4 border-slate-50 relative overflow-hidden h-full">
            {gameState === 'ANSWERING' ? (
              <div className="flex flex-col h-full animate-in zoom-in">
                 <div className="flex justify-between items-center mb-6">
                    <h3 className="text-[10px] font-black text-slate-400 uppercase italic">Khu vực làm bài:</h3>
-                   <button 
-                     onClick={handleBuzz}
-                     disabled={hasBuzzed}
-                     className={`px-6 py-2 rounded-xl font-black uppercase italic text-[10px] shadow-lg transition-all ${hasBuzzed ? 'bg-amber-100 text-amber-600 border-2 border-amber-200' : 'bg-amber-500 text-white border-b-4 border-amber-700 hover:scale-105 active:translate-y-1 active:border-b-0'}`}
-                   >
-                     {hasBuzzed ? '🔔 ĐÃ GIÀNH QUYỀN' : '🛎️ GIÀNH QUYỀN'}
-                   </button>
+                   <div className="flex gap-2">
+                      <button 
+                        onClick={() => setIsHelpUsed(true)}
+                        disabled={isHelpUsed}
+                        className="bg-amber-100 text-amber-600 px-4 py-2 rounded-xl font-black text-[9px] uppercase border-b-2 border-amber-200"
+                      >
+                        {isHelpUsed ? 'ĐÃ DÙNG TRỢ GIÚP' : 'DÙNG TRỢ GIÚP 💡'}
+                      </button>
+                      <button 
+                        onClick={handleBuzz}
+                        disabled={hasBuzzed}
+                        className={`px-6 py-2 rounded-xl font-black uppercase italic text-[10px] shadow-lg transition-all ${hasBuzzed ? 'bg-amber-100 text-amber-600 border-2 border-amber-200' : 'bg-amber-500 text-white border-b-4 border-amber-700 hover:scale-105 active:translate-y-1 active:border-b-0'}`}
+                      >
+                        {hasBuzzed ? '🔔 ĐÃ GIÀNH QUYỀN' : '🛎️ GIÀNH QUYỀN'}
+                      </button>
+                   </div>
                 </div>
                 <div className="flex-1 overflow-y-auto no-scrollbar">
                    <AnswerInput problem={currentProblem} value={userAnswer} onChange={setUserAnswer} onSubmit={submitAnswer} disabled={false} />
