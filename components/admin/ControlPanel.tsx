@@ -134,6 +134,8 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
     return b.score - a.score;
   });
 
+  const onlineCount = studentsList.filter(s => s.isOnline).length;
+
   return (
     <div className="flex flex-col gap-6 h-full text-left">
       <header className="bg-white p-8 rounded-[3.5rem] shadow-2xl border-4 border-slate-50 flex flex-wrap items-center justify-between gap-6">
@@ -224,7 +226,7 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
 
          <div className="col-span-4 bg-white rounded-[3.5rem] border-4 border-slate-50 shadow-2xl flex flex-col overflow-hidden">
             <div className="p-6 bg-slate-900 text-white flex justify-between items-center shrink-0">
-               <span className="text-[10px] font-black uppercase italic tracking-widest">LỚP HỌC TRỰC TUYẾN ({studentsList.filter((s) => s.isOnline).length})</span>
+               <span className="text-[10px] font-black uppercase italic tracking-widest">LỚP HỌC TRỰC TUYẾN ({onlineCount})</span>
                <button onClick={() => channelRef.current?.send({ type: 'broadcast', event: 'teacher_ping' })} className="text-[9px] font-bold text-blue-400 uppercase hover:underline">Làm mới 🔄</button>
             </div>
             <div className="flex-1 overflow-y-auto no-scrollbar">
