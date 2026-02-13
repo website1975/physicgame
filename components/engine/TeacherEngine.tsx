@@ -20,10 +20,10 @@ const TeacherEngine: React.FC<TeacherEngineProps> = ({ gameState, setGameState, 
   const uniqueId = matchData.myId || 'temp';
   const studentGrade = (matchData as any).grade || '10';
   
-  // SỬ DỤNG OBJECT STATE ĐỂ ĐẢM BẢO REACT LUÔN NHẬN DIỆN LÀ "DỮ LIỆU MỚI"
+  // State quản lý đồng bộ: Index câu hỏi và Version để cưỡng bức render
   const [syncState, setSyncState] = useState({
     index: matchData.startIndex || 0,
-    version: Date.now() // Mã phiên bản để cưỡng bức render
+    version: Date.now() 
   });
   
   const [score, setScore] = useState(0);
@@ -37,15 +37,16 @@ const TeacherEngine: React.FC<TeacherEngineProps> = ({ gameState, setGameState, 
   const rounds = matchData.rounds || [];
   const channelRef = useRef<any>(null);
   
-  // Dùng Ref để hàm lắng nghe sự kiện luôn đọc được giá trị mới nhất mà không bị "stale closure"
+  // Ref để truy cập state mới nhất bên trong các hàm callback (tránh Stale Closures)
   const lastStateRef = useRef({
     index: syncState.index,
-    gameState: gameState
+    gameState: gameState,
+    isWhiteboardActive
   });
 
   useEffect(() => {
-    lastStateRef.current = { index: syncState.index, gameState };
-  }, [syncState.index, gameState]);
+    lastStateRef.current = { index: syncState.index, gameState, isWhiteboardActive };
+  }, [syncState.index, gameState, isWhiteboardActive]);
 
   const reportProgress = (statusStr?: string, isCorrect?: boolean, isFinished: boolean = false) => {
     if (!channelRef.current) return;
@@ -63,51 +64,60 @@ const TeacherEngine: React.FC<TeacherEngineProps> = ({ gameState, setGameState, 
     if (gameState === 'ROUND_INTRO') setGameState('ANSWERING');
   }, [gameState, setGameState]);
 
-  // HÀM XỬ LÝ LỆNH TỪ GIÁO VIÊN - CỰC KỲ QUAN TRỌNG
+  // Xử lý lệnh từ giáo viên
   const handleTeacherCommand = (payload: any) => {
     const { type, index, active } = payload;
     
+    // 1. Lệnh Bảng trắng
     if (type === 'WHITEBOARD') {
       setIsWhiteboardActive(!!active);
       return;
     }
 
+    // 2. Lệnh chuyển câu, Reset hoặc Đồng bộ
     if (['MOVE', 'RESET', 'START', 'SYNC'].includes(type)) {
-      // Nếu chỉ số câu hỏi khác hiện tại HOẶC HS đang bị kẹt ở màn hình Feedback (kết quả câu cũ)
-      const isNewQuestion = index !== lastStateRef.current.index;
-      const isForcedReset = type === 'RESET' || type === 'START';
-      const needsJump = lastStateRef.current.gameState === 'FEEDBACK' && (type === 'MOVE' || type === 'SYNC');
+      const targetIndex = index !== undefined ? index : 0;
+      
+      // Kiểm tra xem có thực sự cần cập nhật không
+      const isNewQuestion = targetIndex !== lastStateRef.current.index;
+      const needsStateReset = lastStateRef.current.gameState === 'FEEDBACK' || type === 'RESET' || type === 'START';
 
-      if (isNewQuestion || isForcedReset || needsJump) {
-        console.log(`[RENDER-SYNC] Cưỡng bức nhảy sang câu: ${index}`);
+      if (isNewQuestion || needsStateReset) {
+        console.log(`[SYNC-COMMAND] Nhảy sang câu: ${targetIndex}, Type: ${type}`);
         
-        // Cập nhật State theo kiểu Object để tạo "phiên bản mới"
-        setSyncState({ index: index, version: Date.now() });
+        // Cập nhật State và Version để cưỡng bức Render
+        setSyncState({ index: targetIndex, version: Date.now() });
         
-        // Reset sạch sẽ các trạng thái nhập liệu
+        // Reset các trạng thái làm bài
         setUserAnswer('');
         setFeedback(null);
         setHasBuzzed(false);
-        setIsWhiteboardActive(false);
-        setGameState('ANSWERING'); // Bắt buộc quay lại trạng thái trả lời
+        setGameState('ANSWERING');
         
-        const newProb = rounds[0]?.problems[index];
+        const newProb = rounds[0]?.problems[targetIndex];
         if (newProb) {
           setTimeLeft(newProb.timeLimit || 40);
         }
         
-        // Báo cáo lại cho GV sau khi đã render xong
-        setTimeout(() => reportProgress("Đã nhảy sang câu mới ✨"), 300);
+        // Thông báo cho GV là HS đã nhảy câu thành công
+        setTimeout(() => reportProgress("Đang theo bài giảng..."), 200);
       }
     }
   };
 
   useEffect(() => {
-    const channelName = `room_TEACHER_LIVE_${currentTeacher.id}_match_${uniqueId}`;
-    const channel = supabase.channel(channelName);
+    // FIX: Tên kênh phải khớp hoàn toàn với ControlPanel của GV
+    const channelName = `room_TEACHER_LIVE_${currentTeacher.id}`;
+    const channel = supabase.channel(channelName, {
+      config: {
+        presence: { key: `${playerName}::${uniqueId}` }
+      }
+    });
     
     channel
-      .on('broadcast', { event: 'teacher_command' }, ({ payload }) => handleTeacherCommand(payload))
+      .on('broadcast', { event: 'teacher_command' }, ({ payload }) => {
+        handleTeacherCommand(payload);
+      })
       .on('broadcast', { event: 'teacher_ping' }, () => {
         channel.send({ 
           type: 'broadcast', 
@@ -120,13 +130,20 @@ const TeacherEngine: React.FC<TeacherEngineProps> = ({ gameState, setGameState, 
       })
       .subscribe((status) => {
         if (status === 'SUBSCRIBED') {
+          console.log("[LIVE-ENGINE] Đã kết nối kênh GV:", channelName);
+          // Gửi yêu cầu đồng bộ ngay khi vừa vào Engine
           channel.send({ type: 'broadcast', event: 'request_sync' });
+          // Track presence để GV thấy HS online
+          channel.track({ online: true, in_game: true });
         }
       });
 
     channelRef.current = channel;
-    return () => { supabase.removeChannel(channel); };
-  }, [currentTeacher.id, uniqueId]);
+    return () => { 
+      console.log("[LIVE-ENGINE] Ngắt kết nối kênh GV");
+      supabase.removeChannel(channel); 
+    };
+  }, [currentTeacher.id, uniqueId]); // Chỉ phụ thuộc vào ID giáo viên và ID học sinh
 
   useEffect(() => {
     if (gameState === 'ANSWERING' && timeLeft > 0 && !isWhiteboardActive) {
@@ -138,7 +155,9 @@ const TeacherEngine: React.FC<TeacherEngineProps> = ({ gameState, setGameState, 
   const submitAnswer = () => {
     if (!hasBuzzed) return;
     const currentProblem = rounds[0]?.problems[syncState.index];
-    const correct = (currentProblem?.correctAnswer || "").trim().toUpperCase();
+    if (!currentProblem) return;
+    
+    const correct = (currentProblem.correctAnswer || "").trim().toUpperCase();
     const isPerfect = userAnswer.trim().toUpperCase() === correct;
     const points = isPerfect ? (isHelpUsed ? 60 : 100) : 0;
     
@@ -179,12 +198,8 @@ const TeacherEngine: React.FC<TeacherEngineProps> = ({ gameState, setGameState, 
         </div>
       </header>
       
-      {/* 
-          KEY VERSIONING: Đây là chìa khóa giải quyết vấn đề của bạn.
-          Khi syncState.version thay đổi (mỗi khi GV bấm Next), React sẽ xóa bỏ toàn bộ
-          DOM cũ và dựng lại cái mới hoàn toàn, đảm bảo không bao giờ bị "kẹt" render.
-      */}
-      <div key={`arena-content-${syncState.index}-${syncState.version}`} className="flex-1 grid grid-cols-12 gap-8 min-h-0 relative">
+      {/* KEY CỦA DIV BAO QUANH LÀ CHỐT CHẶN CUỐI CÙNG ĐỂ BUỘC RENDER LẠI */}
+      <div key={`live-arena-render-${syncState.index}-${syncState.version}`} className="flex-1 grid grid-cols-12 gap-8 min-h-0 relative">
         {isWhiteboardActive && (
           <div className="absolute inset-0 z-50 bg-slate-950 rounded-[3.5rem] p-4 shadow-2xl animate-in zoom-in">
             <Whiteboard isTeacher={false} channel={channelRef.current} roomCode="TEACHER_ROOM" />
@@ -211,7 +226,7 @@ const TeacherEngine: React.FC<TeacherEngineProps> = ({ gameState, setGameState, 
            ) : (
              <div className="flex flex-col h-full animate-in slide-in-from-right">
                 <div className={`text-4xl font-black uppercase italic mb-6 ${feedback?.isCorrect ? 'text-emerald-500' : 'text-rose-500'}`}>{feedback?.isCorrect ? '✨ CHÍNH XÁC!' : '💥 RẤT TIẾC!'}</div>
-                <div className="bg-slate-50 p-8 rounded-[2.5rem] border-2 border-slate-100 italic font-bold text-slate-700 mb-8"><LatexRenderer content={feedback?.text || ""} /></div>
+                <div className="bg-slate-50 p-8 rounded-[2.5rem] border-2 border-slate-100 italic font-bold text-slate-700 mb-8 shadow-inner"><LatexRenderer content={feedback?.text || ""} /></div>
                 <div className="flex-1 bg-emerald-50/50 p-8 rounded-[3rem] border-2 border-emerald-100 overflow-y-auto no-scrollbar italic leading-relaxed text-slate-600"><LatexRenderer content={currentProblem?.explanation || ""} /></div>
                 <div className="mt-8 bg-blue-600 text-white p-6 rounded-3xl text-center font-black uppercase italic animate-pulse shadow-lg">⏳ Chờ Thầy chuyển câu...</div>
              </div>
