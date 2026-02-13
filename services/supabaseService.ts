@@ -75,7 +75,6 @@ const inferMetadata = (set: any) => {
     let topic = set.topic || set.TOPIC;
     let title = set.title || set.TITLE;
     
-    // Tính toán lại từ data JSON nếu các cột count bị thiếu trong DB
     let rCount = set.round_count || set.roundCount;
     let qCount = set.question_count || set.questionCount;
 
@@ -111,8 +110,6 @@ export const fetchAllExamSets = async (teacherId: string) => {
 };
 
 export const saveExamSet = async (teacherId: string, title: string, rounds: Round[], topic: string, grade: string, subject: string) => {
-  // PAYLOAD SIÊU TỐI GIẢN - CHỈ GỬI CỘT CƠ BẢN NHẤT
-  // Đã loại bỏ 'round_count' và 'question_count' vì lỗi PGRST204 báo không tìm thấy cột
   const payload: any = { 
     teacher_id: teacherId, 
     title: title, 
@@ -121,10 +118,7 @@ export const saveExamSet = async (teacherId: string, title: string, rounds: Roun
     grade: grade
   };
 
-  // Thử thêm subject nếu có
   if (subject) payload.subject = subject;
-
-  console.log("[Supabase] ĐANG THỬ LƯU VỚI PAYLOAD TỐI GIẢN:", payload);
 
   const { data, error } = await supabase
     .from('exam_sets')
@@ -132,14 +126,8 @@ export const saveExamSet = async (teacherId: string, title: string, rounds: Roun
     .select();
 
   if (error) {
-    console.error("[Supabase] LỖI LƯU ĐỀ:", error);
-    const detailMsg = `LỖI ${error.code}: ${error.message}\n${error.hint || ''}`;
-    alert(detailMsg);
+    const detailMsg = `LỖI ${error.code}: ${error.message}`;
     throw new Error(detailMsg);
-  }
-
-  if (!data || data.length === 0) {
-    throw new Error("Lưu thành công nhưng không nhận được phản hồi từ Database.");
   }
 
   return data[0].id;
@@ -153,18 +141,12 @@ export const updateExamSet = async (setId: string, title: string, rounds: Round[
     grade
   };
 
-  const { data, error } = await supabase
+  const { error } = await supabase
     .from('exam_sets')
     .update(payload)
-    .eq('id', setId)
-    .select();
+    .eq('id', setId);
 
-  if (error) {
-    const detailMsg = `LỖI CẬP NHẬT: ${error.message}`;
-    alert(detailMsg);
-    throw new Error(detailMsg);
-  }
-
+  if (error) throw error;
   return setId;
 };
 
@@ -256,12 +238,24 @@ export const getSetAssignments = async (teacherId: string, setId: string): Promi
   return data.map(row => row.room_code);
 };
 
+/**
+ * Xóa bản ghi gán phòng. 
+ * Đã sửa đổi để đảm bảo xóa sạch mọi bản ghi khớp với teacher, room và set.
+ */
 export const removeRoomAssignment = async (teacherId: string, roomCode: string, setId: string) => {
-  const { error } = await supabase.from('room_assignments').delete()
-    .eq('teacher_id', teacherId)
-    .eq('room_code', roomCode)
-    .eq('set_id', setId);
-  if (error) throw error;
+  console.log(`[Supabase] Đang thực hiện xóa gán: Set ${setId} khỏi Room ${roomCode} cho GV ${teacherId}`);
+  const { error } = await supabase.from('room_assignments')
+    .delete()
+    .match({
+      teacher_id: teacherId,
+      room_code: roomCode,
+      set_id: setId
+    });
+    
+  if (error) {
+    console.error("[Supabase] Lỗi khi xóa gán phòng:", error);
+    throw error;
+  }
   return true;
 };
 
