@@ -74,66 +74,29 @@ const ExamLibrary: React.FC<ExamLibraryProps> = ({
       const matchSearch = (set.title || "").toLowerCase().includes(searchLibrary.toLowerCase());
       if (!matchSearch) return false;
       if (activeCategory === 'Tất cả') return true;
-      
-      // Lọc theo Khối lớp (10, 11, 12)
-      if (['10', '11', '12'].includes(activeCategory)) {
-        return String(set.grade) === activeCategory;
-      }
-      
-      // Lọc theo Môn học (Vật lý, Toán, ...)
-      if (teacherSubject && activeCategory === teacherSubject) {
-        return (set.subject || "").toLowerCase() === teacherSubject.toLowerCase();
-      }
-
-      // Lọc theo topic hoặc tiêu đề
+      if (['10', '11', '12'].includes(activeCategory)) return String(set.grade) === activeCategory;
+      if (teacherSubject && activeCategory === teacherSubject) return (set.subject || "").toLowerCase() === teacherSubject.toLowerCase();
       return (set.topic && set.topic === activeCategory) || (set.title || "").toLowerCase().includes(activeCategory.toLowerCase());
     });
   }, [examSets, searchLibrary, activeCategory, teacherSubject]);
 
   const handleToggleRoom = async (roomCode: string) => {
     if (!distributeTarget || isToggling) return;
-    
     const setId = distributeTarget.id;
     const isCurrentlyAssigned = distributeTarget.assignedRooms.includes(roomCode);
-    
-    const newAssignedRooms = isCurrentlyAssigned 
-      ? distributeTarget.assignedRooms.filter(c => c !== roomCode)
-      : [...distributeTarget.assignedRooms, roomCode];
+    const newAssignedRooms = isCurrentlyAssigned ? distributeTarget.assignedRooms.filter(c => c !== roomCode) : [...distributeTarget.assignedRooms, roomCode];
     
     setDistributeTarget(prev => prev ? { ...prev, assignedRooms: newAssignedRooms } : null);
     setSetAssignments(prev => ({ ...prev, [setId]: newAssignedRooms }));
 
     setIsToggling(true);
     try {
-      if (isCurrentlyAssigned) {
-        await removeRoomAssignment(teacherId, roomCode, setId);
-      } else {
-        await assignSetToRoom(teacherId, roomCode, setId);
-      }
+      if (isCurrentlyAssigned) await removeRoomAssignment(teacherId, roomCode, setId);
+      else await assignSetToRoom(teacherId, roomCode, setId);
     } catch (e) {
-      const rollbackRooms = isCurrentlyAssigned 
-        ? [...distributeTarget.assignedRooms, roomCode]
-        : distributeTarget.assignedRooms.filter(c => c !== roomCode);
-      
-      setDistributeTarget(prev => prev ? { ...prev, assignedRooms: rollbackRooms } : null);
-      setSetAssignments(prev => ({ ...prev, [setId]: rollbackRooms }));
       alert("Lỗi khi cập nhật phòng.");
-    } finally {
-      setIsToggling(false);
-    }
-  };
-
-  const handleCreateSample = async () => {
-    setIsCreatingSample(true);
-    try {
-      await createSampleExamSet(teacherId);
-      onRefresh();
-      alert("Đã tạo bộ đề mẫu thành công! Chúc bạn trải nghiệm Arena vui vẻ.");
-    } catch (e) {
-      alert("Lỗi khi tạo bộ đề mẫu.");
-    } finally {
-      setIsCreatingSample(false);
-    }
+      fetchAllAssignments();
+    } finally { setIsToggling(false); }
   };
 
   const handleRename = async () => {
@@ -142,16 +105,15 @@ const ExamLibrary: React.FC<ExamLibraryProps> = ({
       await updateExamSetTitle(renameTarget.id, newName.trim());
       onRefresh();
       setRenameTarget(null);
-      setNewName('');
     } catch (e) { alert("Lỗi đổi tên"); }
   };
 
-  const filterPills = useMemo(() => {
-    const pills = ['Tất cả'];
-    if (teacherSubject) pills.push(teacherSubject);
-    pills.push('10', '11', '12');
-    return pills;
-  }, [teacherSubject]);
+  const getFriendlyRoomName = (code: string) => {
+    // Map các mã cũ hoặc mã kỹ thuật về tên tiếng Việt
+    if (code === 'TEACHER_ROOM' || code === 'TEACHER_LIVE') return 'Phòng GV LIVE';
+    const room = arenaRooms.find(r => r.code === code);
+    return room ? room.name : code;
+  };
 
   return (
     <div className="flex-1 flex flex-col h-full animate-in fade-in duration-500 text-left">
@@ -159,10 +121,7 @@ const ExamLibrary: React.FC<ExamLibraryProps> = ({
         isOpen={!!deleteTarget}
         title="Xóa bộ đề?"
         message={`Bạn có chắc muốn xóa vĩnh viễn bộ đề "${deleteTarget?.title}"?`}
-        onConfirm={() => {
-          if (deleteTarget) onDeleteSet(deleteTarget.id, deleteTarget.title);
-          setDeleteTarget(null);
-        }}
+        onConfirm={() => { if (deleteTarget) onDeleteSet(deleteTarget.id, deleteTarget.title); setDeleteTarget(null); }}
         onCancel={() => setDeleteTarget(null)}
         isDestructive={true}
       />
@@ -186,8 +145,7 @@ const ExamLibrary: React.FC<ExamLibraryProps> = ({
           <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-sm" onClick={() => setDistributeTarget(null)}></div>
           <div className="bg-white rounded-[4rem] p-10 shadow-2xl max-w-2xl w-full relative z-10 border-4 border-slate-100 animate-in slide-in-from-bottom-8">
             <h3 className="text-3xl font-black text-slate-800 uppercase italic mb-2 text-center">Gán Đề Vào Arena</h3>
-            <p className="text-slate-400 font-bold text-center mb-10 uppercase text-xs italic">Chọn các phòng mà bạn muốn triển khai bộ đề này:</p>
-            
+            <p className="text-slate-400 font-bold text-center mb-10 uppercase text-xs italic">Chọn các phòng để triển khai bộ đề:</p>
             <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-10 max-h-[50vh] overflow-y-auto no-scrollbar p-1">
               {arenaRooms.map(room => {
                 const isAssigned = distributeTarget.assignedRooms.includes(room.code);
@@ -196,20 +154,16 @@ const ExamLibrary: React.FC<ExamLibraryProps> = ({
                     key={room.id}
                     onClick={() => handleToggleRoom(room.code)}
                     disabled={isToggling}
-                    className={`p-6 rounded-[2.5rem] border-4 transition-all text-left relative group flex flex-col items-center justify-center ${isAssigned ? 'bg-blue-600 border-blue-400 text-white shadow-lg' : 'bg-slate-50 border-slate-100 text-slate-800 hover:border-blue-200'} ${isToggling ? 'opacity-70 cursor-wait' : ''}`}
+                    className={`p-6 rounded-[2.5rem] border-4 transition-all text-left relative flex flex-col items-center justify-center ${isAssigned ? 'bg-blue-600 border-blue-400 text-white shadow-lg' : 'bg-slate-50 border-slate-100 text-slate-800 hover:border-blue-200'} ${isToggling ? 'opacity-70' : ''}`}
                   >
-                    {isAssigned && <div className="absolute top-4 right-4 bg-white text-blue-600 w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-black shadow-lg animate-in zoom-in">✓</div>}
+                    {isAssigned && <div className="absolute top-4 right-4 bg-white text-blue-600 w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-black shadow-lg">✓</div>}
                     <div className="text-4xl mb-3">{room.emoji}</div>
-                    <div className="font-black text-sm uppercase italic leading-none mb-1 text-center">{room.name}</div>
-                    <div className={`text-[8px] font-black uppercase tracking-widest ${isAssigned ? 'text-blue-200' : 'text-slate-400'}`}>Mã: {room.code}</div>
-                    {room.type === 'live' && (
-                      <div className="mt-2 bg-rose-500 text-white px-2 py-0.5 rounded-full text-[7px] font-black uppercase italic shadow-sm">Dành cho GV</div>
-                    )}
+                    <div className="font-black text-xs uppercase italic text-center">{room.name}</div>
                   </button>
                 );
               })}
             </div>
-            <button onClick={() => { setDistributeTarget(null); onRefresh(); }} className="w-full py-5 bg-slate-900 text-white font-black rounded-2xl uppercase italic text-sm border-b-8 border-slate-800 active:translate-y-1 active:border-b-0">Hoàn tất thiết lập</button>
+            <button onClick={() => { setDistributeTarget(null); onRefresh(); }} className="w-full py-5 bg-slate-900 text-white font-black rounded-2xl uppercase italic text-sm border-b-8 border-slate-800">Hoàn tất</button>
           </div>
         </div>
       )}
@@ -217,10 +171,10 @@ const ExamLibrary: React.FC<ExamLibraryProps> = ({
       <div className="mb-12 flex flex-wrap items-center gap-4">
         <button onClick={() => setShowSearchInput(!showSearchInput)} className={`w-16 h-16 rounded-full flex items-center justify-center shadow-xl border-4 ${showSearchInput ? 'bg-slate-900 text-white border-slate-800' : 'bg-white text-slate-400 border-slate-50'}`}><span className="text-xl">🔍</span></button>
         <div className="flex flex-wrap gap-4">
-          {filterPills.map(cat => (
-            <button key={cat} onClick={() => setActiveCategory(cat)} className={`px-10 py-5 rounded-full font-black text-xs uppercase italic transition-all shadow-xl border-4 ${activeCategory === cat ? 'bg-blue-600 text-white border-blue-500 scale-105' : 'bg-white text-slate-400 border-slate-50 hover:border-blue-200'}`}>{cat}</button>
+          {['Tất cả', teacherSubject, '10', '11', '12'].filter(Boolean).map(cat => (
+            <button key={cat} onClick={() => setActiveCategory(cat!)} className={`px-10 py-5 rounded-full font-black text-xs uppercase italic transition-all shadow-xl border-4 ${activeCategory === cat ? 'bg-blue-600 text-white border-blue-500 scale-105' : 'bg-white text-slate-400 border-slate-50'}`}>{cat}</button>
           ))}
-          <button onClick={onRefresh} className={`w-16 h-16 bg-emerald-50 text-emerald-600 rounded-full flex items-center justify-center shadow-xl border-4 border-emerald-100 hover:bg-emerald-600 hover:text-white transition-all ${isLoadingSets ? 'animate-spin' : ''}`}><span className="text-xl">🔄</span></button>
+          <button onClick={onRefresh} className={`w-16 h-16 bg-emerald-50 text-emerald-600 rounded-full flex items-center justify-center shadow-xl border-4 border-emerald-100 ${isLoadingSets ? 'animate-spin' : ''}`}>🔄</button>
         </div>
         {showSearchInput && (
           <div className="flex-1 min-w-[300px] animate-in slide-in-from-left-4">
@@ -230,37 +184,31 @@ const ExamLibrary: React.FC<ExamLibraryProps> = ({
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-8 overflow-y-auto no-scrollbar pb-20">
-        {isLoadingSets ? (
-          <div className="col-span-full py-40 text-center flex flex-col items-center justify-center"><div className="w-16 h-16 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mb-4"></div><p className="font-black uppercase italic text-slate-400">Đang đồng bộ kho đề...</p></div>
-        ) : filteredExamSets.length > 0 ? filteredExamSets.map(set => {
-          const assignedRoomsForSet = setAssignments[set.id] || [];
+        {filteredExamSets.length > 0 ? filteredExamSets.map(set => {
+          const rawRooms = setAssignments[set.id] || [];
+          // Lọc trùng: Nếu có cả TEACHER_ROOM và TEACHER_LIVE thì chỉ hiện 1 nhãn
+          const uniqueDisplayRooms = Array.from(new Set(rawRooms.map(code => getFriendlyRoomName(code))));
+          
           return (
-          <div key={set.id} className="bg-white p-8 rounded-[3.5rem] border-4 border-slate-50 shadow-2xl hover:border-blue-100 transition-all flex flex-col group relative overflow-hidden">
+          <div key={set.id} className="bg-white p-8 rounded-[3.5rem] border-4 border-slate-50 shadow-2xl hover:border-blue-100 transition-all flex flex-col group relative">
              <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center gap-2">
                   <span className="px-3 py-1 bg-blue-600 text-white text-[9px] font-black uppercase rounded-lg shadow-sm">{set.topic || 'BÀI TẬP'}</span>
-                  <span className="text-[10px] font-black text-slate-300 uppercase tracking-widest italic">K{set.grade || '10'}</span>
+                  <span className="text-[10px] font-black text-slate-300 uppercase tracking-widest italic">K{set.grade}</span>
                 </div>
-                {assignedRoomsForSet.includes('TEACHER_LIVE') && (
+                {rawRooms.some(r => r.includes('TEACHER')) && (
                   <span className="px-3 py-1 bg-rose-500 text-white text-[9px] font-black uppercase rounded-full shadow-lg animate-pulse">🔥 LIVE READY</span>
                 )}
              </div>
 
              <div className="flex justify-between items-start gap-4 mb-4">
-               <h4 className="text-2xl font-black text-slate-800 uppercase italic leading-tight group-hover:text-blue-600 transition-colors flex-1 line-clamp-2">
-                 {set.title}
-               </h4>
-               <button 
-                 onClick={() => { setRenameTarget({ id: set.id, title: set.title }); setNewName(set.title); }}
-                 className="w-10 h-10 bg-slate-50 text-slate-400 rounded-xl flex items-center justify-center hover:bg-blue-600 hover:text-white transition-all shrink-0 shadow-sm border border-slate-100"
-               >
-                 ✏️
-               </button>
+               <h4 className="text-2xl font-black text-slate-800 uppercase italic leading-tight group-hover:text-blue-600 transition-colors flex-1 line-clamp-2">{set.title}</h4>
+               <button onClick={() => { setRenameTarget({ id: set.id, title: set.title }); setNewName(set.title); }} className="w-10 h-10 bg-slate-50 text-slate-400 rounded-xl flex items-center justify-center hover:bg-blue-600 hover:text-white transition-all shadow-sm border border-slate-100">✏️</button>
              </div>
              
              <div className="flex flex-wrap gap-1.5 mb-6 min-h-[24px]">
-                {assignedRoomsForSet.length > 0 ? assignedRoomsForSet.map(code => (
-                   <span key={code} className="px-2 py-0.5 bg-slate-900 text-white text-[8px] font-black uppercase rounded italic border border-white/10">{arenaRooms.find(r => r.code === code)?.name || code}</span>
+                {uniqueDisplayRooms.length > 0 ? uniqueDisplayRooms.map(name => (
+                   <span key={name} className="px-2 py-0.5 bg-slate-900 text-white text-[8px] font-black uppercase rounded italic border border-white/10">{name}</span>
                 )) : <span className="text-[9px] font-bold text-slate-300 italic uppercase">Chưa gán Arena</span>}
              </div>
 
@@ -277,35 +225,16 @@ const ExamLibrary: React.FC<ExamLibraryProps> = ({
 
              <div className="mt-auto flex flex-col gap-2 pt-4 border-t-2 border-slate-50">
                 <div className="grid grid-cols-3 gap-2 w-full">
-                  <button onClick={() => setDeleteTarget({ id: set.id, title: set.title })} className="py-4 bg-red-50 text-red-500 hover:bg-red-500 hover:text-white border-2 border-red-100 rounded-[1.2rem] font-black uppercase italic transition-all text-[10px]">Xóa</button>
-                  <button onClick={() => onEdit(set.id, set.title)} className="py-4 bg-blue-50 text-blue-600 hover:bg-blue-600 hover:text-white border-2 border-blue-100 rounded-[1.2rem] font-black uppercase italic transition-all text-[10px]">Sửa</button>
-                  <button onClick={() => setDistributeTarget({ id: set.id, title: set.title, assignedRooms: assignedRoomsForSet })} className="py-4 bg-amber-50 text-amber-600 hover:bg-amber-600 hover:text-white border-2 border-amber-100 rounded-[1.2rem] font-black uppercase italic transition-all text-[10px]">Gán Arena</button>
+                  <button onClick={() => setDeleteTarget({ id: set.id, title: set.title })} className="py-4 bg-red-50 text-red-500 hover:bg-red-500 hover:text-white border-2 border-red-100 rounded-[1.2rem] font-black uppercase italic text-[10px]">Xóa</button>
+                  <button onClick={() => onEdit(set.id, set.title)} className="py-4 bg-blue-50 text-blue-600 hover:bg-blue-600 hover:text-white border-2 border-blue-100 rounded-[1.2rem] font-black uppercase italic text-[10px]">Sửa</button>
+                  <button onClick={() => setDistributeTarget({ id: set.id, title: set.title, assignedRooms: rawRooms })} className="py-4 bg-amber-50 text-amber-600 hover:bg-amber-600 hover:text-white border-2 border-amber-100 rounded-[1.2rem] font-black uppercase italic text-[10px]">Gán Arena</button>
                 </div>
              </div>
           </div>
         )}) : (
-          <div className="col-span-full py-20 flex flex-col items-center justify-center animate-in fade-in duration-1000">
-             <div className="text-[12rem] mb-6 grayscale opacity-20 select-none">📭</div>
-             <p className="font-black uppercase italic tracking-[0.3em] text-2xl text-slate-300 mb-8">Kho đề hiện đang trống</p>
-             <div className="flex flex-col sm:flex-row gap-4 items-center">
-                <button 
-                  onClick={handleCreateSample}
-                  disabled={isCreatingSample}
-                  className="px-10 py-5 bg-blue-600 text-white rounded-[2rem] font-black uppercase italic shadow-2xl hover:scale-105 active:scale-95 transition-all flex items-center gap-4 border-b-8 border-blue-800 disabled:opacity-50"
-                >
-                   {isCreatingSample ? (
-                     <div className="w-5 h-5 border-3 border-white border-t-transparent rounded-full animate-spin"></div>
-                   ) : '✨'}
-                   {isCreatingSample ? 'ĐANG KHỞI TẠO...' : 'TẠO BỘ ĐỀ MẪU NGAY'}
-                </button>
-                <div className="text-[10px] font-black text-slate-300 uppercase italic">hoặc</div>
-                <button 
-                  onClick={() => onEdit('', '')}
-                  className="px-10 py-5 bg-white text-slate-400 border-4 border-slate-50 rounded-[2rem] font-black uppercase italic shadow-lg hover:text-slate-600 transition-all"
-                >
-                   ✏️ SOẠN ĐỀ MỚI
-                </button>
-             </div>
+          <div className="col-span-full py-20 text-center flex flex-col items-center justify-center opacity-30">
+             <div className="text-[12rem] mb-6 grayscale">📭</div>
+             <p className="font-black uppercase italic tracking-[0.3em] text-2xl text-slate-400">Kho đề trống</p>
           </div>
         )}
       </div>
