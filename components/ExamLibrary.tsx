@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import ConfirmModal from './ConfirmModal';
-import { updateExamSetTitle, getSetAssignments, removeRoomAssignment, assignSetToRoom, createSampleExamSet } from '../services/supabaseService';
+import { updateExamSetTitle, getSetAssignments, removeRoomAssignment, assignSetToRoom } from '../services/supabaseService';
 
 interface ExamLibraryProps {
   examSets: any[];
@@ -42,7 +42,6 @@ const ExamLibrary: React.FC<ExamLibraryProps> = ({
   const [showSearchInput, setShowSearchInput] = useState(false);
   const [setAssignments, setSetAssignments] = useState<Record<string, string[]>>({});
   const [isToggling, setIsToggling] = useState(false);
-  const [isCreatingSample, setIsCreatingSample] = useState(false);
 
   const arenaRooms = [
     { id: '1', name: 'Phòng đơn', code: 'ARENA_A', emoji: '🛡️', type: 'self' },
@@ -84,41 +83,29 @@ const ExamLibrary: React.FC<ExamLibraryProps> = ({
     if (!distributeTarget || isToggling) return;
     const setId = distributeTarget.id;
     
-    // Kiểm tra xem phòng này hoặc các mã tương đương đã được gán chưa
+    // Kiểm tra gán hiện tại (bao gồm cả mã cũ)
     const isCurrentlyAssigned = distributeTarget.assignedRooms.some(r => 
       r === roomCode || (roomCode === 'TEACHER_LIVE' && r === 'TEACHER_ROOM')
     );
     
-    // Nếu đang gán và bấm vào để bỏ gán: Xóa SẠCH các mã liên quan
     const newAssignedRooms = isCurrentlyAssigned 
-      ? distributeTarget.assignedRooms.filter(c => c !== 'TEACHER_LIVE' && c !== 'TEACHER_ROOM' && c !== roomCode) 
+      ? distributeTarget.assignedRooms.filter(c => c !== roomCode && c !== 'TEACHER_ROOM' && c !== 'TEACHER_LIVE') 
       : [...distributeTarget.assignedRooms, roomCode];
     
-    // Cập nhật giao diện ngay lập tức (Optimistic UI)
     setDistributeTarget(prev => prev ? { ...prev, assignedRooms: newAssignedRooms } : null);
     setSetAssignments(prev => ({ ...prev, [setId]: newAssignedRooms }));
 
     setIsToggling(true);
     try {
       if (isCurrentlyAssigned) {
-        // Xóa mã được yêu cầu
         await removeRoomAssignment(teacherId, roomCode, setId);
-        
-        // Nếu là phòng LIVE, thực hiện xóa bổ sung các mã cũ/mã kỹ thuật để dọn sạch DB
-        if (roomCode === 'TEACHER_LIVE' || roomCode === 'TEACHER_ROOM') {
-          await removeRoomAssignment(teacherId, 'TEACHER_LIVE', setId);
-          await removeRoomAssignment(teacherId, 'TEACHER_ROOM', setId);
-        }
       } else {
-        // Gán mới
         await assignSetToRoom(teacherId, roomCode, setId);
       }
     } catch (e) {
       console.error("Lỗi cập nhật gán phòng:", e);
-      fetchAllAssignments(); // Tải lại nếu lỗi
-    } finally { 
-      setIsToggling(false); 
-    }
+      fetchAllAssignments();
+    } finally { setIsToggling(false); }
   };
 
   const handleRename = async () => {
