@@ -107,27 +107,18 @@ const App: React.FC = () => {
   const handleSaveSet = async (title: string, asNew: boolean, topic: string, grade: string) => {
     if (!currentTeacher) return;
     try {
-      console.log("[App] Bắt đầu quá trình lưu...");
       let finalId = loadedSetId;
-      
       if (asNew || !loadedSetId) {
-        console.log("[App] Đang gọi saveExamSet (Tạo mới)");
         finalId = await saveExamSet(currentTeacher.id, title, rounds, topic, grade, currentTeacher.monday);
         setLoadedSetId(finalId);
       } else {
-        console.log("[App] Đang gọi updateExamSet (Cập nhật)");
         await updateExamSet(loadedSetId, title, rounds, topic, grade, currentTeacher.id);
       }
-      
       setLoadedSetTitle(title);
       setLoadedSetTopic(topic);
-      
-      console.log("[App] Lưu thành công, đang làm mới danh sách...");
       await refreshSets(currentTeacher.id);
-      
-      alert(`Đã lưu thành công bộ đề: ${title}\nVui lòng kiểm tra tab 'Kho đề của tôi'!`);
+      alert(`Đã lưu thành công bộ đề: ${title}`);
     } catch (err: any) {
-      console.error("[App] LỖI TRONG QUÁ TRÌNH LƯU:", err);
       alert("Lỗi khi lưu bộ đề: " + (err.message || "Lỗi không xác định"));
     }
   };
@@ -138,11 +129,9 @@ const App: React.FC = () => {
         <div className="min-h-screen flex items-center justify-center p-4">
           <div className="bg-white rounded-[4rem] p-12 shadow-2xl max-w-2xl w-full text-center border-b-[12px] border-blue-600 animate-in zoom-in duration-500 relative overflow-hidden">
             <div className="absolute top-8 right-10 flex flex-col items-end gap-2">
-               <div className="flex items-center gap-3">
-                  <div className="flex items-center gap-2 bg-slate-50 px-3 py-1.5 rounded-full border border-slate-100 shadow-sm">
-                     <span className="text-sm">👤 :</span>
-                     <span className="text-[10px] font-black text-slate-600 uppercase italic tracking-wider whitespace-nowrap">{visitorCount}</span>
-                  </div>
+               <div className="flex items-center gap-2 bg-slate-50 px-3 py-1.5 rounded-full border border-slate-100 shadow-sm">
+                  <span className="text-sm">👤 :</span>
+                  <span className="text-[10px] font-black text-slate-600 uppercase italic tracking-wider whitespace-nowrap">{visitorCount}</span>
                </div>
                <div className="flex items-center gap-2 bg-blue-50 px-3 py-1 rounded-full border border-blue-100 shadow-sm">
                   <span className="text-sm">📚</span>
@@ -201,35 +190,16 @@ const App: React.FC = () => {
 
       {gameState === 'ADMIN' && currentTeacher && (
         <TeacherPortal 
-          adminTab={adminTab} 
-          setAdminTab={setAdminTab} 
-          playerName={currentTeacher.tengv} 
-          teacherId={currentTeacher.id} 
-          teacherMaGV={currentTeacher.magv} 
-          teacherSubject={currentTeacher.monday} 
-          teacherRole={currentTeacher.role} 
-          onLogout={() => setGameState('LOBBY')}
-          examSets={examSets} 
-          searchLibrary={searchLibrary} 
-          setSearchLibrary={setSearchLibrary} 
-          activeCategory={activeCategory} 
-          setActiveCategory={setActiveCategory} 
-          onLoadSet={handleLoadSet}
-          onDeleteSet={async (id) => { await deleteExamSet(id); refreshSets(currentTeacher.id); return true; }}
-          rounds={rounds} 
-          setRounds={setRounds} 
-          onSaveSet={handleSaveSet}
-          loadedSetTitle={loadedSetTitle} 
-          loadedSetId={loadedSetId}
-          loadedSetTopic={loadedSetTopic}
-          onResetToNew={() => { setRounds([{ number: 1, problems: [], description: '' }]); setLoadedSetId(null); setLoadedSetTitle(null); setLoadedSetTopic(null); }}
-          onRefreshSets={() => refreshSets(currentTeacher.id)} 
-          isLoadingSets={isLoading}
-          onLive={() => {}}
+          adminTab={adminTab} setAdminTab={setAdminTab} playerName={currentTeacher.tengv} teacherId={currentTeacher.id} teacherMaGV={currentTeacher.magv} teacherSubject={currentTeacher.monday} teacherRole={currentTeacher.role} 
+          onLogout={() => setGameState('LOBBY')} examSets={examSets} searchLibrary={searchLibrary} setSearchLibrary={setSearchLibrary} activeCategory={activeCategory} setActiveCategory={setActiveCategory} onLoadSet={handleLoadSet}
+          onDeleteSet={async (id) => { await deleteExamSet(id); refreshSets(currentTeacher.id); return true; }} rounds={rounds} setRounds={setRounds} onSaveSet={handleSaveSet}
+          loadedSetTitle={loadedSetTitle} loadedSetId={loadedSetId} loadedSetTopic={loadedSetTopic} onResetToNew={() => { setRounds([{ number: 1, problems: [], description: '' }]); setLoadedSetId(null); setLoadedSetTitle(null); setLoadedSetTopic(null); }}
+          onRefreshSets={() => refreshSets(currentTeacher.id)} isLoadingSets={isLoading} onLive={() => {}}
         />
       )}
 
-      {(['ROOM_SELECTION', 'SET_SELECTION', 'WAITING_FOR_PLAYERS', 'KEYWORD_SELECTION'].includes(gameState)) && (
+      {/* SỬA LỖI Ở ĐÂY: Thêm 'WAITING_ROOM' vào danh sách render */}
+      {(['ROOM_SELECTION', 'SET_SELECTION', 'WAITING_ROOM', 'WAITING_FOR_PLAYERS', 'KEYWORD_SELECTION'].includes(gameState)) && (
         <StudentArenaFlow 
           gameState={gameState} setGameState={setGameState} playerName={playerName} studentGrade={studentGrade!} currentTeacher={currentTeacher!}
           onStartMatch={(data) => { setMatchData(data); setGameState('ROUND_INTRO'); }} joinedRoom={joinedRoom} setJoinedRoom={setJoinedRoom} availableSets={availableSets} setAvailableSets={setAvailableSets}
