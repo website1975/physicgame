@@ -1,8 +1,8 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Round, Teacher } from '../../types';
-// Fixed: Changed assignSetToTeacherRoom to assignSetToRoom which exists in supabaseService
+import { Round, Teacher, QuestionType } from '../../types';
 import { supabase, getLatestRoomAssignment, fetchSetData, assignSetToRoom } from '../../services/supabaseService';
+import Whiteboard from '../Whiteboard';
 
 interface ControlPanelProps {
   teacherId: string;
@@ -13,13 +13,13 @@ interface ControlPanelProps {
   liveSessionKey?: number;
 }
 
-// Interface for typed student session tracking
 interface StudentSessionInfo {
   name: string;
   score: number;
   progress: string;
   lastStatus: string;
   isOnline: boolean;
+  buzzedAt?: number;
 }
 
 const ControlPanel: React.FC<ControlPanelProps> = ({ 
@@ -27,28 +27,15 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
 }) => {
   const [studentRegistry, setStudentRegistry] = useState<Record<string, StudentSessionInfo>>({});
   const [activeSetInfo, setActiveSetInfo] = useState<{ id: string, title: string } | null>(null);
-  const [isRefreshing, setIsRefreshing] = useState(false);
-  const [currentQuestionIdx, setCurrentQuestionIdx] = useState(-1); // -1: Chờ, 0+: Đang làm câu X
+  const [currentQuestionIdx, setCurrentQuestionIdx] = useState(-1);
   const [isStarting, setIsStarting] = useState(false);
+  const [isWhiteboardActive, setIsWhiteboardActive] = useState(false);
   const channelRef = useRef<any>(null);
 
-  const refreshActiveSet = async () => {
-    setIsRefreshing(true);
-    try {
-      const setId = await getLatestRoomAssignment(teacherId, 'TEACHER_ROOM');
-      if (setId) {
-        const data = await fetchSetData(setId);
-        setActiveSetInfo({ id: setId, title: data.title });
-      } else {
-        setActiveSetInfo(null);
-      }
-    } catch (e) { console.error(e); } finally { setIsRefreshing(false); }
-  };
-
   useEffect(() => {
-    refreshActiveSet();
     setStudentRegistry({});
     setCurrentQuestionIdx(-1);
+    setIsWhiteboardActive(false);
   }, [liveSessionKey, teacherId]);
 
   useEffect(() => {
@@ -74,27 +61,39 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
       })
       .on('broadcast', { event: 'student_report' }, ({ payload }) => {
         const registryKey = `${payload.name}::${payload.uniqueId}`;
-        setStudentRegistry(prev => {
-          const existing = prev[registryKey];
-          return {
-            ...prev,
-            [registryKey]: {
-              name: existing?.name || payload.name,
-              isOnline: true,
-              score: payload.score,
-              progress: payload.progress,
-              lastStatus: payload.isCorrect ? 'ĐÚNG ✅' : 'SAI ❌'
-            }
-          };
-        });
+        setStudentRegistry(prev => ({
+          ...prev,
+          [registryKey]: {
+            ...prev[registryKey],
+            name: payload.name,
+            isOnline: true,
+            score: payload.score,
+            progress: payload.progress,
+            lastStatus: payload.isCorrect ? 'ĐÚNG ✅' : 'SAI ❌'
+          }
+        }));
+      })
+      .on('broadcast', { event: 'student_buzzer' }, ({ payload }) => {
+        const registryKey = `${payload.name}::${payload.uniqueId}`;
+        setStudentRegistry(prev => ({
+          ...prev,
+          [registryKey]: {
+            ...prev[registryKey],
+            buzzedAt: Date.now()
+          }
+        }));
       })
       .on('broadcast', { event: 'ask_session_state' }, () => {
-        // HS hỏi trạng thái (cho trường hợp vào muộn hoặc mất mạng quay lại)
         if (currentQuestionIdx >= 0 && loadedSetId) {
           channel.send({
             type: 'broadcast',
             event: 'teacher_start_game',
-            payload: { setId: loadedSetId, title: loadedSetTitle || '', currentQuestionIndex: currentQuestionIdx }
+            payload: { 
+              setId: loadedSetId, 
+              title: loadedSetTitle || '', 
+              currentQuestionIndex: currentQuestionIdx,
+              isWhiteboardActive 
+            }
           });
         }
       })
@@ -102,155 +101,137 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
 
     channelRef.current = channel;
     return () => { if (channelRef.current) supabase.removeChannel(channelRef.current); };
-  }, [teacherId, liveSessionKey, currentQuestionIdx, loadedSetId, loadedSetTitle]);
+  }, [teacherId, liveSessionKey, currentQuestionIdx, loadedSetId, loadedSetTitle, isWhiteboardActive]);
 
   const handleStartGame = async () => {
-    if (!loadedSetId) { 
-      alert("⚠️ Không tìm thấy đề đang chọn! Vui lòng vào Kho Đề và nhấn 'DÙNG CHO TIẾT DẠY' trước."); 
-      return; 
-    }
-    
+    if (!loadedSetId) { alert("Chọn bộ đề trước khi bắt đầu!"); return; }
     setIsStarting(true);
     try {
-      // Đảm bảo gán đề vào cơ sở dữ liệu để HS vào sau vẫn nhận được
-      // Fixed: Replaced assignSetToTeacherRoom with assignSetToRoom using 'TEACHER_ROOM' code
       await assignSetToRoom(teacherId, 'TEACHER_ROOM', loadedSetId);
-      
       setCurrentQuestionIdx(0);
-      setActiveSetInfo({ id: loadedSetId, title: loadedSetTitle || 'Bộ đề' });
-
-      // Phát sóng tín hiệu bắt đầu 5 lần để đảm bảo HS nhận được dù mạng yếu
-      let count = 0;
-      const interval = setInterval(() => {
-        channelRef.current?.send({
-          type: 'broadcast',
-          event: 'teacher_start_game',
-          payload: { 
-            setId: loadedSetId, 
-            title: loadedSetTitle || '', 
-            currentQuestionIndex: 0 
-          }
-        });
-        count++;
-        if (count >= 5) clearInterval(interval);
-      }, 300);
-
-    } catch (err) {
-      alert("Lỗi khi bắt đầu tiết dạy. Vui lòng thử lại!");
-    } finally {
-      setIsStarting(false);
-    }
+      channelRef.current?.send({
+        type: 'broadcast',
+        event: 'teacher_start_game',
+        payload: { setId: loadedSetId, title: loadedSetTitle || '', currentQuestionIndex: 0 }
+      });
+    } catch (err) { alert("Lỗi kết nối"); } finally { setIsStarting(false); }
   };
 
   const handleNextQuestion = () => {
     const nextIdx = currentQuestionIdx + 1;
     setCurrentQuestionIdx(nextIdx);
-    
-    channelRef.current?.send({
-      type: 'broadcast',
-      event: 'teacher_next_question',
-      payload: { nextIndex: nextIdx }
+    resetBuzzers();
+    channelRef.current?.send({ type: 'broadcast', event: 'teacher_next_question', payload: { nextIndex: nextIdx } });
+  };
+
+  const handlePrevQuestion = () => {
+    const prevIdx = Math.max(0, currentQuestionIdx - 1);
+    setCurrentQuestionIdx(prevIdx);
+    resetBuzzers();
+    channelRef.current?.send({ type: 'broadcast', event: 'teacher_next_question', payload: { nextIndex: prevIdx } });
+  };
+
+  const toggleWhiteboard = () => {
+    const newState = !isWhiteboardActive;
+    setIsWhiteboardActive(newState);
+    channelRef.current?.send({ type: 'broadcast', event: 'teacher_toggle_whiteboard', payload: { active: newState } });
+  };
+
+  const resetBuzzers = () => {
+    setStudentRegistry(prev => {
+      const next = { ...prev };
+      Object.keys(next).forEach(k => delete next[k].buzzedAt);
+      return next;
     });
   };
 
-  const studentsList = (Object.values(studentRegistry) as StudentSessionInfo[]).sort((a, b) => b.score - a.score);
+  const studentsList = Object.values(studentRegistry).sort((a, b) => {
+    if (a.buzzedAt && b.buzzedAt) return a.buzzedAt - b.buzzedAt;
+    if (a.buzzedAt) return -1;
+    if (b.buzzedAt) return 1;
+    return b.score - a.score;
+  });
 
   return (
-    <div className="flex flex-col gap-6 h-full text-left">
-      <header className="bg-white p-8 rounded-[3rem] shadow-xl border-4 border-slate-50 flex items-center justify-between">
+    <div className="flex flex-col gap-6 h-full text-left animate-in fade-in">
+      <header className="bg-white p-8 rounded-[3.5rem] shadow-2xl border-4 border-slate-50 flex flex-wrap items-center justify-between gap-6">
         <div className="flex items-center gap-6">
-           <div className="bg-slate-950 text-white p-5 rounded-[2rem] text-center min-w-[140px] shadow-2xl border-b-8 border-slate-800">
-              <span className="text-[10px] font-black uppercase text-blue-400 block mb-1">MÃ PHÒNG</span>
+           <div className="bg-slate-900 text-white p-5 rounded-[2rem] text-center min-w-[120px] shadow-xl border-b-8 border-slate-800">
+              <span className="text-[9px] font-black uppercase text-blue-400 block mb-1">MÃ PHÒNG</span>
               <div className="text-3xl font-black italic tracking-widest">{teacherMaGV}</div>
            </div>
            <div>
-              <h3 className="text-2xl font-black text-slate-800 uppercase italic leading-none">Điều phối tiết dạy</h3>
-              <div className="flex items-center gap-2 mt-2">
-                 <p className="text-xs font-bold uppercase text-slate-400">
-                   {loadedSetTitle ? `Sẵn sàng: ${loadedSetTitle}` : (activeSetInfo ? `Đang dạy: ${activeSetInfo.title}` : '⚠️ CHƯA GÁN ĐỀ')}
-                 </p>
-              </div>
+              <h3 className="text-2xl font-black text-slate-800 uppercase italic leading-none">QUẢN LÝ TIẾT DẠY</h3>
+              <p className="text-xs font-bold text-slate-400 mt-2 uppercase italic truncate max-w-xs">{loadedSetTitle || "Chưa gán đề"}</p>
            </div>
         </div>
 
-        <div className="flex gap-4">
+        <div className="flex items-center gap-3">
+           {currentQuestionIdx >= 0 && (
+              <div className="flex gap-2 mr-4">
+                 <button onClick={handlePrevQuestion} className="w-12 h-12 bg-slate-100 text-slate-400 rounded-xl flex items-center justify-center hover:bg-slate-200 transition-all">◀</button>
+                 <button onClick={handleNextQuestion} className="w-12 h-12 bg-slate-100 text-slate-400 rounded-xl flex items-center justify-center hover:bg-slate-200 transition-all">▶</button>
+              </div>
+           )}
+           <button onClick={toggleWhiteboard} className={`px-8 py-5 rounded-2xl font-black uppercase italic shadow-lg transition-all flex items-center gap-3 border-b-4 ${isWhiteboardActive ? 'bg-emerald-600 text-white border-emerald-800' : 'bg-slate-800 text-white border-slate-950'}`}>
+              <span className="text-xl">🎨</span> {isWhiteboardActive ? 'ĐANG GIẢNG BÀI' : 'BẬT BẢNG TRẮNG'}
+           </button>
            {currentQuestionIdx === -1 ? (
-             <button 
-               onClick={handleStartGame}
-               disabled={isStarting || !loadedSetId}
-               className={`px-12 py-6 rounded-[2rem] font-black uppercase italic shadow-xl border-b-8 transition-all flex items-center gap-3
-                 ${isStarting || !loadedSetId 
-                   ? 'bg-slate-200 text-slate-400 border-slate-300' 
-                   : 'bg-blue-600 text-white border-blue-800 hover:scale-105 active:translate-y-2 active:border-b-0'}`}
-             >
-               <span className="text-2xl">{isStarting ? '⏳' : '🚀'}</span> 
-               {isStarting ? 'ĐANG KHỞI TẠO...' : 'BẮT ĐẦU TIẾT DẠY'}
-             </button>
+             <button onClick={handleStartGame} disabled={isStarting || !loadedSetId} className="px-10 py-5 bg-blue-600 text-white rounded-2xl font-black uppercase italic shadow-xl border-b-8 border-blue-800 hover:scale-105 transition-all">PHÁT ĐỀ 🚀</button>
            ) : (
-             <button 
-               onClick={handleNextQuestion}
-               className="px-12 py-6 bg-emerald-500 text-white rounded-[2rem] font-black uppercase italic shadow-xl border-b-8 border-emerald-700 hover:scale-105 active:translate-y-2 active:border-b-0 transition-all flex items-center gap-3"
-             >
-               <span className="text-2xl">⏩</span> CÂU KẾ TIẾP ({currentQuestionIdx + 1})
-             </button>
+             <button onClick={resetBuzzers} className="px-8 py-5 bg-amber-500 text-white rounded-2xl font-black uppercase italic shadow-xl border-b-8 border-amber-700">RESET CHUÔNG 🔔</button>
            )}
         </div>
       </header>
 
-      <div className="flex-1 bg-white rounded-[3.5rem] border-4 border-slate-50 shadow-2xl overflow-hidden flex flex-col">
-        <div className="p-6 bg-slate-50 border-b-2 border-slate-100 flex justify-between items-center">
-           <span className="text-[10px] font-black text-slate-400 uppercase italic">Thành viên trong phòng ({studentsList.length})</span>
-           <div className="flex items-center gap-3">
-              {currentQuestionIdx >= 0 && (
-                <div className="px-4 py-1.5 bg-blue-100 text-blue-600 rounded-full text-[10px] font-black uppercase italic">
-                  ĐANG Ở CÂU {currentQuestionIdx + 1}
-                </div>
-              )}
-           </div>
-        </div>
-        <div className="flex-1 overflow-y-auto no-scrollbar">
-           <table className="w-full text-left">
-              <thead className="sticky top-0 bg-white shadow-sm z-10">
-                 <tr>
-                    <th className="px-8 py-4 text-[10px] font-black text-slate-400 uppercase italic">Học sinh</th>
-                    <th className="px-8 py-4 text-[10px] font-black text-slate-400 uppercase italic text-center">Tiến trình</th>
-                    <th className="px-8 py-4 text-[10px] font-black text-slate-400 uppercase italic text-right">Trạng thái & Điểm</th>
-                 </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-50">
-                 {studentsList.length > 0 ? studentsList.map((s, i) => (
-                    <tr key={i} className={`hover:bg-slate-50/50 transition-colors ${!s.isOnline ? 'opacity-40' : ''}`}>
-                       <td className="px-8 py-6">
-                          <div className="flex items-center gap-4">
-                             <div className={`w-3 h-3 rounded-full ${s.isOnline ? 'bg-emerald-500 animate-pulse shadow-[0_0_8px_#10b981]' : 'bg-slate-300'}`}></div>
-                             <div className="font-black text-slate-800 uppercase italic text-sm">{s.name}</div>
-                          </div>
-                       </td>
-                       <td className="px-8 py-6 text-center">
-                          <span className="bg-slate-100 px-4 py-1.5 rounded-full font-bold text-[10px] text-slate-500 border border-slate-200 uppercase italic">
-                             {s.progress}
-                          </span>
-                       </td>
-                       <td className="px-8 py-6 text-right">
-                          <div className="flex flex-col items-end">
-                             <span className="text-2xl font-black text-blue-600 leading-none">{s.score}đ</span>
-                             <span className={`text-[9px] font-black uppercase mt-1 ${s.lastStatus.includes('ĐÚNG') ? 'text-emerald-500' : (s.lastStatus.includes('SAI') ? 'text-rose-500' : 'text-slate-400')}`}>
-                                {s.lastStatus}
-                             </span>
-                          </div>
-                       </td>
-                    </tr>
-                 )) : (
-                    <tr>
-                       <td colSpan={3} className="py-20 text-center">
-                          <div className="text-5xl mb-4 grayscale opacity-20">📡</div>
-                          <p className="font-black uppercase italic text-slate-300 text-sm tracking-widest">Chưa có học sinh nào kết nối...</p>
-                       </td>
-                    </tr>
-                 )}
-              </tbody>
-           </table>
-        </div>
+      <div className="flex-1 grid grid-cols-12 gap-6 min-h-0">
+         <div className="col-span-12 lg:col-span-8 flex flex-col gap-6">
+            <div className="flex-1 bg-white rounded-[3.5rem] border-4 border-slate-50 shadow-2xl overflow-hidden relative">
+               {isWhiteboardActive ? (
+                 <Whiteboard isTeacher={true} channel={channelRef.current} roomCode="TEACHER_ROOM" />
+               ) : (
+                 <div className="h-full flex flex-col items-center justify-center text-center p-12 bg-slate-50/50">
+                    <div className="text-[8rem] opacity-10 mb-6">📺</div>
+                    <h4 className="text-2xl font-black text-slate-300 uppercase italic tracking-widest">Màn hình đang hiển thị Câu {currentQuestionIdx + 1}</h4>
+                    {currentQuestionIdx >= 0 && (
+                       <div className="mt-8 px-8 py-4 bg-white rounded-3xl border-2 border-slate-100 shadow-sm max-w-lg">
+                          <p className="font-bold text-slate-500 italic">"Học sinh đang giải bài trên thiết bị của họ. Bạn có thể bấm 'Bật bảng trắng' để dừng lại giảng giải bất cứ lúc nào."</p>
+                       </div>
+                    )}
+                 </div>
+               )}
+            </div>
+         </div>
+
+         <div className="col-span-12 lg:col-span-4 bg-white rounded-[3.5rem] border-4 border-slate-50 shadow-2xl flex flex-col overflow-hidden">
+            <div className="p-6 bg-slate-900 text-white flex justify-between items-center">
+               <span className="text-[10px] font-black uppercase italic tracking-widest">LỚP HỌC ({studentsList.length})</span>
+               {currentQuestionIdx >= 0 && <span className="text-[10px] font-black uppercase bg-blue-600 px-3 py-1 rounded-full italic">CÂU {currentQuestionIdx + 1}</span>}
+            </div>
+            <div className="flex-1 overflow-y-auto no-scrollbar">
+               {studentsList.length > 0 ? studentsList.map((s, i) => (
+                 <div key={i} className={`flex items-center gap-4 p-5 border-b border-slate-50 transition-all ${s.buzzedAt ? 'bg-amber-50 animate-pulse' : ''}`}>
+                    <div className="relative">
+                       <div className={`w-12 h-12 rounded-full flex items-center justify-center text-lg shadow-sm border-2 ${s.isOnline ? 'bg-blue-50 border-blue-100 text-blue-600' : 'bg-slate-100 border-slate-200 text-slate-300'}`}>👤</div>
+                       {s.buzzedAt && <div className="absolute -top-1 -right-1 bg-amber-500 text-white w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-black shadow-md border-2 border-white animate-bounce">🔔</div>}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                       <div className="font-black text-slate-800 uppercase italic text-xs truncate">{s.name}</div>
+                       <div className="text-[9px] font-bold text-slate-400 uppercase italic mt-0.5">{s.progress}</div>
+                    </div>
+                    <div className="text-right">
+                       <div className="text-xl font-black text-blue-600 italic leading-none">{s.score}đ</div>
+                       <div className={`text-[8px] font-black uppercase mt-1 ${s.lastStatus.includes('ĐÚNG') ? 'text-emerald-500' : 'text-rose-500'}`}>{s.lastStatus}</div>
+                    </div>
+                 </div>
+               )) : (
+                 <div className="h-full flex flex-col items-center justify-center p-10 text-center opacity-20">
+                    <div className="text-6xl mb-4">📡</div>
+                    <p className="font-black uppercase italic text-xs tracking-widest">Đang đợi học sinh vào phòng...</p>
+                 </div>
+               )}
+            </div>
+         </div>
       </div>
     </div>
   );
