@@ -5,6 +5,7 @@ import EditorPanel from './admin/EditorPanel';
 import LibraryPanel from './admin/LibraryPanel';
 import GameLabPanel from './admin/GameLabPanel';
 import ManagementPanel from './admin/ManagementPanel';
+import ControlPanel from './admin/ControlPanel';
 
 interface TeacherPortalProps {
   adminTab: AdminTab;
@@ -42,7 +43,7 @@ const TeacherPortal: React.FC<TeacherPortalProps> = (props) => {
     setSearchLibrary, activeCategory, setActiveCategory, onLoadSet, 
     onDeleteSet, onRefreshSets, isLoadingSets, onSaveSet, rounds, 
     setRounds, loadedSetTitle, loadedSetId, loadedSetTopic, 
-    onResetToNew 
+    onResetToNew, liveSessionKey 
   } = props;
 
   return (
@@ -69,24 +70,25 @@ const TeacherPortal: React.FC<TeacherPortalProps> = (props) => {
            </div>
 
            <div className="space-y-1">
-              <button onClick={() => { onResetToNew(); setAdminTab('EDITOR'); }} className={`w-full text-left p-4 rounded-xl font-black text-[9px] uppercase flex items-center gap-3 ${adminTab === 'EDITOR' ? 'bg-purple-600 text-white' : 'text-slate-400 hover:bg-white/5'}`}><span>📝</span> Soạn thảo đề</button>
-              <button onClick={() => setAdminTab('CLOUD')} className={`w-full text-left p-4 rounded-xl font-black text-[9px] uppercase flex items-center gap-3 ${adminTab === 'CLOUD' ? 'bg-sky-600 text-white' : 'text-slate-400 hover:bg-white/5'}`}><span>🌍</span> Kho đề của tôi</button>
-              <button onClick={() => setAdminTab('LAB')} className={`w-full text-left p-4 rounded-xl font-black text-[9px] uppercase flex items-center gap-3 ${adminTab === 'LAB' ? 'bg-[#FF6D60] text-white' : 'text-slate-400 hover:bg-white/5'}`}><span>🎮</span> Kho game Arena</button>
+              <button onClick={() => { onResetToNew(); setAdminTab('EDITOR'); }} className={`w-full text-left p-4 rounded-xl font-black text-[9px] uppercase flex items-center gap-3 ${adminTab === 'EDITOR' ? 'bg-purple-600 text-white shadow-lg' : 'text-slate-400 hover:bg-white/5'}`}><span>📝</span> Soạn thảo đề</button>
+              <button onClick={() => setAdminTab('CLOUD')} className={`w-full text-left p-4 rounded-xl font-black text-[9px] uppercase flex items-center gap-3 ${adminTab === 'CLOUD' ? 'bg-sky-600 text-white shadow-lg' : 'text-slate-400 hover:bg-white/5'}`}><span>🌍</span> Kho đề của tôi</button>
+              <button onClick={() => setAdminTab('CONTROL')} className={`w-full text-left p-4 rounded-xl font-black text-[9px] uppercase flex items-center gap-3 ${adminTab === 'CONTROL' ? 'bg-blue-600 text-white shadow-lg animate-pulse' : 'text-slate-400 hover:bg-white/5'}`}><span>⚡</span> Điều phối Live</button>
+              <button onClick={() => setAdminTab('LAB')} className={`w-full text-left p-4 rounded-xl font-black text-[9px] uppercase flex items-center gap-3 ${adminTab === 'LAB' ? 'bg-[#FF6D60] text-white shadow-lg' : 'text-slate-400 hover:bg-white/5'}`}><span>🎮</span> Game Arena</button>
               
               {teacherRole === 'ADMIN' && (
-                <button onClick={() => setAdminTab('MANAGEMENT')} className={`w-full text-left p-4 rounded-xl font-black text-[9px] uppercase flex items-center gap-3 ${adminTab === 'MANAGEMENT' ? 'bg-amber-600 text-white' : 'text-slate-400 hover:bg-white/5'}`}><span>👥</span> Danh sách GV</button>
+                <button onClick={() => setAdminTab('MANAGEMENT')} className={`w-full text-left p-4 rounded-xl font-black text-[9px] uppercase flex items-center gap-3 ${adminTab === 'MANAGEMENT' ? 'bg-amber-600 text-white shadow-lg' : 'text-slate-400 hover:bg-white/5'}`}><span>👥</span> Danh sách GV</button>
               )}
            </div>
         </nav>
 
-        <button onClick={onLogout} className="mt-auto p-4 text-slate-500 font-black text-[9px] uppercase flex items-center gap-2 hover:text-white"><span>🚪</span> Đăng xuất</button>
+        <button onClick={onLogout} className="mt-auto p-4 text-slate-500 font-black text-[9px] uppercase flex items-center gap-2 hover:text-white transition-colors"><span>🚪</span> Đăng xuất</button>
       </aside>
 
       <main className="flex-1 p-10 overflow-y-auto no-scrollbar bg-[#f8fafc]">
          <header className="flex justify-between items-center mb-10">
             <div>
               <h3 className="text-5xl font-black italic uppercase text-slate-900 tracking-tighter leading-none">
-                {adminTab === 'EDITOR' ? 'Workshop' : adminTab === 'CLOUD' ? 'Library' : adminTab === 'LAB' ? 'Game Lab' : 'Directory'}
+                {adminTab === 'EDITOR' ? 'Workshop' : adminTab === 'CLOUD' ? 'Library' : adminTab === 'LAB' ? 'Game Lab' : adminTab === 'CONTROL' ? 'Arena Control' : 'Directory'}
               </h3>
             </div>
          </header>
@@ -103,12 +105,22 @@ const TeacherPortal: React.FC<TeacherPortalProps> = (props) => {
            <LibraryPanel 
              examSets={examSets} searchLibrary={searchLibrary} setSearchLibrary={setSearchLibrary}
              activeCategory={activeCategory} setActiveCategory={setActiveCategory}
-             // Fixed handleLoadSet to onLoadSet as it is correctly destructured from props
              onLoadSet={onLoadSet} onDeleteSet={onDeleteSet} onRefresh={onRefreshSets}
              teacherId={teacherId} teacherSubject={teacherSubject} isLoadingSets={isLoadingSets}
              onEdit={(id, title) => { onLoadSet(id, title); setAdminTab('EDITOR'); }}
-             onLive={() => {}}
+             onLive={() => setAdminTab('CONTROL')}
            />
+         )}
+
+         {adminTab === 'CONTROL' && (
+            <ControlPanel 
+               teacherId={teacherId} 
+               teacherMaGV={teacherMaGV || ''} 
+               loadedSetId={loadedSetId} 
+               loadedSetTitle={loadedSetTitle} 
+               rounds={rounds} 
+               liveSessionKey={liveSessionKey} 
+            />
          )}
 
          {adminTab === 'LAB' && <GameLabPanel />}
