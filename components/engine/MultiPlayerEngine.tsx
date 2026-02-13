@@ -71,11 +71,12 @@ const MultiPlayerEngine: React.FC<MultiPlayerEngineProps> = ({ gameState, setGam
       })
       .on('broadcast', { event: 'match_result' }, ({ payload }) => {
         if (payload.playerId !== stateRef.current.myId) {
+          const oppName = matchData.opponents?.find(o => o.id === payload.playerId)?.name || "ĐỐI THỦ";
           setOpponentScores(prev => ({ ...prev, [payload.playerId]: (prev[payload.playerId] || 0) + payload.points }));
           const currentProb = rounds[stateRef.current.currentRoundIdx]?.problems[stateRef.current.currentProblemIdx];
           setFeedback({ 
             isCorrect: payload.isCorrect, 
-            text: `Đối thủ đã trả lời ${payload.isCorrect ? 'Đúng' : 'Sai'}. Đáp án: ${currentProb?.correctAnswer}` 
+            text: `${oppName} đã trả lời ${payload.isCorrect ? 'Đúng' : 'Sai'}. Đáp án: ${currentProb?.correctAnswer}` 
           });
           setGameState('FEEDBACK');
         }
@@ -94,7 +95,7 @@ const MultiPlayerEngine: React.FC<MultiPlayerEngineProps> = ({ gameState, setGam
 
     channelRef.current = channel;
     return () => { supabase.removeChannel(channel); };
-  }, [matchData.joinedRoom.code, currentTeacher.id]);
+  }, [matchData.joinedRoom.code, currentTeacher.id, matchData.opponents]);
 
   useEffect(() => {
     let t: any;
@@ -253,15 +254,18 @@ const MultiPlayerEngine: React.FC<MultiPlayerEngineProps> = ({ gameState, setGam
           <h2 className="text-3xl font-black uppercase italic mb-4">KẾT THÚC!</h2>
           <div className="space-y-4 mb-10">
              <div className="flex justify-between items-center p-4 bg-blue-50 rounded-2xl">
-                <span className="font-black italic text-slate-400 text-xs uppercase">BẠN:</span>
+                <span className="font-black italic text-slate-400 text-[10px] uppercase">BẠN:</span>
                 <span className="text-3xl font-black text-blue-600">{score}đ</span>
              </div>
-             {Object.entries(opponentScores).map(([id, s]) => (
-               <div key={id} className="flex justify-between items-center p-4 bg-slate-50 rounded-2xl">
-                  <span className="font-black italic text-slate-400 text-xs uppercase">ĐỐI THỦ:</span>
-                  <span className="text-3xl font-black text-slate-700">{s}đ</span>
-               </div>
-             ))}
+             {Object.entries(opponentScores).map(([id, s]) => {
+               const oppName = matchData.opponents?.find(o => o.id === id)?.name || "ĐỐI THỦ";
+               return (
+                 <div key={id} className="flex justify-between items-center p-4 bg-slate-50 rounded-2xl">
+                    <span className="font-black italic text-slate-400 text-[10px] uppercase">{oppName}:</span>
+                    <span className="text-3xl font-black text-slate-700">{s}đ</span>
+                 </div>
+               );
+             })}
           </div>
           <button onClick={onExit} className="w-full py-6 bg-slate-900 text-white rounded-3xl font-black uppercase italic shadow-xl hover:scale-105 transition-all">Quay về sảnh</button>
         </div>
@@ -277,9 +281,14 @@ const MultiPlayerEngine: React.FC<MultiPlayerEngineProps> = ({ gameState, setGam
       <header className="bg-white px-10 py-6 rounded-full shadow-lg mb-6 flex justify-between items-center border-b-8 border-slate-200/50">
         <div className="flex items-center gap-4">
            <div className="bg-blue-600 text-white px-8 py-2.5 rounded-full font-black italic shadow-lg">BẠN: {score}đ</div>
-           {Object.entries(opponentScores).map(([id, s]) => (
-             <div key={id} className="bg-slate-800 text-white px-6 py-2.5 rounded-full font-black italic shadow-md hidden sm:block">ĐỐI THỦ: {s}đ</div>
-           ))}
+           {Object.entries(opponentScores).map(([id, s]) => {
+             const oppName = matchData.opponents?.find(o => o.id === id)?.name || "ĐỐI THỦ";
+             return (
+               <div key={id} className="bg-slate-800 text-white px-6 py-2.5 rounded-full font-black italic shadow-md hidden sm:block">
+                 {oppName}: {s}đ
+               </div>
+             );
+           })}
         </div>
         
         <div className="flex items-center gap-8">
@@ -355,7 +364,7 @@ const MultiPlayerEngine: React.FC<MultiPlayerEngineProps> = ({ gameState, setGam
                    <div className="flex flex-col items-center justify-center h-full">
                       <div className="text-[10rem] mb-8 grayscale opacity-20">📡</div>
                       <p className="text-3xl font-black text-slate-400 uppercase italic text-center leading-tight">
-                        ĐỐI THỦ ĐÃ NHANH TAY HƠN!<br/>
+                        {(matchData.opponents?.find(o => o.id === buzzerWinner)?.name || "ĐỐI THỦ").toUpperCase()} ĐÃ NHANH TAY HƠN!<br/>
                         <span className="text-sm tracking-widest opacity-50 block mt-4 font-bold">Vui lòng đợi kết quả...</span>
                       </p>
                       <div className="mt-12 w-64 h-3 bg-slate-100 rounded-full overflow-hidden border-2 border-white shadow-inner">
