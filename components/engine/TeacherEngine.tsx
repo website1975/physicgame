@@ -32,11 +32,11 @@ const TeacherEngine: React.FC<TeacherEngineProps> = ({ gameState, setGameState, 
   const currentProblem = rounds[0]?.problems[currentProblemIdx];
   const channelRef = useRef<any>(null);
 
-  const reportStatus = (statusStr?: string, isCorrect?: boolean, isFinished: boolean = false) => {
+  const reportProgress = (statusStr?: string, isCorrect?: boolean, isFinished: boolean = false) => {
     if (!channelRef.current) return;
     channelRef.current.send({
       type: 'broadcast',
-      event: 'student_report',
+      event: 'student_score_update',
       payload: { 
         name: playerName, uniqueId, score, isCorrect, status: statusStr, isFinished,
         progress: `Câu ${currentProblemIdx + 1}/${rounds[0]?.problems?.length || 0}`
@@ -49,31 +49,28 @@ const TeacherEngine: React.FC<TeacherEngineProps> = ({ gameState, setGameState, 
   }, [gameState]);
 
   useEffect(() => {
-    const channelName = `room_TEACHER_LIVE_${currentTeacher.id}`;
-    const channel = supabase.channel(channelName);
-
+    const channel = supabase.channel(`room_TEACHER_LIVE_${currentTeacher.id}`);
     channel
-      .on('broadcast', { event: 'teacher_sync_action' }, ({ payload }) => {
-        if (payload.action === 'MOVE' || payload.action === 'RESET' || payload.action === 'START') {
+      .on('broadcast', { event: 'teacher_command' }, ({ payload }) => {
+        if (['MOVE', 'RESET', 'START', 'SYNC'].includes(payload.type)) {
           setCurrentProblemIdx(payload.index);
           setUserAnswer('');
           setFeedback(null);
           setHasBuzzed(false);
           setGameState('ANSWERING');
           setTimeLeft(rounds[0]?.problems[payload.index]?.timeLimit || 40);
-          setTimeout(() => reportStatus("Đang trả lời..."), 300);
-        } else if (payload.action === 'WHITEBOARD') {
+          setTimeout(() => reportProgress("Đang giải bài..."), 300);
+        } else if (payload.type === 'WHITEBOARD') {
           setIsWhiteboardActive(payload.active);
         }
       })
-      .on('broadcast', { event: 'teacher_presence_ping' }, () => {
-        channel.send({ type: 'broadcast', event: 'student_checkin', payload: { name: playerName, uniqueId, grade: studentGrade } });
+      .on('broadcast', { event: 'teacher_ping' }, () => {
+        channel.send({ type: 'broadcast', event: 'student_presence_report', payload: { name: playerName, uniqueId, grade: studentGrade, progress: `Câu ${currentProblemIdx + 1}` } });
       })
       .subscribe();
-
     channelRef.current = channel;
     return () => { supabase.removeChannel(channel); };
-  }, [currentTeacher.id, playerName, uniqueId]);
+  }, [currentTeacher.id, playerName, uniqueId, studentGrade]);
 
   useEffect(() => {
     if (gameState === 'ANSWERING' && timeLeft > 0 && !isWhiteboardActive) {
@@ -83,32 +80,24 @@ const TeacherEngine: React.FC<TeacherEngineProps> = ({ gameState, setGameState, 
   }, [gameState, timeLeft, isWhiteboardActive]);
 
   const submitAnswer = () => {
-    if (gameState !== 'ANSWERING' || !hasBuzzed) return;
+    if (!hasBuzzed) return;
     const correct = (currentProblem?.correctAnswer || "").trim().toUpperCase();
     const isPerfect = userAnswer.trim().toUpperCase() === correct;
     const points = isPerfect ? (isHelpUsed ? 60 : 100) : 0;
-    
     setScore(s => s + points);
-    setFeedback({ isCorrect: isPerfect, text: isPerfect ? 'CHÍNH XÁC! ✨' : `RẤT TIẾC! Đáp án đúng là: ${correct}` });
+    setFeedback({ isCorrect: isPerfect, text: isPerfect ? '✨ CHÍNH XÁC!' : `❌ SAI RỒI! Đáp án đúng: ${correct}` });
     setGameState('FEEDBACK');
-    reportStatus(undefined, isPerfect, true);
-  };
-
-  const handleBuzz = () => {
-    if (hasBuzzed || gameState !== 'ANSWERING') return;
-    setHasBuzzed(true);
-    channelRef.current?.send({ type: 'broadcast', event: 'student_buzzer', payload: { name: playerName, uniqueId } });
-    reportStatus("GIÀNH QUYỀN 🔔");
+    reportProgress(undefined, isPerfect, true);
   };
 
   if (gameState === 'GAME_OVER') {
     return (
-      <div className="min-h-screen bg-slate-950 flex items-center justify-center p-6 text-center">
+      <div className="min-h-screen bg-slate-950 flex items-center justify-center text-center p-6">
         <div className="bg-white rounded-[4rem] p-12 shadow-2xl max-w-md w-full border-b-[15px] border-emerald-600 animate-in zoom-in">
           <div className="text-8xl mb-6">🏆</div>
-          <h2 className="text-3xl font-black uppercase italic mb-4">TIẾT DẠY KẾT THÚC</h2>
+          <h2 className="text-3xl font-black uppercase italic mb-4">HOÀN THÀNH TIẾT DẠY</h2>
           <div className="text-6xl font-black text-emerald-600 mb-10">{score}đ</div>
-          <button onClick={onExit} className="w-full py-6 bg-slate-900 text-white rounded-3xl font-black uppercase italic shadow-xl">Quay về sảnh</button>
+          <button onClick={onExit} className="w-full py-6 bg-slate-900 text-white rounded-3xl font-black uppercase italic shadow-xl">Về sảnh</button>
         </div>
       </div>
     );
@@ -123,55 +112,25 @@ const TeacherEngine: React.FC<TeacherEngineProps> = ({ gameState, setGameState, 
         </div>
         <div className="flex items-center gap-8">
            <div className="text-4xl font-black italic tabular-nums text-slate-900">{timeLeft}s</div>
-           <button onClick={onExit} className="w-10 h-10 bg-red-50 text-red-500 rounded-xl font-black text-xs hover:bg-red-500 hover:text-white transition-all">✕</button>
+           <button onClick={onExit} className="w-10 h-10 bg-red-50 text-red-500 rounded-xl font-black">✕</button>
         </div>
       </header>
-
-      <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-8 min-h-0 overflow-hidden relative">
-        {isWhiteboardActive && (
-          <div className="absolute inset-0 z-50 bg-slate-950 rounded-[3.5rem] p-4 shadow-2xl animate-in zoom-in">
-             <Whiteboard isTeacher={false} channel={channelRef.current} roomCode="TEACHER_ROOM" />
-             <div className="absolute bottom-8 left-1/2 -translate-x-1/2 bg-white/10 backdrop-blur-md px-6 py-2 rounded-full border border-white/20">
-                <span className="text-white font-black uppercase italic text-[10px] tracking-widest">Thầy đang giảng bài...</span>
-             </div>
-          </div>
-        )}
-
-        <div className="lg:col-span-7 overflow-y-auto no-scrollbar h-full">
-           <ProblemCard problem={currentProblem} isHelpUsed={isHelpUsed} isPaused={gameState !== 'ANSWERING' || isWhiteboardActive} />
-        </div>
-        <div className="lg:col-span-5 bg-white rounded-[3.5rem] p-10 shadow-2xl flex flex-col border-4 border-slate-50 relative overflow-hidden h-full">
+      <div className="flex-1 grid grid-cols-12 gap-8 min-h-0 relative">
+        {isWhiteboardActive && <div className="absolute inset-0 z-50 bg-slate-950 rounded-[3.5rem] p-4 shadow-2xl animate-in zoom-in"><Whiteboard isTeacher={false} channel={channelRef.current} roomCode="TEACHER_ROOM" /><div className="absolute bottom-8 left-1/2 -translate-x-1/2 bg-white/10 backdrop-blur-md px-6 py-2 rounded-full border border-white/20 text-white font-black italic text-[10px] uppercase">Thầy đang giảng bài...</div></div>}
+        <div className="col-span-7 h-full"><ProblemCard problem={currentProblem} isHelpUsed={isHelpUsed} isPaused={gameState !== 'ANSWERING' || isWhiteboardActive} /></div>
+        <div className="col-span-5 bg-white rounded-[3.5rem] p-10 shadow-2xl flex flex-col border-4 border-slate-50 h-full">
            {gameState === 'ANSWERING' ? (
              <div className="flex flex-col h-full">
-                <div className="flex justify-between items-center mb-6">
-                   <h3 className="text-[10px] font-black text-slate-400 uppercase italic">Làm bài:</h3>
-                   <button 
-                     onClick={handleBuzz} 
-                     disabled={hasBuzzed}
-                     className={`px-6 py-2 rounded-xl font-black uppercase italic text-[10px] transition-all ${hasBuzzed ? 'bg-amber-100 text-amber-600 border border-amber-200' : 'bg-amber-500 text-white shadow-lg border-b-4 border-amber-700'}`}
-                   >
-                     {hasBuzzed ? '🔔 ĐÃ GIÀNH QUYỀN' : '🛎️ GIÀNH QUYỀN'}
-                   </button>
-                </div>
-                <div className="flex-1 overflow-y-auto no-scrollbar">
-                   <AnswerInput problem={currentProblem} value={userAnswer} onChange={setUserAnswer} onSubmit={submitAnswer} disabled={false} />
-                </div>
-                {hasBuzzed && (
-                  <button onClick={submitAnswer} disabled={!userAnswer} className="w-full py-6 bg-blue-600 text-white rounded-3xl font-black italic text-xl mt-8 shadow-xl border-b-8 border-blue-800 active:translate-y-1 active:border-b-0">XÁC NHẬN ✅</button>
-                )}
+                <div className="flex justify-between items-center mb-6"><h3 className="text-[10px] font-black text-slate-400 uppercase italic">Làm bài:</h3><button onClick={() => { setHasBuzzed(true); reportProgress("🛎️ GIÀNH QUYỀN!"); }} disabled={hasBuzzed} className={`px-6 py-2 rounded-xl font-black text-[10px] uppercase italic transition-all ${hasBuzzed ? 'bg-amber-100 text-amber-600 border border-amber-200' : 'bg-red-600 text-white shadow-lg border-b-4 border-red-800'}`}>{hasBuzzed ? '🔔 ĐÃ GIÀNH QUYỀN' : 'GIÀNH QUYỀN 🛎️'}</button></div>
+                <div className="flex-1 overflow-y-auto no-scrollbar"><AnswerInput problem={currentProblem} value={userAnswer} onChange={setUserAnswer} onSubmit={submitAnswer} disabled={false} /></div>
+                {hasBuzzed && <button onClick={submitAnswer} disabled={!userAnswer} className="w-full py-6 bg-blue-600 text-white rounded-3xl font-black italic text-xl mt-8 shadow-xl border-b-8 border-blue-800 active:translate-y-1 active:border-b-0">XÁC NHẬN ✅</button>}
              </div>
            ) : (
              <div className="flex flex-col h-full animate-in slide-in-from-right">
-                <div className={`text-4xl font-black uppercase italic mb-6 ${feedback?.isCorrect ? 'text-emerald-500' : 'text-rose-500'}`}>
-                   {feedback?.isCorrect ? '✨ CHÍNH XÁC!' : '💥 RẤT TIẾC!'}
-                </div>
-                <div className="bg-slate-50 p-8 rounded-[2.5rem] border-2 border-slate-100 italic font-bold text-slate-700 mb-8">
-                   <LatexRenderer content={feedback?.text || ""} />
-                </div>
-                <div className="flex-1 bg-emerald-50/50 p-8 rounded-[3rem] border-2 border-emerald-100 overflow-y-auto no-scrollbar leading-relaxed">
-                   <LatexRenderer content={currentProblem?.explanation || ""} />
-                </div>
-                <div className="mt-8 bg-blue-600 text-white p-6 rounded-3xl text-center font-black uppercase italic animate-pulse shadow-lg">⏳ Chờ Thầy chuyển câu tiếp theo...</div>
+                <div className={`text-4xl font-black uppercase italic mb-6 ${feedback?.isCorrect ? 'text-emerald-500' : 'text-rose-500'}`}>{feedback?.isCorrect ? '✨ CHÍNH XÁC!' : '💥 RẤT TIẾC!'}</div>
+                <div className="bg-slate-50 p-8 rounded-[2.5rem] border-2 border-slate-100 italic font-bold text-slate-700 mb-8"><LatexRenderer content={feedback?.text || ""} /></div>
+                <div className="flex-1 bg-emerald-50/50 p-8 rounded-[3rem] border-2 border-emerald-100 overflow-y-auto no-scrollbar italic leading-relaxed text-slate-600"><LatexRenderer content={currentProblem?.explanation || ""} /></div>
+                <div className="mt-8 bg-blue-600 text-white p-6 rounded-3xl text-center font-black uppercase italic animate-pulse shadow-lg">⏳ Chờ Thầy chuyển câu...</div>
              </div>
            )}
         </div>
