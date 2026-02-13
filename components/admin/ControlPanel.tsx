@@ -39,16 +39,13 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
     setStudentRegistry({});
     setCurrentQuestionIdx(-1);
     setIsWhiteboardActive(false);
-    
     if (loadedSetId) {
        fetchSetData(loadedSetId).then(data => setCurrentSetGrade(data.grade));
     }
   }, [liveSessionKey, teacherId, loadedSetId]);
 
   useEffect(() => {
-    if (channelRef.current) {
-      supabase.removeChannel(channelRef.current);
-    }
+    if (channelRef.current) supabase.removeChannel(channelRef.current);
     
     const channelName = `room_TEACHER_LIVE_${teacherId}`;
     const channel = supabase.channel(channelName);
@@ -57,57 +54,53 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
       .on('presence', { event: 'sync' }, () => {
         const state = channel.presenceState();
         const onlineKeys = Object.keys(state);
-        
         setStudentRegistry(prev => {
           const next = { ...prev };
           onlineKeys.forEach(key => {
             const presenceData = state[key][0] as any;
             const [name, uid] = key.split('::');
             if (!next[key]) {
-              next[key] = { 
-                name, 
-                uniqueId: uid,
-                score: 0, 
-                progress: 'Vừa vào phòng', 
-                lastStatus: 'Đang chờ...', 
-                isOnline: true, 
-                grade: presenceData.grade 
-              };
+              next[key] = { name, uniqueId: uid, score: 0, progress: 'Đang kết nối', lastStatus: 'Online', isOnline: true, grade: presenceData.grade };
             } else {
               next[key].isOnline = true;
             }
           });
-          // Đánh dấu offline cho những người không còn trong presence
-          Object.keys(next).forEach(key => { 
-            if (!onlineKeys.includes(key)) next[key].isOnline = false; 
-          });
+          Object.keys(next).forEach(key => { if (!onlineKeys.includes(key)) next[key].isOnline = false; });
           return next;
         });
       })
-      .on('broadcast', { event: 'student_report' }, ({ payload }) => {
-        const registryKey = `${payload.name}::${payload.uniqueId}`;
+      .on('broadcast', { event: 'student_checkin' }, ({ payload }) => {
+        const key = `${payload.name}::${payload.uniqueId}`;
         setStudentRegistry(prev => ({
           ...prev,
-          [registryKey]: {
-            ...prev[registryKey],
+          [key]: {
+            ...(prev[key] || { score: 0, progress: 'Đang làm...', lastStatus: 'Đã vào' }),
             name: payload.name,
             uniqueId: payload.uniqueId,
-            isOnline: true,
-            score: payload.score ?? prev[registryKey]?.score ?? 0,
-            progress: payload.progress || prev[registryKey]?.progress || '...',
+            grade: payload.grade,
+            isOnline: true
+          }
+        }));
+      })
+      .on('broadcast', { event: 'student_report' }, ({ payload }) => {
+        const key = `${payload.name}::${payload.uniqueId}`;
+        setStudentRegistry(prev => ({
+          ...prev,
+          [key]: {
+            ...prev[key],
+            score: payload.score ?? prev[key]?.score ?? 0,
+            progress: payload.progress || prev[key]?.progress || '...',
             lastStatus: payload.status || (payload.isCorrect ? 'ĐÚNG ✅' : 'SAI ❌'),
-            hasAnswered: payload.status ? false : true
+            hasAnswered: payload.isFinished ? true : false,
+            isOnline: true
           }
         }));
       })
       .on('broadcast', { event: 'student_buzzer' }, ({ payload }) => {
-        const registryKey = `${payload.name}::${payload.uniqueId}`;
+        const key = `${payload.name}::${payload.uniqueId}`;
         setStudentRegistry(prev => ({
           ...prev,
-          [registryKey]: {
-            ...prev[registryKey],
-            buzzedAt: Date.now()
-          }
+          [key]: { ...prev[key], buzzedAt: Date.now(), isOnline: true }
         }));
       })
       .on('broadcast', { event: 'ask_session_state' }, () => {
@@ -131,55 +124,7 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
     return () => { if (channelRef.current) supabase.removeChannel(channelRef.current); };
   }, [teacherId, liveSessionKey, currentQuestionIdx, loadedSetId, loadedSetTitle, isWhiteboardActive, currentSetGrade]);
 
-  const handleStartGame = async () => {
-    if (!loadedSetId) { alert("Chọn bộ đề trước khi bắt đầu!"); return; }
-    setIsStarting(true);
-    try {
-      await assignSetToRoom(teacherId, 'TEACHER_ROOM', loadedSetId);
-      setCurrentQuestionIdx(0);
-      resetAllStatus('Đang làm câu 1...');
-      channelRef.current?.send({
-        type: 'broadcast',
-        event: 'teacher_start_game',
-        payload: { 
-          setId: loadedSetId, 
-          title: loadedSetTitle || '', 
-          grade: currentSetGrade,
-          currentQuestionIndex: 0 
-        }
-      });
-    } catch (err) { alert("Lỗi kết nối"); } finally { setIsStarting(false); }
-  };
-
-  const handleNextQuestion = () => {
-    const nextIdx = currentQuestionIdx + 1;
-    setCurrentQuestionIdx(nextIdx);
-    resetAllStatus(`Đang làm câu ${nextIdx + 1}...`);
-    channelRef.current?.send({ 
-      type: 'broadcast', 
-      event: 'teacher_next_question', 
-      payload: { nextIndex: nextIdx } 
-    });
-  };
-
-  const handlePrevQuestion = () => {
-    const prevIdx = Math.max(0, currentQuestionIdx - 1);
-    setCurrentQuestionIdx(prevIdx);
-    resetAllStatus(`Quay lại câu ${prevIdx + 1}...`);
-    channelRef.current?.send({ 
-      type: 'broadcast', 
-      event: 'teacher_next_question', 
-      payload: { nextIndex: prevIdx } 
-    });
-  };
-
-  const toggleWhiteboard = () => {
-    const newState = !isWhiteboardActive;
-    setIsWhiteboardActive(newState);
-    channelRef.current?.send({ type: 'broadcast', event: 'teacher_toggle_whiteboard', payload: { active: newState } });
-  };
-
-  const resetAllStatus = (msg: string = 'Đang làm bài...') => {
+  const resetLocalStatuses = (msg: string) => {
     setStudentRegistry(prev => {
       const next = { ...prev };
       Object.keys(next).forEach(k => {
@@ -191,22 +136,50 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
     });
   };
 
+  const handleStartGame = async () => {
+    if (!loadedSetId) { alert("Chọn bộ đề!"); return; }
+    setIsStarting(true);
+    try {
+      await assignSetToRoom(teacherId, 'TEACHER_ROOM', loadedSetId);
+      setCurrentQuestionIdx(0);
+      resetLocalStatuses('Bắt đầu câu 1');
+      channelRef.current?.send({
+        type: 'broadcast',
+        event: 'teacher_start_game',
+        payload: { setId: loadedSetId, title: loadedSetTitle || '', grade: currentSetGrade, currentQuestionIndex: 0 }
+      });
+    } catch (err) { alert("Lỗi kết nối"); } finally { setIsStarting(false); }
+  };
+
+  const handleNextQuestion = () => {
+    const nextIdx = currentQuestionIdx + 1;
+    setCurrentQuestionIdx(nextIdx);
+    resetLocalStatuses(`Câu ${nextIdx + 1}`);
+    channelRef.current?.send({ type: 'broadcast', event: 'teacher_next_question', payload: { nextIndex: nextIdx } });
+  };
+
+  const handlePrevQuestion = () => {
+    const prevIdx = Math.max(0, currentQuestionIdx - 1);
+    setCurrentQuestionIdx(prevIdx);
+    resetLocalStatuses(`Quay lại câu ${prevIdx + 1}`);
+    channelRef.current?.send({ type: 'broadcast', event: 'teacher_next_question', payload: { nextIndex: prevIdx } });
+  };
+
   const handleResetCurrent = () => {
-    resetAllStatus(`Làm lại câu ${currentQuestionIdx + 1}...`);
-    channelRef.current?.send({ 
-      type: 'broadcast', 
-      event: 'teacher_reset_question', 
-      payload: { index: currentQuestionIdx } 
-    });
+    resetLocalStatuses('Làm lại câu này');
+    channelRef.current?.send({ type: 'broadcast', event: 'teacher_reset_question', payload: { index: currentQuestionIdx } });
+  };
+
+  const toggleWhiteboard = () => {
+    const newState = !isWhiteboardActive;
+    setIsWhiteboardActive(newState);
+    channelRef.current?.send({ type: 'broadcast', event: 'teacher_toggle_whiteboard', payload: { active: newState } });
   };
 
   const studentsList = Object.values(studentRegistry).sort((a, b) => {
-    // 1. Ưu tiên online
     if (a.isOnline !== b.isOnline) return a.isOnline ? -1 : 1;
-    // 2. Ưu tiên người giành chuông mà chưa trả lời
     if (a.buzzedAt && !a.hasAnswered && (!b.buzzedAt || b.hasAnswered)) return -1;
     if (b.buzzedAt && !b.hasAnswered && (!a.buzzedAt || a.hasAnswered)) return 1;
-    // 3. Theo điểm số
     return b.score - a.score;
   });
 
@@ -227,8 +200,8 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
         <div className="flex items-center gap-3">
            {currentQuestionIdx >= 0 && (
               <div className="flex gap-2 mr-4">
-                 <button onClick={handlePrevQuestion} className="w-12 h-12 bg-slate-100 text-slate-400 rounded-xl flex items-center justify-center hover:bg-slate-200 transition-all text-xs border-b-4 border-slate-200 active:border-b-0 active:translate-y-1">◀</button>
-                 <button onClick={handleNextQuestion} className="w-12 h-12 bg-slate-100 text-slate-400 rounded-xl flex items-center justify-center hover:bg-slate-200 transition-all text-xs border-b-4 border-slate-200 active:border-b-0 active:translate-y-1">▶</button>
+                 <button onClick={handlePrevQuestion} className="w-12 h-12 bg-slate-100 text-slate-400 rounded-xl flex items-center justify-center hover:bg-slate-200 transition-all text-xs border-b-4 border-slate-200">◀</button>
+                 <button onClick={handleNextQuestion} className="w-12 h-12 bg-slate-100 text-slate-400 rounded-xl flex items-center justify-center hover:bg-slate-200 transition-all text-xs border-b-4 border-slate-200">▶</button>
               </div>
            )}
            <button onClick={toggleWhiteboard} className={`px-8 py-5 rounded-2xl font-black uppercase italic shadow-lg transition-all flex items-center gap-3 border-b-4 ${isWhiteboardActive ? 'bg-emerald-600 text-white border-emerald-800' : 'bg-slate-800 text-white border-slate-950'}`}>
