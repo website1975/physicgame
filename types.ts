@@ -37,7 +37,7 @@ export interface Teacher {
   tengv: string;
   monday: string;
   pass: string;
-  role: 'ADMIN' | 'TEACHER'; // Trường mới để phân quyền
+  role: 'ADMIN' | 'TEACHER';
   email?: string;
 }
 
@@ -81,9 +81,11 @@ export interface GameSettings {
   maxPlayers: number;
 }
 
-export type AdminTab = 'EDITOR' | 'CONTROL' | 'CLOUD' | 'LAB' | 'MANAGEMENT'; 
+// Xóa tab CONTROL
+export type AdminTab = 'EDITOR' | 'CLOUD' | 'LAB' | 'MANAGEMENT';
 
-export type GameState = 'LOBBY' | 'ROOM_SELECTION' | 'SET_SELECTION' | 'WAITING_ROOM' | 'ADMIN' | 'ROUND_INTRO' | 'STARTING_ROUND' | 'WAITING_FOR_BUZZER' | 'ANSWERING' | 'FEEDBACK' | 'LECTURING' | 'GAME_OVER' | 'ENTER_CODE' | 'STUDENT_SETUP' | 'TEACHER_LOGIN' | 'WAITING_FOR_PLAYERS' | 'KEYWORD_SELECTION';
+// Xóa ENTER_CODE vì không còn nhập mã phòng GV
+export type GameState = 'LOBBY' | 'ROOM_SELECTION' | 'SET_SELECTION' | 'WAITING_ROOM' | 'ADMIN' | 'ROUND_INTRO' | 'STARTING_ROUND' | 'STARTING_QUESTION' | 'STARTING_ROUND_REVEAL' | 'WAITING_FOR_BUZZER' | 'ANSWERING' | 'FEEDBACK' | 'GAME_OVER' | 'STUDENT_SETUP' | 'TEACHER_LOGIN' | 'WAITING_FOR_PLAYERS' | 'KEYWORD_SELECTION';
 
 export interface MatchData {
   setId: string;
