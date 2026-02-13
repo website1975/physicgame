@@ -93,7 +93,6 @@ const SoloEngine: React.FC<SoloEngineProps> = ({ gameState, setGameState, matchD
     const correct = (currentProblem?.correctAnswer || "").trim().toUpperCase();
     const isPerfect = userAnswer.trim().toUpperCase() === correct;
     
-    // Logic tính điểm theo yêu cầu mới
     let points = isPerfect 
       ? (isHelpUsed ? 60 : 100) 
       : (isHelpUsed ? -40 : 0);
@@ -228,7 +227,7 @@ const SoloEngine: React.FC<SoloEngineProps> = ({ gameState, setGameState, matchD
 
       <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-8 min-h-0">
         <div className="lg:col-span-7 h-full">
-           <ProblemCard problem={currentProblem} isHelpUsed={isHelpUsed} />
+           <ProblemCard problem={currentProblem} isHelpUsed={isHelpUsed} isPaused={gameState !== 'ANSWERING'} />
         </div>
         
         <div className="lg:col-span-5 bg-white rounded-[3.5rem] p-10 shadow-2xl flex flex-col border-4 border-slate-50 relative overflow-hidden">
