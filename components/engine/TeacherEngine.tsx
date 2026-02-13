@@ -33,7 +33,6 @@ const TeacherEngine: React.FC<TeacherEngineProps> = ({ gameState, setGameState, 
   const currentProblem = currentRound?.problems[currentProblemIdx];
   const channelRef = useRef<any>(null);
 
-  // Tự động chuyển sang ANSWERING nếu đang ở ROUND_INTRO trong luồng Teacher Live
   useEffect(() => {
     if (gameState === 'ROUND_INTRO') {
       setGameState('ANSWERING');
@@ -52,6 +51,9 @@ const TeacherEngine: React.FC<TeacherEngineProps> = ({ gameState, setGameState, 
       })
       .on('broadcast', { event: 'teacher_toggle_whiteboard' }, ({ payload }) => {
         setIsWhiteboardActive(payload.active);
+      })
+      .on('broadcast', { event: 'teacher_reset_buzzers' }, () => {
+        setHasBuzzed(false);
       })
       .subscribe(async (status) => {
         if (status === 'SUBSCRIBED') await channel.track({ online: true });
@@ -107,7 +109,7 @@ const TeacherEngine: React.FC<TeacherEngineProps> = ({ gameState, setGameState, 
       setCurrentProblemIdx(index);
       setUserAnswer('');
       setFeedback(null);
-      setHasBuzzed(false);
+      setHasBuzzed(false); // Quan trọng: Reset chuông cho câu hỏi mới
       setIsHelpUsed(false);
       setTimeLeft(currentRound.problems[index].timeLimit || 40);
       setGameState('ANSWERING');
