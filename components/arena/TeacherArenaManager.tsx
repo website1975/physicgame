@@ -23,11 +23,9 @@ const TeacherArenaManager: React.FC<TeacherArenaManagerProps> = ({
   const [loading, setLoading] = useState(true);
   const matchLaunchedRef = useRef(false);
 
-  // Bước 1: Tìm đề đã gán
   const checkAssignment = async () => {
     try {
       const sets = await getRoomAssignmentsWithMeta(currentTeacher.id, 'TEACHER_LIVE');
-      // Lọc đề theo khối lớp của HS
       const validSet = sets.find(s => String(s.grade) === String(studentGrade));
       setAssignedSet(validSet || null);
     } catch (e) { 
@@ -42,11 +40,10 @@ const TeacherArenaManager: React.FC<TeacherArenaManagerProps> = ({
     if (currentTeacher) checkAssignment(); 
   }, [currentTeacher?.id, studentGrade]);
 
-  // Bước 2: Kết nối và chờ lệnh từ GV
   useEffect(() => {
     if (gameState === 'WAITING_FOR_PLAYERS' && currentTeacher) {
-      // Kênh chung: room_TEACHER_LIVE_{teacherId}
-      const channel = supabase.channel(`room_TEACHER_LIVE_${currentTeacher.id}`, { 
+      const channelName = `room_TEACHER_LIVE_${currentTeacher.id}`;
+      const channel = supabase.channel(channelName, { 
         config: { presence: { key: `${playerName}::${uniqueId}` } } 
       });
 
@@ -57,12 +54,8 @@ const TeacherArenaManager: React.FC<TeacherArenaManagerProps> = ({
           setPresentStudents([...new Set(names)].sort());
         })
         .on('broadcast', { event: 'teacher_command' }, async ({ payload }) => {
-          // Khi GV nhấn "BẮT ĐẦU" hoặc "SYNC"
           if ((payload.type === 'START' || payload.type === 'SYNC') && !matchLaunchedRef.current) {
-            console.log("[LOBBY] Nhận lệnh START từ GV");
             matchLaunchedRef.current = true;
-            
-            // Lấy dữ liệu đầy đủ của bộ đề
             try {
               const data = await fetchSetData(payload.setId);
               onStartMatch({ 
@@ -84,12 +77,12 @@ const TeacherArenaManager: React.FC<TeacherArenaManagerProps> = ({
         .subscribe(async (status) => {
           if (status === 'SUBSCRIBED') {
             await channel.track({ online: true, role: 'student' });
-            // Báo cáo sự hiện diện ngay lập tức
             channel.send({ 
               type: 'broadcast', 
               event: 'student_presence_report', 
               payload: { name: playerName, uniqueId, grade: studentGrade, progress: 'Đang ở sảnh chờ' } 
             });
+            channel.send({ type: 'broadcast', event: 'request_sync' });
           }
         });
 
