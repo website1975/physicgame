@@ -45,10 +45,11 @@ const ExamLibrary: React.FC<ExamLibraryProps> = ({
   const [isCreatingSample, setIsCreatingSample] = useState(false);
 
   const arenaRooms = [
-    { id: '1', name: 'Phòng đơn', code: 'ARENA_A', emoji: '🛡️' },
-    { id: '2', name: 'Phòng đôi', code: 'ARENA_B', emoji: '⚔️' },
-    { id: '3', name: 'Phòng 3', code: 'ARENA_C', emoji: '🏹' },
-    { id: '4', name: 'Phòng 4', code: 'ARENA_D', emoji: '🔱' },
+    { id: '1', name: 'Phòng đơn', code: 'ARENA_A', emoji: '🛡️', type: 'self' },
+    { id: '2', name: 'Phòng đôi', code: 'ARENA_B', emoji: '⚔️', type: 'self' },
+    { id: '3', name: 'Phòng 3', code: 'ARENA_C', emoji: '🏹', type: 'self' },
+    { id: '4', name: 'Phòng 4', code: 'ARENA_D', emoji: '🔱', type: 'self' },
+    { id: '5', name: 'Phòng GV LIVE', code: 'TEACHER_LIVE', emoji: '👨‍🏫', type: 'live' },
   ];
 
   const fetchAllAssignments = async () => {
@@ -183,11 +184,11 @@ const ExamLibrary: React.FC<ExamLibraryProps> = ({
       {distributeTarget && (
         <div className="fixed inset-0 z-[999] flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-sm" onClick={() => setDistributeTarget(null)}></div>
-          <div className="bg-white rounded-[3rem] p-10 shadow-2xl max-w-xl w-full relative z-10 border-4 border-slate-100 animate-in slide-in-from-bottom-8">
-            <h3 className="text-3xl font-black text-slate-800 uppercase italic mb-2 text-center">Phân phối Arena Tự học</h3>
-            <p className="text-slate-400 font-bold text-center mb-10 uppercase text-xs italic">Học sinh có thể tự luyện bộ đề này tại các phòng:</p>
+          <div className="bg-white rounded-[4rem] p-10 shadow-2xl max-w-2xl w-full relative z-10 border-4 border-slate-100 animate-in slide-in-from-bottom-8">
+            <h3 className="text-3xl font-black text-slate-800 uppercase italic mb-2 text-center">Gán Đề Vào Arena</h3>
+            <p className="text-slate-400 font-bold text-center mb-10 uppercase text-xs italic">Chọn các phòng mà bạn muốn triển khai bộ đề này:</p>
             
-            <div className="grid grid-cols-2 gap-4 mb-10">
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-10 max-h-[50vh] overflow-y-auto no-scrollbar p-1">
               {arenaRooms.map(room => {
                 const isAssigned = distributeTarget.assignedRooms.includes(room.code);
                 return (
@@ -195,17 +196,20 @@ const ExamLibrary: React.FC<ExamLibraryProps> = ({
                     key={room.id}
                     onClick={() => handleToggleRoom(room.code)}
                     disabled={isToggling}
-                    className={`p-8 rounded-[2.5rem] border-4 transition-all text-left relative group ${isAssigned ? 'bg-blue-600 border-blue-400 text-white shadow-lg' : 'bg-slate-50 border-slate-100 text-slate-800 hover:border-blue-200'} ${isToggling ? 'opacity-70 cursor-wait' : ''}`}
+                    className={`p-6 rounded-[2.5rem] border-4 transition-all text-left relative group flex flex-col items-center justify-center ${isAssigned ? 'bg-blue-600 border-blue-400 text-white shadow-lg' : 'bg-slate-50 border-slate-100 text-slate-800 hover:border-blue-200'} ${isToggling ? 'opacity-70 cursor-wait' : ''}`}
                   >
-                    {isAssigned && <div className="absolute top-6 right-6 bg-white text-blue-600 w-8 h-8 rounded-full flex items-center justify-center text-sm font-black shadow-lg animate-in zoom-in">✓</div>}
-                    <div className="text-4xl mb-4">{room.emoji}</div>
-                    <div className="font-black text-xl uppercase italic leading-none mb-1">{room.name}</div>
-                    <div className={`text-[10px] font-black uppercase tracking-widest ${isAssigned ? 'text-blue-200' : 'text-slate-400'}`}>Mã: {room.code}</div>
+                    {isAssigned && <div className="absolute top-4 right-4 bg-white text-blue-600 w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-black shadow-lg animate-in zoom-in">✓</div>}
+                    <div className="text-4xl mb-3">{room.emoji}</div>
+                    <div className="font-black text-sm uppercase italic leading-none mb-1 text-center">{room.name}</div>
+                    <div className={`text-[8px] font-black uppercase tracking-widest ${isAssigned ? 'text-blue-200' : 'text-slate-400'}`}>Mã: {room.code}</div>
+                    {room.type === 'live' && (
+                      <div className="mt-2 bg-rose-500 text-white px-2 py-0.5 rounded-full text-[7px] font-black uppercase italic shadow-sm">Dành cho GV</div>
+                    )}
                   </button>
                 );
               })}
             </div>
-            <button onClick={() => setDistributeTarget(null)} className="w-full py-5 bg-slate-900 text-white font-black rounded-2xl uppercase italic text-sm">Hoàn tất thiết lập</button>
+            <button onClick={() => { setDistributeTarget(null); onRefresh(); }} className="w-full py-5 bg-slate-900 text-white font-black rounded-2xl uppercase italic text-sm border-b-8 border-slate-800 active:translate-y-1 active:border-b-0">Hoàn tất thiết lập</button>
           </div>
         </div>
       )}
@@ -235,14 +239,11 @@ const ExamLibrary: React.FC<ExamLibraryProps> = ({
              <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center gap-2">
                   <span className="px-3 py-1 bg-blue-600 text-white text-[9px] font-black uppercase rounded-lg shadow-sm">{set.topic || 'BÀI TẬP'}</span>
-                  <span className="text-[10px] font-black text-slate-300 uppercase tracking-widest">K{set.grade || '10'}</span>
+                  <span className="text-[10px] font-black text-slate-300 uppercase tracking-widest italic">K{set.grade || '10'}</span>
                 </div>
-                <button 
-                  onClick={() => { onLoadSet(set.id, set.title).then(() => onLive(set.id, set.title)); }}
-                  className="px-4 py-2 bg-rose-600 text-white text-[9px] font-black uppercase rounded-full shadow-lg hover:bg-rose-500 hover:scale-105 transition-all animate-pulse flex items-center gap-2"
-                >
-                  ⚡ DẠY LIVE
-                </button>
+                {assignedRoomsForSet.includes('TEACHER_LIVE') && (
+                  <span className="px-3 py-1 bg-rose-500 text-white text-[9px] font-black uppercase rounded-full shadow-lg animate-pulse">🔥 LIVE READY</span>
+                )}
              </div>
 
              <div className="flex justify-between items-start gap-4 mb-4">
