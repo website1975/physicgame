@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Round, Teacher, QuestionType } from '../../types';
-import { supabase, fetchSetData, getRoomAssignmentsWithMeta } from '../../services/supabaseService';
+import { Round, Teacher } from '../../types';
+import { supabase, getRoomAssignmentsWithMeta } from '../../services/supabaseService';
 import Whiteboard from '../Whiteboard';
 
 interface ControlPanelProps {
@@ -19,8 +19,6 @@ interface StudentSessionInfo {
   progress: string;
   lastStatus: string;
   isOnline: boolean;
-  buzzedAt?: number;
-  hasAnswered?: boolean;
   grade?: string; 
   uniqueId: string;
 }
@@ -33,6 +31,7 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
   const [isWhiteboardActive, setIsWhiteboardActive] = useState(false);
   const [assignedSet, setAssignedSet] = useState<any>(null);
   const channelRef = useRef<any>(null);
+  const heartbeatRef = useRef<any>(null);
 
   const refreshAssignedSet = async () => {
     try {
@@ -40,29 +39,28 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
       if (sets && sets.length > 0) {
         const sorted = [...sets].sort((a, b) => new Date(b.assigned_at).getTime() - new Date(a.assigned_at).getTime());
         setAssignedSet(sorted[0]);
-      } else {
-        setAssignedSet(null);
-      }
+      } else { setAssignedSet(null); }
     } catch (e) { console.error(e); }
   };
 
   useEffect(() => { refreshAssignedSet(); }, [teacherId, loadedSetId]);
 
-  // CƠ CHẾ ĐIỂM DANH LẠI KHI GV QUAY LẠI TAB
+  // HEARTBEAT LOGIC: Phát tín hiệu SYNC liên tục để máy HS không bao giờ bị kẹt
   useEffect(() => {
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === 'visible' && channelRef.current) {
-        // GV quay lại tab -> Phát tín hiệu yêu cầu HS báo danh để làm mới danh sách
-        channelRef.current.send({ type: 'broadcast', event: 'teacher_ping' });
-      }
-    };
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
-  }, []);
+    if (currentQuestionIdx >= 0 && assignedSet && channelRef.current) {
+      if (heartbeatRef.current) clearInterval(heartbeatRef.current);
+      heartbeatRef.current = setInterval(() => {
+        channelRef.current.send({
+          type: 'broadcast',
+          event: 'teacher_command',
+          payload: { type: 'SYNC', setId: assignedSet.id, index: currentQuestionIdx, isWhiteboardActive }
+        });
+      }, 2000);
+    }
+    return () => { if (heartbeatRef.current) clearInterval(heartbeatRef.current); };
+  }, [currentQuestionIdx, assignedSet, isWhiteboardActive]);
 
   useEffect(() => {
-    if (channelRef.current) supabase.removeChannel(channelRef.current);
-    
     const channelName = `room_TEACHER_LIVE_${teacherId}`;
     const channel = supabase.channel(channelName);
     
@@ -91,10 +89,7 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
       })
       .on('broadcast', { event: 'student_score_update' }, ({ payload }) => {
         const key = `${payload.name}::${payload.uniqueId}`;
-        setStudentRegistry(prev => ({
-          ...prev,
-          [key]: { ...prev[key], ...payload, isOnline: true }
-        }));
+        setStudentRegistry(prev => ({ ...prev, [key]: { ...prev[key], ...payload, isOnline: true } }));
       })
       .on('broadcast', { event: 'request_sync' }, () => {
         if (currentQuestionIdx >= 0 && assignedSet) {
@@ -105,11 +100,7 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
           });
         }
       })
-      .subscribe(async (status) => {
-        if (status === 'SUBSCRIBED') {
-          channel.send({ type: 'broadcast', event: 'teacher_ping' });
-        }
-      });
+      .subscribe();
 
     channelRef.current = channel;
     return () => { if (channelRef.current) supabase.removeChannel(channelRef.current); };
@@ -135,11 +126,11 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
         <div className="flex items-center gap-6">
            <div className="bg-slate-900 text-white p-5 rounded-[2rem] text-center min-w-[120px] shadow-xl border-b-8 border-slate-800">
               <span className="text-[9px] font-black uppercase text-blue-400 block mb-1">MÃ PHÒNG</span>
-              <div className="text-3xl font-black italic tracking-widest">{teacherMaGV}</div>
+              <div className="text-3xl font-black italic tracking-widest leading-none">{teacherMaGV}</div>
            </div>
            <div>
               <h3 className="text-2xl font-black text-slate-800 uppercase italic">ĐIỀU PHỐI TIẾT DẠY</h3>
-              <p className="text-xs font-bold text-blue-600 italic uppercase">{assignedSet ? assignedSet.title : '⚠️ CHƯA GÁN ĐỀ LIVE'}</p>
+              <p className="text-xs font-bold text-blue-600 italic uppercase leading-none mt-2">{assignedSet ? assignedSet.title : '⚠️ CHƯA GÁN ĐỀ LIVE'}</p>
            </div>
         </div>
 
