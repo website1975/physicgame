@@ -13,6 +13,7 @@ interface ExamLibraryProps {
   onDeleteSet: (setId: string, title: string) => Promise<boolean>;
   onDistribute: (setId: string, title: string, roomCode: string) => void;
   onEdit: (setId: string, title: string) => void;
+  onLive: (setId: string, title: string) => void;
   onRefresh: () => void;
   teacherId: string;
   teacherSubject?: string;
@@ -28,6 +29,7 @@ const ExamLibrary: React.FC<ExamLibraryProps> = ({
   onLoadSet,
   onDeleteSet,
   onEdit,
+  onLive,
   onRefresh,
   teacherId,
   teacherSubject,
@@ -230,9 +232,17 @@ const ExamLibrary: React.FC<ExamLibraryProps> = ({
           const assignedRoomsForSet = setAssignments[set.id] || [];
           return (
           <div key={set.id} className="bg-white p-8 rounded-[3.5rem] border-4 border-slate-50 shadow-2xl hover:border-blue-100 transition-all flex flex-col group relative overflow-hidden">
-             <div className="flex items-center gap-2 mb-4">
-                <span className="px-3 py-1 bg-blue-600 text-white text-[9px] font-black uppercase rounded-lg shadow-sm">{set.topic || 'BÀI TẬP'}</span>
-                <span className="text-[10px] font-black text-slate-300 uppercase tracking-widest">K{set.grade || '10'}</span>
+             <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-2">
+                  <span className="px-3 py-1 bg-blue-600 text-white text-[9px] font-black uppercase rounded-lg shadow-sm">{set.topic || 'BÀI TẬP'}</span>
+                  <span className="text-[10px] font-black text-slate-300 uppercase tracking-widest">K{set.grade || '10'}</span>
+                </div>
+                <button 
+                  onClick={() => { onLoadSet(set.id, set.title).then(() => onLive(set.id, set.title)); }}
+                  className="px-4 py-2 bg-rose-600 text-white text-[9px] font-black uppercase rounded-full shadow-lg hover:bg-rose-500 hover:scale-105 transition-all animate-pulse flex items-center gap-2"
+                >
+                  ⚡ DẠY LIVE
+                </button>
              </div>
 
              <div className="flex justify-between items-start gap-4 mb-4">
