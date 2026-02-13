@@ -20,7 +20,7 @@ const InteractiveArena: React.FC<InteractiveArenaProps> = ({ value, onChange, di
   const [bullets, setBullets] = useState<Bullet[]>([]);
   const containerRef = useRef<HTMLDivElement>(null);
 
-  // Cấu hình các phím số - Thu nhỏ lại và phân bố rộng hơn
+  // Cấu hình các phím số
   const keys = [
     { n: '1', x: 20, y: 15 }, { n: '2', x: 50, y: 15 }, { n: '3', x: 80, y: 15 },
     { n: '4', x: 30, y: 35 }, { n: '5', x: 50, y: 35 }, { n: '6', x: 70, y: 35 },
@@ -89,11 +89,12 @@ const InteractiveArena: React.FC<InteractiveArenaProps> = ({ value, onChange, di
           ))}
         </div>
 
-        {/* Các ô số mục tiêu - Thu nhỏ lại */}
+        {/* Các ô số mục tiêu */}
         {keys.map((key) => (
           <div
             key={key.n}
-            className="absolute w-10 h-10 md:w-12 md:h-12 bg-blue-600 rounded-xl border-b-4 border-blue-800 flex items-center justify-center shadow-lg transition-transform"
+            onPointerDown={(e) => { e.preventDefault(); if(!disabled) onChange(value + key.n); }}
+            className="absolute w-10 h-10 md:w-12 md:h-12 bg-blue-600 rounded-xl border-b-4 border-blue-800 flex items-center justify-center shadow-lg transition-transform z-40 cursor-pointer active:scale-125 active:bg-yellow-400 active:text-slate-900"
             style={{ 
               left: `${key.x}%`, 
               top: `${key.y}%`, 
@@ -113,7 +114,7 @@ const InteractiveArena: React.FC<InteractiveArenaProps> = ({ value, onChange, di
 
         {/* Nhân vật chính */}
         <div 
-          className="absolute w-12 h-12 flex items-center justify-center text-3xl transition-all duration-75 z-20"
+          className="absolute w-12 h-12 flex items-center justify-center text-3xl transition-all duration-75 z-20 pointer-events-none"
           style={{ left: `${playerPos.x}%`, top: `${playerPos.y}%`, transform: 'translate(-50%, -50%)' }}
         >
           <div className="relative">
@@ -125,29 +126,27 @@ const InteractiveArena: React.FC<InteractiveArenaProps> = ({ value, onChange, di
         </div>
       </div>
 
-      {/* Bộ điều khiển (D-Pad & Action) */}
+      {/* Bộ điều khiển */}
       <div className="h-40 shrink-0 flex items-center justify-between px-4 pb-2">
-        {/* D-Pad */}
         <div className="grid grid-cols-3 gap-1 scale-90 md:scale-100">
           <div />
-          <button onPointerDown={() => move(0, -8)} className="w-12 h-12 bg-slate-800 rounded-xl flex items-center justify-center text-white active:bg-blue-600 shadow-lg border-b-4 border-slate-950 active:border-b-0 active:translate-y-1">▲</button>
+          <button onPointerDown={(e) => { e.preventDefault(); move(0, -8); }} className="w-12 h-12 bg-slate-800 rounded-xl flex items-center justify-center text-white active:bg-blue-600 shadow-lg border-b-4 border-slate-950 active:border-b-0 active:translate-y-1">▲</button>
           <div />
-          <button onPointerDown={() => move(-8, 0)} className="w-12 h-12 bg-slate-800 rounded-xl flex items-center justify-center text-white active:bg-blue-600 shadow-lg border-b-4 border-slate-950 active:border-b-0 active:translate-y-1">◀</button>
-          <button onPointerDown={() => move(0, 8)} className="w-12 h-12 bg-slate-800 rounded-xl flex items-center justify-center text-white active:bg-blue-600 shadow-lg border-b-4 border-slate-950 active:border-b-0 active:translate-y-1">▼</button>
-          <button onPointerDown={() => move(8, 0)} className="w-12 h-12 bg-slate-800 rounded-xl flex items-center justify-center text-white active:bg-blue-600 shadow-lg border-b-4 border-slate-950 active:border-b-0 active:translate-y-1">▶</button>
+          <button onPointerDown={(e) => { e.preventDefault(); move(-8, 0); }} className="w-12 h-12 bg-slate-800 rounded-xl flex items-center justify-center text-white active:bg-blue-600 shadow-lg border-b-4 border-slate-950 active:border-b-0 active:translate-y-1">◀</button>
+          <button onPointerDown={(e) => { e.preventDefault(); move(0, 8); }} className="w-12 h-12 bg-slate-800 rounded-xl flex items-center justify-center text-white active:bg-blue-600 shadow-lg border-b-4 border-slate-950 active:border-b-0 active:translate-y-1">▼</button>
+          <button onPointerDown={(e) => { e.preventDefault(); move(8, 0); }} className="w-12 h-12 bg-slate-800 rounded-xl flex items-center justify-center text-white active:bg-blue-600 shadow-lg border-b-4 border-slate-950 active:border-b-0 active:translate-y-1">▶</button>
         </div>
 
-        {/* Nút Bắn / Action */}
         <div className="flex flex-col items-center gap-2">
           <button 
-            onPointerDown={shoot}
+            onPointerDown={(e) => { e.preventDefault(); shoot(); }}
             className="w-20 h-20 bg-red-600 rounded-full border-b-[8px] border-red-800 flex items-center justify-center shadow-2xl active:border-b-0 active:translate-y-2 active:scale-95 transition-all group"
           >
             <div className="w-14 h-14 rounded-full border-4 border-white/20 flex items-center justify-center">
               <span className="text-white font-black text-xs uppercase italic tracking-widest">FIRE</span>
             </div>
           </button>
-          <span className="text-[8px] text-slate-500 font-black uppercase tracking-widest">Bắn để chọn số</span>
+          <span className="text-[8px] text-slate-500 font-black uppercase tracking-widest">Hỗ trợ: Chạm số để chọn</span>
         </div>
       </div>
 
