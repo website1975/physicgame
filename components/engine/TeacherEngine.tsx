@@ -1,9 +1,10 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { GameState, Teacher, Round, MatchData } from '../../types';
+import { GameState, Teacher, MatchData } from '../../types';
 import ProblemCard from '../ProblemCard';
 import AnswerInput from '../AnswerInput';
 import LatexRenderer from '../LatexRenderer';
+import Whiteboard from '../Whiteboard';
 import { supabase } from '../../services/supabaseService';
 
 interface TeacherEngineProps {
@@ -17,21 +18,20 @@ interface TeacherEngineProps {
 
 const TeacherEngine: React.FC<TeacherEngineProps> = ({ gameState, setGameState, playerName, currentTeacher, matchData, onExit }) => {
   const uniqueId = matchData.myId || 'temp';
-  
-  // Khởi tạo ở câu GV đang dạy (startIndex)
   const [currentRoundIdx, setCurrentRoundIdx] = useState(0);
   const [currentProblemIdx, setCurrentProblemIdx] = useState(matchData.startIndex || 0);
   const [score, setScore] = useState(0);
   const [timeLeft, setTimeLeft] = useState(40);
   const [userAnswer, setUserAnswer] = useState('');
   const [feedback, setFeedback] = useState<any>(null);
+  const [isWhiteboardActive, setIsWhiteboardActive] = useState(false);
+  const [hasBuzzed, setHasBuzzed] = useState(false);
   
   const rounds = matchData.rounds || [];
   const currentRound = rounds[currentRoundIdx];
   const currentProblem = currentRound?.problems[currentProblemIdx];
   const channelRef = useRef<any>(null);
 
-  // Lắng nghe lệnh từ GV
   useEffect(() => {
     const channelName = `room_TEACHER_LIVE_${currentTeacher.id}`;
     const channel = supabase.channel(channelName, { 
@@ -40,8 +40,10 @@ const TeacherEngine: React.FC<TeacherEngineProps> = ({ gameState, setGameState, 
 
     channel
       .on('broadcast', { event: 'teacher_next_question' }, ({ payload }) => {
-        // payload: { nextIndex }
         moveToQuestion(payload.nextIndex);
+      })
+      .on('broadcast', { event: 'teacher_toggle_whiteboard' }, ({ payload }) => {
+        setIsWhiteboardActive(payload.active);
       })
       .subscribe(async (status) => {
         if (status === 'SUBSCRIBED') await channel.track({ online: true });
@@ -52,11 +54,11 @@ const TeacherEngine: React.FC<TeacherEngineProps> = ({ gameState, setGameState, 
   }, [currentTeacher.id, playerName, uniqueId]);
 
   useEffect(() => {
-    if (gameState === 'ANSWERING' && timeLeft > 0) {
+    if (gameState === 'ANSWERING' && timeLeft > 0 && !isWhiteboardActive) {
       const t = setInterval(() => setTimeLeft(p => p - 1), 1000);
       return () => clearInterval(t);
     }
-  }, [gameState, timeLeft]);
+  }, [gameState, timeLeft, isWhiteboardActive]);
 
   const submitAnswer = () => {
     if (gameState !== 'ANSWERING') return;
@@ -69,7 +71,6 @@ const TeacherEngine: React.FC<TeacherEngineProps> = ({ gameState, setGameState, 
     setFeedback({ isCorrect: isPerfect, text: isPerfect ? 'CHÍNH XÁC! ✨' : `SAI RỒI! Đáp án là: ${correct}` });
     setGameState('FEEDBACK');
 
-    // Báo cáo về máy GV ngay lập tức
     channelRef.current?.send({
       type: 'broadcast',
       event: 'student_report',
@@ -83,11 +84,22 @@ const TeacherEngine: React.FC<TeacherEngineProps> = ({ gameState, setGameState, 
     });
   };
 
+  const handleBuzz = () => {
+    if (hasBuzzed || gameState !== 'ANSWERING') return;
+    setHasBuzzed(true);
+    channelRef.current?.send({
+      type: 'broadcast',
+      event: 'student_buzzer',
+      payload: { name: playerName, uniqueId }
+    });
+  };
+
   const moveToQuestion = (index: number) => {
     if (index < currentRound.problems.length) {
       setCurrentProblemIdx(index);
       setUserAnswer('');
       setFeedback(null);
+      setHasBuzzed(false);
       setTimeLeft(currentRound.problems[index].timeLimit || 40);
       setGameState('ANSWERING');
     } else {
@@ -111,24 +123,45 @@ const TeacherEngine: React.FC<TeacherEngineProps> = ({ gameState, setGameState, 
   return (
     <div className="min-h-screen bg-slate-100 flex flex-col p-4 text-left">
       <header className="bg-white px-8 py-4 rounded-full shadow-lg mb-6 flex justify-between items-center border-b-4 border-slate-200">
-        <div className="bg-blue-600 text-white px-6 py-2 rounded-2xl font-black italic shadow-lg">ĐIỂM: {score}đ</div>
+        <div className="flex items-center gap-4">
+           <div className="bg-blue-600 text-white px-6 py-2 rounded-2xl font-black italic shadow-lg">ĐIỂM: {score}đ</div>
+           {isWhiteboardActive && <span className="text-[10px] font-black text-emerald-500 uppercase italic animate-pulse">👨‍🏫 Thầy đang giảng bài...</span>}
+        </div>
         <div className="flex items-center gap-4">
            <div className="bg-slate-50 px-4 py-2 rounded-xl border border-slate-100 font-black italic text-slate-400 text-xs">
               Câu {currentProblemIdx + 1} / {currentRound.problems.length}
            </div>
-           <div className="text-slate-900 text-3xl font-black italic">{timeLeft}s</div>
-           <button onClick={onExit} className="w-10 h-10 bg-red-50 text-red-500 rounded-xl font-black text-xs">✕</button>
+           <div className={`text-3xl font-black italic ${timeLeft <= 5 ? 'text-red-500 animate-pulse' : 'text-slate-900'}`}>{timeLeft}s</div>
+           <button onClick={onExit} className="w-10 h-10 bg-red-50 text-red-500 rounded-xl font-black text-xs hover:bg-red-500 hover:text-white transition-all">✕</button>
         </div>
       </header>
 
-      <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-8 min-h-0 overflow-hidden">
+      <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-8 min-h-0 overflow-hidden relative">
+        {isWhiteboardActive && (
+          <div className="absolute inset-0 z-50 bg-slate-950 rounded-[3.5rem] p-4 shadow-2xl animate-in zoom-in">
+             <Whiteboard isTeacher={false} channel={channelRef.current} roomCode="TEACHER_ROOM" />
+             <div className="absolute bottom-8 left-1/2 -translate-x-1/2 bg-white/10 backdrop-blur-md px-6 py-2 rounded-full border border-white/20">
+                <span className="text-white font-black uppercase italic text-[10px] tracking-widest">Đang theo dõi bảng giảng trực tiếp</span>
+             </div>
+          </div>
+        )}
+
         <div className="lg:col-span-7 overflow-y-auto no-scrollbar">
            <ProblemCard problem={currentProblem} />
         </div>
         <div className="lg:col-span-5 bg-white rounded-[3.5rem] p-10 shadow-2xl flex flex-col border-4 border-slate-50 relative overflow-hidden">
            {gameState === 'ANSWERING' ? (
              <div className="flex flex-col h-full animate-in zoom-in">
-                <h3 className="text-[10px] font-black text-slate-400 uppercase italic mb-6">Khu vực làm bài:</h3>
+                <div className="flex justify-between items-center mb-6">
+                   <h3 className="text-[10px] font-black text-slate-400 uppercase italic">Khu vực làm bài:</h3>
+                   <button 
+                     onClick={handleBuzz}
+                     disabled={hasBuzzed}
+                     className={`px-6 py-2 rounded-xl font-black uppercase italic text-[10px] shadow-lg transition-all ${hasBuzzed ? 'bg-amber-100 text-amber-600 border-2 border-amber-200' : 'bg-amber-500 text-white border-b-4 border-amber-700 hover:scale-105 active:translate-y-1 active:border-b-0'}`}
+                   >
+                     {hasBuzzed ? '🔔 ĐÃ GIÀNH QUYỀN' : '🛎️ GIÀNH QUYỀN'}
+                   </button>
+                </div>
                 <div className="flex-1 overflow-y-auto no-scrollbar">
                    <AnswerInput problem={currentProblem} value={userAnswer} onChange={setUserAnswer} onSubmit={submitAnswer} disabled={false} />
                 </div>
@@ -137,7 +170,7 @@ const TeacherEngine: React.FC<TeacherEngineProps> = ({ gameState, setGameState, 
                   disabled={!userAnswer} 
                   className={`w-full py-6 rounded-3xl font-black italic text-xl mt-8 shadow-xl border-b-[10px] transition-all ${userAnswer ? 'bg-blue-600 text-white border-blue-800' : 'bg-slate-100 text-slate-300 border-slate-200'}`}
                 >
-                  GỬI ĐÁP ÁN ✅
+                  XÁC NHẬN ✅
                 </button>
              </div>
            ) : (
@@ -145,19 +178,18 @@ const TeacherEngine: React.FC<TeacherEngineProps> = ({ gameState, setGameState, 
                 <div className={`text-4xl font-black uppercase italic mb-6 ${feedback?.isCorrect ? 'text-emerald-500' : 'text-rose-500'}`}>
                    {feedback?.isCorrect ? '✨ XUẤT SẮC!' : '💥 CỐ GẮNG HƠN!'}
                 </div>
-                <div className="bg-slate-50 p-8 rounded-[2.5rem] border-2 border-slate-100 italic font-bold text-slate-700 mb-8">
+                <div className="bg-slate-50 p-8 rounded-[2.5rem] border-2 border-slate-100 italic font-bold text-slate-700 mb-8 shadow-inner">
                    <LatexRenderer content={feedback?.text || ""} />
                 </div>
                 <div className="flex-1 bg-emerald-50/50 p-8 rounded-[3rem] border-2 border-emerald-100 overflow-y-auto no-scrollbar">
-                   <h4 className="text-emerald-600 font-black uppercase text-[10px] mb-4 italic">Hướng dẫn giải:</h4>
+                   <h4 className="text-emerald-600 font-black uppercase text-[10px] mb-4 italic tracking-widest">Đáp án chi tiết:</h4>
                    <div className="text-slate-600 italic leading-relaxed text-lg">
                       <LatexRenderer content={currentProblem?.explanation || ""} />
                    </div>
                 </div>
                 
-                {/* THAY ĐỔI: Không cho HS bấm Next, hiện thông báo chờ GV */}
-                <div className="mt-8 bg-blue-600 text-white p-6 rounded-3xl text-center font-black uppercase italic animate-pulse">
-                   ⏳ Chờ giáo viên chuyển câu...
+                <div className="mt-8 bg-blue-600 text-white p-6 rounded-3xl text-center font-black uppercase italic animate-pulse shadow-lg border-b-8 border-blue-800">
+                   ⏳ Chờ thầy chuyển câu hỏi mới...
                 </div>
              </div>
            )}
