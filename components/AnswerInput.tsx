@@ -93,6 +93,7 @@ const AnswerInput: React.FC<AnswerInputProps> = ({ problem, value, onChange, onS
         setTimeout(() => { target.isLit = false; }, 300);
       }
     } else {
+      // Đối với tất cả các cơ chế khác, chạm trực tiếp cũng sẽ nhập số
       onChange(valueRef.current + target.value);
       target.isLit = true;
       setTimeout(() => { target.isLit = false; }, 300);
@@ -181,7 +182,7 @@ const AnswerInput: React.FC<AnswerInputProps> = ({ problem, value, onChange, onS
   }, [isShortAnswer, disabled, activeMechanic]);
 
   const handleTileClick = (target: Target) => {
-    if (activeMechanic === InteractiveMechanic.HIDDEN_TILES) {
+    if (!disabled) {
        handleHitLogic(target);
     }
   };
@@ -256,9 +257,10 @@ const AnswerInput: React.FC<AnswerInputProps> = ({ problem, value, onChange, onS
   const isNấmMode = activeMechanic === InteractiveMechanic.MARIO;
   const isHiddenMode = activeMechanic === InteractiveMechanic.HIDDEN_TILES;
   const isShootMode = [InteractiveMechanic.CANNON, InteractiveMechanic.RISING_WATER, InteractiveMechanic.SPACE_DASH].includes(activeMechanic);
+  const isWaterMode = activeMechanic === InteractiveMechanic.RISING_WATER;
 
   return (
-    <div className="space-y-4 flex flex-col h-full overflow-hidden text-left">
+    <div className="space-y-4 flex flex-col h-full overflow-hidden text-left touch-none">
       <div className="flex justify-between items-center bg-slate-900 px-6 py-4 rounded-[2.2rem] border-4 border-slate-800 shadow-xl shrink-0">
          <div className="flex items-center gap-5">
             <span className="text-slate-500 font-black text-[10px] uppercase tracking-widest italic">KẾT QUẢ:</span>
@@ -267,16 +269,15 @@ const AnswerInput: React.FC<AnswerInputProps> = ({ problem, value, onChange, onS
          <button onClick={() => onChange('')} disabled={disabled} className="bg-red-500/10 text-red-500 px-4 py-2 rounded-xl font-black text-[10px] uppercase border border-red-500/20 hover:bg-red-500 hover:text-white transition-all italic">Xoá</button>
       </div>
 
-      <div className="relative w-full flex-1 min-h-[400px] rounded-[3.5rem] border-[10px] overflow-hidden bg-slate-950 border-slate-900 shadow-inner">
+      <div className="relative w-full flex-1 min-h-[350px] rounded-[3.5rem] border-[10px] overflow-hidden bg-slate-950 border-slate-900 shadow-inner">
         {visual.targets.map(t => (
           <div 
             key={t.id} 
-            onClick={() => !disabled && handleTileClick(t)}
-            className={`absolute w-12 h-12 md:w-16 md:h-16 rounded-2xl flex items-center justify-center text-xl md:text-3xl font-black shadow-lg border-2 transition-all duration-300 
+            onPointerDown={(e) => { e.preventDefault(); handleTileClick(t); }}
+            className={`absolute w-12 h-12 md:w-16 md:h-16 rounded-2xl flex items-center justify-center text-xl md:text-3xl font-black shadow-lg border-2 transition-all duration-300 z-40 cursor-pointer
             ${t.isLit ? 'bg-yellow-400 border-white scale-125 text-slate-900 z-50 ring-4 ring-yellow-400/30' : 
               (t.isRevealed ? 'bg-blue-600 border-white text-white' : 'bg-blue-900/40 border-blue-500/20 text-blue-500/30')}
-            ${isNấmMode && t.isColliding ? 'bg-emerald-500 ring-4 ring-emerald-400' : ''}
-            ${isHiddenMode ? 'cursor-pointer hover:scale-110 active:scale-95' : 'cursor-default'}`} 
+            ${isNấmMode && t.isColliding ? 'bg-emerald-500 ring-4 ring-emerald-400' : ''}`} 
             style={{ left: `${t.x}%`, top: `${t.y}%`, transform: 'translate(-50%, -50%)' }}>
             {t.isRevealed ? t.value : '?'}
           </div>
@@ -287,9 +288,9 @@ const AnswerInput: React.FC<AnswerInputProps> = ({ problem, value, onChange, onS
         ))}
 
         {!isHiddenMode && (
-          <div className="absolute transition-all duration-100 z-30" style={{ left: `${visual.playerX}%`, top: `${visual.playerY}%`, transform: 'translate(-50%, -50%)' }}>
+          <div className="absolute transition-all duration-100 z-30 pointer-events-none" style={{ left: `${visual.playerX}%`, top: `${visual.playerY}%`, transform: 'translate(-50%, -50%)' }}>
             <div className={`text-5xl md:text-7xl ${isNấmMode ? 'animate-bounce' : ''}`}>
-              {activeMechanic === InteractiveMechanic.SPACE_DASH ? '🚀' : isNấmMode ? '🍄' : '🛸'}
+              {activeMechanic === InteractiveMechanic.SPACE_DASH ? '🚀' : isNấmMode ? '🍄' : isWaterMode ? '🚢' : '🛸'}
             </div>
           </div>
         )}
@@ -301,30 +302,22 @@ const AnswerInput: React.FC<AnswerInputProps> = ({ problem, value, onChange, onS
 
       {!isHiddenMode && !disabled && (
         <div className="grid grid-cols-3 gap-3 shrink-0">
-            <button onPointerDown={() => engineRef.current.playerX = Math.max(5, engineRef.current.playerX - 10)} className="bg-slate-800 text-white py-4 rounded-2xl font-black text-xl shadow-lg active:scale-90 transition-transform">←</button>
+            <button onPointerDown={(e) => { e.preventDefault(); engineRef.current.playerX = Math.max(5, engineRef.current.playerX - 10); }} className="bg-slate-800 text-white py-4 rounded-2xl font-black text-xl shadow-lg active:scale-90 transition-transform">←</button>
             <div className="grid grid-rows-2 gap-2">
-              <button onPointerDown={() => engineRef.current.playerY = Math.max(10, engineRef.current.playerY - 10)} className="bg-slate-800 text-white py-2 rounded-xl font-black text-lg shadow-md active:scale-90 transition-transform">↑</button>
-              <button onPointerDown={() => engineRef.current.playerY = Math.min(92, engineRef.current.playerY + 10)} className="bg-slate-800 text-white py-2 rounded-xl font-black text-lg shadow-md active:scale-90 transition-transform">↓</button>
+              <button onPointerDown={(e) => { e.preventDefault(); engineRef.current.playerY = Math.max(10, engineRef.current.playerY - 10); }} className="bg-slate-800 text-white py-2 rounded-xl font-black text-lg shadow-md active:scale-90 transition-transform">↑</button>
+              <button onPointerDown={(e) => { e.preventDefault(); engineRef.current.playerY = Math.min(92, engineRef.current.playerY + 10); }} className="bg-slate-800 text-white py-2 rounded-xl font-black text-lg shadow-md active:scale-90 transition-transform">↓</button>
             </div>
-            <button onPointerDown={() => engineRef.current.playerX = Math.min(95, engineRef.current.playerX + 10)} className="bg-slate-800 text-white py-4 rounded-2xl font-black text-xl shadow-lg active:scale-90 transition-transform">→</button>
+            <button onPointerDown={(e) => { e.preventDefault(); engineRef.current.playerX = Math.min(95, engineRef.current.playerX + 10); }} className="bg-slate-800 text-white py-4 rounded-2xl font-black text-xl shadow-lg active:scale-90 transition-transform">→</button>
         </div>
       )}
 
       {isShootMode && !disabled && (
-        <button onPointerDown={() => engineRef.current.projectiles.push({ x: engineRef.current.playerX, y: engineRef.current.playerY - 6, id: Date.now() })} className="w-full py-5 bg-blue-600 text-white rounded-[1.8rem] font-black uppercase shadow-xl active:scale-95 transition-all text-xl border-b-8 border-blue-800 shrink-0">BẮN ĐÁP ÁN 🎯</button>
+        <button onPointerDown={(e) => { e.preventDefault(); engineRef.current.projectiles.push({ x: engineRef.current.playerX, y: engineRef.current.playerY - 6, id: Date.now() }); }} className="w-full py-5 bg-blue-600 text-white rounded-[1.8rem] font-black uppercase shadow-xl active:scale-95 transition-all text-xl border-b-8 border-blue-800 shrink-0">BẮN ĐÁP ÁN 🎯</button>
       )}
       
-      {isNấmMode && !disabled && (
-        <div className="w-full py-5 bg-orange-600 text-white rounded-[1.8rem] font-black uppercase text-center italic text-sm shrink-0 border-b-8 border-orange-800 shadow-lg">
-           DI CHUYỂN NẤM ĐỂ CHẠM VÀO SỐ! ✨
-        </div>
-      )}
-
-      {isHiddenMode && !disabled && (
-        <div className="w-full py-5 bg-emerald-600 text-white rounded-[1.8rem] font-black uppercase text-center italic text-sm shrink-0 border-b-8 border-emerald-800 shadow-lg">
-           CHẠM TRỰC TIẾP ĐỂ LẬT VÀ CHỌN SỐ! 🃏
-        </div>
-      )}
+      <div className="w-full py-4 bg-slate-900/50 text-white/60 rounded-[1.8rem] font-black uppercase text-center italic text-[10px] shrink-0 border-2 border-white/5 shadow-inner">
+         HỖ TRỢ: CHẠM TRỰC TIẾP VÀO SỐ ĐỂ CHỌN NHANH ✨
+      </div>
     </div>
   );
 
