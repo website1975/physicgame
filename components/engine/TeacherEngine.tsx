@@ -18,6 +18,7 @@ interface TeacherEngineProps {
 
 const TeacherEngine: React.FC<TeacherEngineProps> = ({ gameState, setGameState, playerName, currentTeacher, matchData, onExit }) => {
   const uniqueId = matchData.myId || 'temp';
+  const studentGrade = (matchData as any).grade || '10';
   const [currentRoundIdx, setCurrentRoundIdx] = useState(0);
   const [currentProblemIdx, setCurrentProblemIdx] = useState(matchData.startIndex || 0);
   const [score, setScore] = useState(0);
@@ -33,8 +34,7 @@ const TeacherEngine: React.FC<TeacherEngineProps> = ({ gameState, setGameState, 
   const currentProblem = currentRound?.problems[currentProblemIdx];
   const channelRef = useRef<any>(null);
 
-  // Sync Báo cáo trạng thái khi có thay đổi quan trọng
-  const reportStatus = (statusStr?: string, isCorrect?: boolean) => {
+  const reportStatus = (statusStr?: string, isCorrect?: boolean, isFinished: boolean = false) => {
     if (!channelRef.current) return;
     channelRef.current.send({
       type: 'broadcast',
@@ -45,15 +45,14 @@ const TeacherEngine: React.FC<TeacherEngineProps> = ({ gameState, setGameState, 
         score: score, 
         isCorrect: isCorrect,
         status: statusStr,
-        progress: `Đang làm câu ${currentProblemIdx + 1}/${currentRound?.problems?.length || 0}`
+        isFinished: isFinished,
+        progress: `Câu ${currentProblemIdx + 1}/${currentRound?.problems?.length || 0}`
       }
     });
   };
 
   useEffect(() => {
-    if (gameState === 'ROUND_INTRO') {
-      setGameState('ANSWERING');
-    }
+    if (gameState === 'ROUND_INTRO') setGameState('ANSWERING');
   }, [gameState]);
 
   useEffect(() => {
@@ -66,20 +65,25 @@ const TeacherEngine: React.FC<TeacherEngineProps> = ({ gameState, setGameState, 
       .on('broadcast', { event: 'teacher_next_question' }, ({ payload }) => {
         moveToQuestion(payload.nextIndex);
       })
-      .on('broadcast', { event: 'teacher_toggle_whiteboard' }, ({ payload }) => {
-        setIsWhiteboardActive(payload.active);
-      })
       .on('broadcast', { event: 'teacher_reset_question' }, ({ payload }) => {
         moveToQuestion(payload.index);
+      })
+      .on('broadcast', { event: 'teacher_toggle_whiteboard' }, ({ payload }) => {
+        setIsWhiteboardActive(payload.active);
       })
       .on('broadcast', { event: 'teacher_reset_buzzers' }, () => {
         setHasBuzzed(false);
       })
       .subscribe(async (status) => {
         if (status === 'SUBSCRIBED') {
-          await channel.track({ online: true });
-          // HS Báo cáo hiện diện ngay lập tức khi đăng nhập thành công
-          reportStatus("Đã vào phòng 🟢");
+          await channel.track({ online: true, grade: studentGrade });
+          // Báo danh ngay lập tức để GV thấy HS trong danh sách
+          channel.send({
+            type: 'broadcast',
+            event: 'student_checkin',
+            payload: { name: playerName, uniqueId, grade: studentGrade }
+          });
+          reportStatus("Vừa vào phòng");
         }
       });
 
@@ -105,7 +109,7 @@ const TeacherEngine: React.FC<TeacherEngineProps> = ({ gameState, setGameState, 
     setFeedback({ isCorrect: isPerfect, text: isPerfect ? 'CHÍNH XÁC! ✨' : `SAI RỒI! Đáp án là: ${correct}` });
     setGameState('FEEDBACK');
 
-    // Gửi báo cáo kết quả tức thì
+    // Báo kết quả về GV
     channelRef.current?.send({
       type: 'broadcast',
       event: 'student_report',
@@ -114,6 +118,7 @@ const TeacherEngine: React.FC<TeacherEngineProps> = ({ gameState, setGameState, 
         uniqueId: uniqueId,
         score: newScore, 
         isCorrect: isPerfect,
+        isFinished: true,
         progress: `Đã xong câu ${currentProblemIdx + 1}`
       }
     });
@@ -127,7 +132,6 @@ const TeacherEngine: React.FC<TeacherEngineProps> = ({ gameState, setGameState, 
       event: 'student_buzzer',
       payload: { name: playerName, uniqueId }
     });
-    // Báo cho GV biết đã giành quyền nhanh nhất
     reportStatus("Đã giành quyền 🔔");
   };
 
@@ -139,11 +143,10 @@ const TeacherEngine: React.FC<TeacherEngineProps> = ({ gameState, setGameState, 
       setHasBuzzed(false);
       setIsHelpUsed(false);
       setTimeLeft(currentRound.problems[index].timeLimit || 40);
-      // QUAN TRỌNG: Buộc HS chuyển từ màn hình FEEDBACK quay lại ANSWERING
-      setGameState('ANSWERING');
+      setGameState('ANSWERING'); // Ép buộc quay lại màn hình làm bài
       
-      // Báo cáo GV là đã sẵn sàng cho câu mới
-      setTimeout(() => reportStatus(`Đang làm câu ${index + 1}...`), 300);
+      // Báo cho GV biết HS đã sẵn sàng câu mới
+      setTimeout(() => reportStatus("Đang làm bài..."), 300);
     } else {
       setGameState('GAME_OVER');
     }
