@@ -1,7 +1,8 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { GameState, Teacher, MatchData } from '../../types';
-import { getRoomAssignments, fetchSetData, supabase } from '../../services/supabaseService';
+// Fixed: getRoomAssignments was not exported from supabaseService. Using getRoomAssignmentsWithMeta instead.
+import { getRoomAssignmentsWithMeta, supabase } from '../../services/supabaseService';
 
 interface MultiPlayerArenaManagerProps {
   setGameState: (s: GameState) => void;
@@ -49,21 +50,17 @@ const MultiPlayerArenaManager: React.FC<MultiPlayerArenaManagerProps> = ({
         // Nếu đủ người và là người dẫn đầu phòng (Master)
         if (playerInfos.length >= capacity && !matchStartedRef.current && isMaster && !heartbeatIntervalRef.current) {
           try {
-            // Lấy các bộ đề mà giáo viên đã gán cho phòng này (ARENA_B, C, D)
-            const assignments = await getRoomAssignments(currentTeacher.id, joinedRoom.code);
-            const validSets = [];
-            for (const item of assignments) {
-               try {
-                 const data = await fetchSetData(item.set_id);
-                 if (String(data.grade) === String(studentGrade)) {
-                   validSets.push({ ...data, id: item.set_id });
-                 }
-               } catch(e) {}
-            }
+            // Fixed: use getRoomAssignmentsWithMeta which returns set objects with meta data already attached
+            const assignments = await getRoomAssignmentsWithMeta(currentTeacher.id, joinedRoom.code);
+            
+            // Lọc các bộ đề theo khối lớp học sinh
+            const validSets = assignments.filter(s => String(s.grade) === String(studentGrade));
 
-            // Nếu giáo viên chưa gán đề, báo lỗi hoặc dùng đề mặc định (ở đây ta ưu tiên đề gán)
+            // Nếu giáo viên đã gán đề, chọn một bộ đề ngẫu nhiên để bắt đầu trận đấu
             if (validSets.length > 0) {
               const selectedSet = validSets[Math.floor(Math.random() * validSets.length)];
+              // Trong inferMetadata, rounds được lưu trong trường data
+              const rounds = selectedSet.data || [];
               const allPlayersPayload = playerInfos.map(p => ({ id: p.id, name: p.name }));
               const syncStartTime = Date.now() + 4000;
 
@@ -74,7 +71,7 @@ const MultiPlayerArenaManager: React.FC<MultiPlayerArenaManagerProps> = ({
                   event: 'match_start_signal',
                   payload: {
                     setId: selectedSet.id,
-                    rounds: selectedSet.rounds,
+                    rounds: rounds,
                     title: selectedSet.title,
                     allPlayers: allPlayersPayload,
                     startTime: syncStartTime
@@ -93,7 +90,7 @@ const MultiPlayerArenaManager: React.FC<MultiPlayerArenaManagerProps> = ({
                   if (heartbeatIntervalRef.current) clearInterval(heartbeatIntervalRef.current);
                   const opponents = allPlayersPayload.filter(p => p.id !== uniqueId);
                   onStartMatch({ 
-                    setId: selectedSet.id, title: selectedSet.title, rounds: selectedSet.rounds, 
+                    setId: selectedSet.id, title: selectedSet.title, rounds: rounds, 
                     opponents, joinedRoom, myId: uniqueId, startIndex: 0 
                   });
                 }
@@ -135,7 +132,7 @@ const MultiPlayerArenaManager: React.FC<MultiPlayerArenaManagerProps> = ({
       if (heartbeatIntervalRef.current) clearInterval(heartbeatIntervalRef.current);
       supabase.removeChannel(channel);
     };
-  }, [joinedRoom.code, currentTeacher.id, uniqueId, playerName, studentGrade]);
+  }, [joinedRoom.code, currentTeacher.id, uniqueId, playerName, studentGrade, onStartMatch, joinedRoom, setJoinedRoom]);
 
   return (
     <div className="min-h-screen flex items-center justify-center p-6 bg-slate-950">
