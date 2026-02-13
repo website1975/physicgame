@@ -146,10 +146,10 @@ const TeacherEngine: React.FC<TeacherEngineProps> = ({ gameState, setGameState, 
           </div>
         )}
 
-        <div className="lg:col-span-7 overflow-y-auto no-scrollbar">
+        <div className="lg:col-span-7 overflow-y-auto no-scrollbar h-full">
            <ProblemCard problem={currentProblem} />
         </div>
-        <div className="lg:col-span-5 bg-white rounded-[3.5rem] p-10 shadow-2xl flex flex-col border-4 border-slate-50 relative overflow-hidden">
+        <div className="lg:col-span-5 bg-white rounded-[3.5rem] p-10 shadow-2xl flex flex-col border-4 border-slate-50 relative overflow-hidden h-full">
            {gameState === 'ANSWERING' ? (
              <div className="flex flex-col h-full animate-in zoom-in">
                 <div className="flex justify-between items-center mb-6">
