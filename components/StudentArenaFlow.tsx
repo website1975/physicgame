@@ -47,7 +47,7 @@ const StudentArenaFlow: React.FC<StudentArenaFlowProps> = (props) => {
               onClick={() => { 
                 setJoinedRoom(room); 
                 if (room.code === 'TEACHER_LIVE') {
-                  setGameState('WAITING_ROOM'); // Chuyển đến màn hình nhập mã phòng
+                  setGameState('WAITING_ROOM'); 
                 } else {
                   setGameState('WAITING_FOR_PLAYERS');
                 }
@@ -64,6 +64,7 @@ const StudentArenaFlow: React.FC<StudentArenaFlowProps> = (props) => {
     );
   }
 
+  // Xử lý logic theo loại phòng
   if (joinedRoom?.code === 'ARENA_A') {
     return <SoloArenaManager {...props} uniqueId={uniqueId} />;
   }
@@ -72,6 +73,7 @@ const StudentArenaFlow: React.FC<StudentArenaFlowProps> = (props) => {
     return <MultiPlayerArenaManager {...props} uniqueId={uniqueId} />;
   }
 
+  // Chấp nhận cả trạng thái WAITING_ROOM và WAITING_FOR_PLAYERS cho Phòng GV
   if (joinedRoom?.code === 'TEACHER_LIVE') {
     return <TeacherArenaManager {...props} uniqueId={uniqueId} />;
   }
