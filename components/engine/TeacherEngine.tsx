@@ -19,7 +19,13 @@ interface TeacherEngineProps {
 const TeacherEngine: React.FC<TeacherEngineProps> = ({ gameState, setGameState, playerName, currentTeacher, matchData, onExit }) => {
   const uniqueId = matchData.myId || 'temp';
   const studentGrade = (matchData as any).grade || '10';
-  const [currentProblemIdx, setCurrentProblemIdx] = useState(matchData.startIndex || 0);
+  
+  // SỬ DỤNG OBJECT STATE ĐỂ ĐẢM BẢO REACT LUÔN NHẬN DIỆN LÀ "DỮ LIỆU MỚI"
+  const [syncState, setSyncState] = useState({
+    index: matchData.startIndex || 0,
+    version: Date.now() // Mã phiên bản để cưỡng bức render
+  });
+  
   const [score, setScore] = useState(0);
   const [timeLeft, setTimeLeft] = useState(40);
   const [userAnswer, setUserAnswer] = useState('');
@@ -29,8 +35,17 @@ const TeacherEngine: React.FC<TeacherEngineProps> = ({ gameState, setGameState, 
   const [isHelpUsed, setIsHelpUsed] = useState(false);
   
   const rounds = matchData.rounds || [];
-  const currentProblem = rounds[0]?.problems[currentProblemIdx];
   const channelRef = useRef<any>(null);
+  
+  // Dùng Ref để hàm lắng nghe sự kiện luôn đọc được giá trị mới nhất mà không bị "stale closure"
+  const lastStateRef = useRef({
+    index: syncState.index,
+    gameState: gameState
+  });
+
+  useEffect(() => {
+    lastStateRef.current = { index: syncState.index, gameState };
+  }, [syncState.index, gameState]);
 
   const reportProgress = (statusStr?: string, isCorrect?: boolean, isFinished: boolean = false) => {
     if (!channelRef.current) return;
@@ -39,51 +54,79 @@ const TeacherEngine: React.FC<TeacherEngineProps> = ({ gameState, setGameState, 
       event: 'student_score_update',
       payload: { 
         name: playerName, uniqueId, score, isCorrect, status: statusStr, isFinished,
-        progress: `Câu ${currentProblemIdx + 1}/${rounds[0]?.problems?.length || 0}`
+        progress: `Câu ${lastStateRef.current.index + 1}/${rounds[0]?.problems?.length || 0}`
       }
     });
   };
 
   useEffect(() => {
     if (gameState === 'ROUND_INTRO') setGameState('ANSWERING');
-  }, [gameState]);
+  }, [gameState, setGameState]);
 
-  // SYNC LOGIC: HS sẽ nhảy câu ngay lập tức khi nhận lệnh MOVE hoặc SYNC (Heartbeat) từ GV
+  // HÀM XỬ LÝ LỆNH TỪ GIÁO VIÊN - CỰC KỲ QUAN TRỌNG
   const handleTeacherCommand = (payload: any) => {
     const { type, index, active } = payload;
     
     if (type === 'WHITEBOARD') {
-      setIsWhiteboardActive(active);
+      setIsWhiteboardActive(!!active);
       return;
     }
 
     if (['MOVE', 'RESET', 'START', 'SYNC'].includes(type)) {
-      if (index !== currentProblemIdx || (type !== 'SYNC' && gameState === 'FEEDBACK')) {
-        setCurrentProblemIdx(index);
+      // Nếu chỉ số câu hỏi khác hiện tại HOẶC HS đang bị kẹt ở màn hình Feedback (kết quả câu cũ)
+      const isNewQuestion = index !== lastStateRef.current.index;
+      const isForcedReset = type === 'RESET' || type === 'START';
+      const needsJump = lastStateRef.current.gameState === 'FEEDBACK' && (type === 'MOVE' || type === 'SYNC');
+
+      if (isNewQuestion || isForcedReset || needsJump) {
+        console.log(`[RENDER-SYNC] Cưỡng bức nhảy sang câu: ${index}`);
+        
+        // Cập nhật State theo kiểu Object để tạo "phiên bản mới"
+        setSyncState({ index: index, version: Date.now() });
+        
+        // Reset sạch sẽ các trạng thái nhập liệu
         setUserAnswer('');
         setFeedback(null);
         setHasBuzzed(false);
-        setGameState('ANSWERING');
-        setTimeLeft(rounds[0]?.problems[index]?.timeLimit || 40);
-        setTimeout(() => reportProgress("Đang theo bài giảng..."), 300);
+        setIsWhiteboardActive(false);
+        setGameState('ANSWERING'); // Bắt buộc quay lại trạng thái trả lời
+        
+        const newProb = rounds[0]?.problems[index];
+        if (newProb) {
+          setTimeLeft(newProb.timeLimit || 40);
+        }
+        
+        // Báo cáo lại cho GV sau khi đã render xong
+        setTimeout(() => reportProgress("Đã nhảy sang câu mới ✨"), 300);
       }
     }
   };
 
   useEffect(() => {
-    const channelName = `room_TEACHER_LIVE_${currentTeacher.id}`;
+    const channelName = `room_TEACHER_LIVE_${currentTeacher.id}_match_${uniqueId}`;
     const channel = supabase.channel(channelName);
     
     channel
       .on('broadcast', { event: 'teacher_command' }, ({ payload }) => handleTeacherCommand(payload))
       .on('broadcast', { event: 'teacher_ping' }, () => {
-        channel.send({ type: 'broadcast', event: 'student_presence_report', payload: { name: playerName, uniqueId, grade: studentGrade, progress: `Câu ${currentProblemIdx + 1}` } });
+        channel.send({ 
+          type: 'broadcast', 
+          event: 'student_presence_report', 
+          payload: { 
+            name: playerName, uniqueId, grade: studentGrade, 
+            progress: `Câu ${lastStateRef.current.index + 1}` 
+          } 
+        });
       })
-      .subscribe();
+      .subscribe((status) => {
+        if (status === 'SUBSCRIBED') {
+          channel.send({ type: 'broadcast', event: 'request_sync' });
+        }
+      });
 
     channelRef.current = channel;
     return () => { supabase.removeChannel(channel); };
-  }, [currentTeacher.id, playerName, uniqueId, studentGrade, currentProblemIdx, gameState]);
+  }, [currentTeacher.id, uniqueId]);
 
   useEffect(() => {
     if (gameState === 'ANSWERING' && timeLeft > 0 && !isWhiteboardActive) {
@@ -94,14 +137,21 @@ const TeacherEngine: React.FC<TeacherEngineProps> = ({ gameState, setGameState, 
 
   const submitAnswer = () => {
     if (!hasBuzzed) return;
+    const currentProblem = rounds[0]?.problems[syncState.index];
     const correct = (currentProblem?.correctAnswer || "").trim().toUpperCase();
     const isPerfect = userAnswer.trim().toUpperCase() === correct;
     const points = isPerfect ? (isHelpUsed ? 60 : 100) : 0;
+    
     setScore(s => s + points);
-    setFeedback({ isCorrect: isPerfect, text: isPerfect ? '✨ CHÍNH XÁC!' : `❌ SAI RỒI! Đáp án đúng: ${correct}` });
+    setFeedback({ 
+      isCorrect: isPerfect, 
+      text: isPerfect ? '✨ CHÍNH XÁC!' : `❌ SAI RỒI! Đáp án đúng: ${correct}` 
+    });
     setGameState('FEEDBACK');
     reportProgress(undefined, isPerfect, true);
   };
+
+  const currentProblem = rounds[0]?.problems[syncState.index];
 
   if (gameState === 'GAME_OVER') {
     return (
@@ -121,23 +171,31 @@ const TeacherEngine: React.FC<TeacherEngineProps> = ({ gameState, setGameState, 
       <header className="bg-white px-8 py-4 rounded-full shadow-lg mb-6 flex justify-between items-center border-b-4 border-slate-200">
         <div className="flex items-center gap-4">
            <div className="bg-blue-600 text-white px-6 py-2 rounded-2xl font-black italic shadow-lg">ĐIỂM: {score}đ</div>
-           <div className="text-[10px] font-black text-slate-300 uppercase italic">Câu {currentProblemIdx + 1} / {rounds[0]?.problems?.length || 0}</div>
+           <div className="text-[10px] font-black text-slate-300 uppercase italic">Câu {syncState.index + 1} / {rounds[0]?.problems?.length || 0}</div>
         </div>
         <div className="flex items-center gap-8">
            <div className="text-4xl font-black italic tabular-nums text-slate-900">{timeLeft}s</div>
            <button onClick={onExit} className="w-10 h-10 bg-red-50 text-red-500 rounded-xl font-black flex items-center justify-center">✕</button>
         </div>
       </header>
-      <div className="flex-1 grid grid-cols-12 gap-8 min-h-0 relative">
+      
+      {/* 
+          KEY VERSIONING: Đây là chìa khóa giải quyết vấn đề của bạn.
+          Khi syncState.version thay đổi (mỗi khi GV bấm Next), React sẽ xóa bỏ toàn bộ
+          DOM cũ và dựng lại cái mới hoàn toàn, đảm bảo không bao giờ bị "kẹt" render.
+      */}
+      <div key={`arena-content-${syncState.index}-${syncState.version}`} className="flex-1 grid grid-cols-12 gap-8 min-h-0 relative">
         {isWhiteboardActive && (
           <div className="absolute inset-0 z-50 bg-slate-950 rounded-[3.5rem] p-4 shadow-2xl animate-in zoom-in">
             <Whiteboard isTeacher={false} channel={channelRef.current} roomCode="TEACHER_ROOM" />
             <div className="absolute bottom-8 left-1/2 -translate-x-1/2 bg-white/10 backdrop-blur-md px-6 py-2 rounded-full border border-white/20 text-white font-black italic text-[10px] uppercase">Thầy đang giảng bài...</div>
           </div>
         )}
+        
         <div className="col-span-7 h-full">
            <ProblemCard problem={currentProblem} isHelpUsed={isHelpUsed} isPaused={gameState !== 'ANSWERING' || isWhiteboardActive} />
         </div>
+        
         <div className="col-span-5 bg-white rounded-[3.5rem] p-10 shadow-2xl flex flex-col border-4 border-slate-50 h-full">
            {gameState === 'ANSWERING' ? (
              <div className="flex flex-col h-full">
@@ -145,7 +203,9 @@ const TeacherEngine: React.FC<TeacherEngineProps> = ({ gameState, setGameState, 
                   <h3 className="text-[10px] font-black text-slate-400 uppercase italic">Làm bài:</h3>
                   <button onClick={() => { setHasBuzzed(true); reportProgress("🛎️ GIÀNH QUYỀN!"); }} disabled={hasBuzzed} className={`px-6 py-2 rounded-xl font-black text-[10px] uppercase italic transition-all ${hasBuzzed ? 'bg-amber-100 text-amber-600 border border-amber-200' : 'bg-red-600 text-white shadow-lg border-b-4 border-red-800'}`}>{hasBuzzed ? '🔔 ĐÃ GIÀNH QUYỀN' : 'GIÀNH QUYỀN 🛎️'}</button>
                 </div>
-                <div className="flex-1 overflow-y-auto no-scrollbar"><AnswerInput problem={currentProblem} value={userAnswer} onChange={setUserAnswer} onSubmit={submitAnswer} disabled={false} /></div>
+                <div className="flex-1 overflow-y-auto no-scrollbar">
+                  <AnswerInput problem={currentProblem} value={userAnswer} onChange={setUserAnswer} onSubmit={submitAnswer} disabled={false} />
+                </div>
                 {hasBuzzed && <button onClick={submitAnswer} disabled={!userAnswer} className="w-full py-6 bg-blue-600 text-white rounded-3xl font-black italic text-xl mt-8 shadow-xl border-b-8 border-blue-800 active:translate-y-1 active:border-b-0">XÁC NHẬN ✅</button>}
              </div>
            ) : (
