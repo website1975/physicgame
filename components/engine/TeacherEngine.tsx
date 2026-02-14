@@ -46,16 +46,18 @@ const TeacherEngine: React.FC<TeacherEngineProps> = ({ gameState, setGameState, 
   }, [gameState, currentRoundIdx, currentProblemIdx, buzzerWinner, score]);
 
   // Báo cáo về Bảng điều khiển của Thầy thông qua kênh arena_live
-  const reportProgress = () => {
+  // Cập nhật: Truyền điểm trực tiếp để tránh race condition
+  const reportProgress = (currentScore: number, progressStr?: string) => {
     if (!channelRef.current) return;
+    const prog = progressStr || `Câu ${flatIndex + 1}/${allProblems.length}`;
     channelRef.current.send({
       type: 'broadcast',
       event: 'student_score_update',
       payload: { 
         name: playerName, 
         uniqueId: myId, 
-        score: stateRef.current.score,
-        progress: `Câu ${flatIndex + 1}/${allProblems.length}`
+        score: currentScore,
+        progress: prog
       }
     });
   };
@@ -83,7 +85,8 @@ const TeacherEngine: React.FC<TeacherEngineProps> = ({ gameState, setGameState, 
       })
       .on('broadcast', { event: 'teacher_command' }, (msg) => {
         if (msg.payload.type === 'SYNC_NEXT') {
-           handleNextQuestion();
+           // Đảm bảo nhảy đúng câu mà thầy đang ở đó
+           handleNextQuestion(msg.payload.problemIdx);
         } else if (msg.payload.type === 'STOP') {
            setStopMessage(msg.payload.message || "Các em ngừng, nghe thầy giảng");
         } else if (msg.payload.type === 'RESUME') {
@@ -93,7 +96,8 @@ const TeacherEngine: React.FC<TeacherEngineProps> = ({ gameState, setGameState, 
       .subscribe();
 
     channelRef.current = channel;
-    reportProgress();
+    // Báo cáo trạng thái ban đầu
+    reportProgress(score);
     return () => { supabase.removeChannel(channel); };
   }, [tId, currentProblem?.id, stopMessage]);
 
@@ -143,7 +147,8 @@ const TeacherEngine: React.FC<TeacherEngineProps> = ({ gameState, setGameState, 
     const isPerfect = userAnswer.trim().toUpperCase() === correct;
     const points = isPerfect ? (isHelpUsed ? 60 : 100) : (isHelpUsed ? -40 : -50);
     
-    setScore(s => s + points);
+    const newScore = score + points;
+    setScore(newScore);
     setFeedback({ isCorrect: isPerfect, text: isPerfect ? `CHÍNH XÁC! (+${points}đ)` : `SAI RỒI! (${points}đ). Đáp án: ${correct}` });
     setGameState('FEEDBACK');
     
@@ -152,18 +157,34 @@ const TeacherEngine: React.FC<TeacherEngineProps> = ({ gameState, setGameState, 
       event: 'match_result', 
       payload: { playerId: myId, points, isCorrect: isPerfect } 
     });
-    reportProgress();
+    
+    // Báo cáo ngay lập tức với điểm số mới
+    reportProgress(newScore);
   };
 
-  const handleNextQuestion = () => {
-    let nextP = currentProblemIdx + 1;
+  const handleNextQuestion = (forcedIdx?: number) => {
+    let nextP = typeof forcedIdx === 'number' ? forcedIdx : currentProblemIdx + 1;
     let nextR = currentRoundIdx;
     let nextState: GameState = 'WAITING_FOR_BUZZER';
 
-    if (nextP >= (rounds[nextR]?.problems?.length || 0)) {
-      nextP = 0;
-      nextR++;
-      nextState = 'ROUND_INTRO';
+    // Tính toán vòng dựa trên chỉ số phẳng nếu được ép buộc từ thầy
+    if (typeof forcedIdx === 'number') {
+       let count = 0;
+       for (let i = 0; i < rounds.length; i++) {
+          const probCount = rounds[i].problems.length;
+          if (forcedIdx < count + probCount) {
+             nextR = i;
+             nextP = forcedIdx - count;
+             break;
+          }
+          count += probCount;
+       }
+    } else {
+       if (nextP >= (rounds[nextR]?.problems?.length || 0)) {
+         nextP = 0;
+         nextR++;
+         nextState = 'ROUND_INTRO';
+       }
     }
 
     if (nextR < rounds.length) {
@@ -175,7 +196,10 @@ const TeacherEngine: React.FC<TeacherEngineProps> = ({ gameState, setGameState, 
       setIsHelpUsed(false);
       setTimeLeft(rounds[nextR].problems[nextP].timeLimit || 40);
       setGameState(nextState);
-      reportProgress();
+      
+      // Báo cáo tiến độ mới sau khi đổi câu
+      const prog = `Câu ${forcedIdx !== undefined ? forcedIdx + 1 : flatIndex + 2}/${allProblems.length}`;
+      reportProgress(score, prog);
     } else {
       setGameState('GAME_OVER');
     }
@@ -206,8 +230,8 @@ const TeacherEngine: React.FC<TeacherEngineProps> = ({ gameState, setGameState, 
 
       <header className="bg-white px-10 py-6 rounded-full shadow-lg mb-6 flex justify-between items-center border-b-8 border-slate-200">
         <div className="flex items-center gap-6">
-           <div className="bg-blue-600 text-white px-8 py-3 rounded-full font-black italic shadow-lg text-lg">ĐIỂM: {score}</div>
-           <div className="hidden md:flex flex-col">
+           <div className="bg-blue-600 text-white px-8 py-3 rounded-full font-black italic shadow-lg text-lg text-left">ĐIỂM: {score}</div>
+           <div className="hidden md:flex flex-col text-left">
               <span className="text-[9px] font-black text-slate-300 uppercase italic">LIVE: {currentTeacher?.tengv}</span>
               <span className="text-sm font-black text-slate-800 italic uppercase">Câu {flatIndex + 1} / {allProblems.length}</span>
            </div>
@@ -261,7 +285,7 @@ const TeacherEngine: React.FC<TeacherEngineProps> = ({ gameState, setGameState, 
              <div className="flex flex-col h-full w-full animate-in slide-in-from-right">
                 <div className={`text-4xl font-black uppercase italic mb-6 ${feedback?.isCorrect ? 'text-emerald-500' : 'text-rose-500'}`}>{feedback?.isCorrect ? '✨ CHÍNH XÁC!' : '💥 SAI MẤT RỒI!'}</div>
                 <div className="bg-slate-50 p-8 rounded-[2.5rem] border-2 border-slate-100 italic font-bold text-slate-700 mb-8 shadow-inner"><LatexRenderer content={feedback?.text || ""} /></div>
-                <div className="flex-1 bg-emerald-50/50 p-10 rounded-[3rem] border-2 border-emerald-100 overflow-y-auto no-scrollbar"><div className="text-slate-600 italic leading-relaxed text-lg"><LatexRenderer content={currentProblem?.explanation || "Không có giải chi tiết."} /></div></div>
+                <div className="flex-1 bg-emerald-50/50 p-10 rounded-[3rem] border-2 border-emerald-100 overflow-y-auto no-scrollbar text-left"><div className="text-slate-600 italic leading-relaxed text-lg"><LatexRenderer content={currentProblem?.explanation || "Không có giải chi tiết."} /></div></div>
                 
                 <div className="mt-10 p-6 bg-blue-600 text-white rounded-[2rem] shadow-xl animate-pulse flex flex-col items-center gap-2">
                    <div className="text-xs font-black uppercase italic tracking-widest">ĐANG ĐỢI LỆNH TỪ THẦY</div>
