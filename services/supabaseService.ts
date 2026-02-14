@@ -67,6 +67,34 @@ export const fetchTeacherByMaGV = async (maGV: string): Promise<Teacher | null> 
   } as Teacher;
 };
 
+export const fetchTeacherById = async (id: string): Promise<Teacher | null> => {
+  let { data } = await supabase.from('giaovien').select('*').eq('id', id).maybeSingle();
+  if (!data) return null;
+  return { 
+    id: data.id, 
+    magv: data.magv || data.maGV, 
+    tengv: data.tengv || data.TenGV, 
+    monday: data.monday || data.MonDay, 
+    pass: data.pass || data.PASS,
+    role: (data.role || 'TEACHER').toUpperCase() as 'ADMIN' | 'TEACHER'
+  } as Teacher;
+};
+
+export const fetchSessionByCode = async (code: string) => {
+  const { data, error } = await supabase
+    .from('room_assignments')
+    .select('*')
+    .eq('room_code', code.toUpperCase())
+    .order('assigned_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  return { data, error };
+};
+
+export const fetchTeacherByRoomCode = async (roomCode: string): Promise<Teacher | null> => {
+  return fetchTeacherByMaGV(roomCode);
+};
+
 const inferMetadata = (set: any) => {
     if (!set) return null;
     let grade = set.grade || set.GRADE;
@@ -90,7 +118,8 @@ const inferMetadata = (set: any) => {
         grade: String(grade || "10"),
         subject: subject || "Vật lý",
         round_count: rCount || 0,
-        question_count: qCount || 0
+        question_count: qCount || 0,
+        is_legacy: typeof set.teacher_id === 'string' && set.teacher_id.length < 20
     };
 };
 
@@ -135,15 +164,18 @@ export const fetchSetData = async (setId: string): Promise<{ rounds: Round[], to
   };
 };
 
-export const assignSetToRoom = async (teacherId: string, roomCode: string, setId: string) => {
-  const { error } = await supabase.from('room_assignments').upsert({ 
-    teacher_id: teacherId, 
-    room_code: roomCode, 
-    set_id: setId, 
-    assigned_at: new Date().toISOString() 
-  }, { onConflict: 'teacher_id,room_code,set_id' });
-  if (error) throw error;
-  return true;
+/**
+ * Added to satisfy imports in StudentArenaFlow.tsx (root and components)
+ * Fetches all assignments for a specific teacher and room code.
+ */
+export const getRoomAssignments = async (teacherId: string, roomCode: string): Promise<{set_id: string, assigned_at: string}[]> => {
+  const { data, error } = await supabase.from('room_assignments')
+    .select('set_id, assigned_at')
+    .eq('teacher_id', teacherId)
+    .eq('room_code', roomCode)
+    .order('assigned_at', { ascending: true });
+  if (error || !data) return [];
+  return data.map(row => ({ set_id: row.set_id, assigned_at: row.assigned_at }));
 };
 
 export const getSetAssignments = async (teacherId: string, setId: string): Promise<string[]> => {
@@ -152,27 +184,19 @@ export const getSetAssignments = async (teacherId: string, setId: string): Promi
   return data.map(row => row.room_code);
 };
 
-export const getRoomAssignmentsWithMeta = async (teacherId: string, roomCode: string): Promise<any[]> => {
-  const { data: assignments, error: assignError } = await supabase.from('room_assignments').select('set_id, assigned_at').eq('teacher_id', teacherId).eq('room_code', roomCode);
-  if (assignError || !assignments || assignments.length === 0) return [];
-  const setIds = assignments.map(a => a.set_id);
-  const { data: sets, error: setsError } = await supabase.from('exam_sets').select('*').eq('teacher_id', teacherId).in('id', setIds);
-  if (setsError || !sets) return [];
-  return assignments.map(assign => {
-      const setRaw = sets.find(s => s.id === assign.set_id);
-      if (!setRaw) return null;
-      return { ...inferMetadata(setRaw), assigned_at: assign.assigned_at };
-  }).filter(Boolean);
+export const removeRoomAssignment = async (teacherId: string, roomCode: string, setId: string) => {
+  await supabase.from('room_assignments').delete().match({ teacher_id: teacherId, room_code: roomCode, set_id: setId });
+  return true;
 };
 
-export const removeRoomAssignment = async (teacherId: string, roomCode: string, setId: string) => {
-  // Logic dọn dẹp triệt để mã phòng GV
-  if (roomCode.includes('TEACHER')) {
-    await supabase.from('room_assignments').delete().match({ teacher_id: teacherId, room_code: 'TEACHER_LIVE', set_id: setId });
-    await supabase.from('room_assignments').delete().match({ teacher_id: teacherId, room_code: 'TEACHER_ROOM', set_id: setId });
-  } else {
-    await supabase.from('room_assignments').delete().match({ teacher_id: teacherId, room_code: roomCode, set_id: setId });
-  }
+export const assignSetToRoom = async (teacherId: string, roomCode: string, setId: string) => {
+  const { error } = await supabase.from('room_assignments').upsert({ 
+    teacher_id: teacherId, 
+    room_code: roomCode, 
+    set_id: setId, 
+    assigned_at: new Date().toISOString() 
+  }, { onConflict: 'teacher_id,room_code,set_id' });
+  if (error) throw error;
   return true;
 };
 
@@ -248,19 +272,24 @@ export const deleteTeacher = async (id: string) => {
   return true;
 };
 
-export const createSampleExamSet = async (teacherId: string) => {
-  const sampleRounds: Round[] = [
-    {
-      number: 1,
-      description: "Vòng khởi động!",
-      problems: [
-        {
-          id: 's1', title: 'Năng lượng', content: 'Tính thế năng của vật khối lượng $m = 2kg$ ở độ cao $h = 5m$. Lấy $g = 10 m/s^2$.',
-          difficulty: Difficulty.EASY, type: QuestionType.SHORT_ANSWER, challenge: DisplayChallenge.NORMAL,
-          correctAnswer: '100', topic: 'Năng lượng', explanation: '$W_t = mgh = 2.10.5 = 100J$', grade: '10'
-        }
-      ]
-    }
-  ];
-  return await saveExamSet(teacherId, "Bộ đề mẫu: Năng lượng", sampleRounds, "Cơ học", "10", "Vật lý");
+export const standardizeLegacySets = async (teacherId: string, maGV: string) => {
+  const { error } = await supabase
+    .from('exam_sets')
+    .update({ teacher_id: teacherId })
+    .eq('teacher_id', maGV);
+  if (error) throw error;
+  return true;
+};
+
+export const getRoomAssignmentsWithMeta = async (teacherId: string, roomCode: string): Promise<any[]> => {
+  const { data: assignments, error: assignError } = await supabase.from('room_assignments').select('set_id, assigned_at, room_code').eq('teacher_id', teacherId).eq('room_code', roomCode);
+  if (assignError || !assignments || assignments.length === 0) return [];
+  const setIds = assignments.map(a => a.set_id);
+  const { data: sets, error: setsError } = await supabase.from('exam_sets').select('*').eq('teacher_id', teacherId).in('id', setIds);
+  if (setsError || !sets) return [];
+  return assignments.map(assign => {
+      const setRaw = sets.find(s => s.id === assign.set_id);
+      if (!setRaw) return null;
+      return { ...inferMetadata(setRaw), assigned_at: assign.assigned_at, room_code: assign.room_code };
+  }).filter(Boolean);
 };
