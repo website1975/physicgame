@@ -1,9 +1,10 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { GameState, Teacher } from '../types';
 import SoloArenaManager from './arena/SoloArenaManager';
 import MultiPlayerArenaManager from './arena/MultiPlayerArenaManager';
 import TeacherArenaManager from './arena/TeacherArenaManager';
+import { supabase } from '../services/supabaseService';
 
 interface StudentArenaFlowProps {
   gameState: GameState;
@@ -27,14 +28,50 @@ const ARENA_ROOMS = [
 ];
 
 const StudentArenaFlow: React.FC<StudentArenaFlowProps> = (props) => {
-  const { gameState, setGameState, playerName, joinedRoom, setJoinedRoom, currentTeacher } = props;
+  const { gameState, setGameState, playerName, joinedRoom, setJoinedRoom, currentTeacher, onStartMatch } = props;
   const [uniqueId] = useState(() => Math.random().toString(36).substring(7));
+  const [presentPlayers, setPresentPlayers] = useState<string[]>([]);
+  const channelRef = useRef<any>(null);
 
   const handleQuickJoinLive = () => {
     if (!currentTeacher?.magv) return;
     setJoinedRoom(ARENA_ROOMS.find(r => r.code === 'TEACHER_LIVE'));
     setGameState('WAITING_ROOM'); 
   };
+
+  // Logic sảnh chờ đồng bộ cho Teacher Room
+  useEffect(() => {
+    if (gameState === 'WAITING_FOR_PLAYERS' && joinedRoom?.code === 'TEACHER_ROOM') {
+       const channelName = `arena_live_${currentTeacher.id.trim()}`;
+       const channel = supabase.channel(channelName, {
+         config: { presence: { key: `${playerName}::${uniqueId}` } }
+       });
+
+       channel
+        .on('presence', { event: 'sync' }, () => {
+           const state = channel.presenceState();
+           setPresentPlayers(Object.keys(state).filter(k => k !== 'teacher').map(k => k.split('::')[0]));
+        })
+        .on('broadcast', { event: 'teacher_command' }, (msg) => {
+           if (msg.payload.type === 'START') {
+              onStartMatch({
+                setId: msg.payload.setId,
+                title: msg.payload.title,
+                rounds: msg.payload.rounds,
+                joinedRoom,
+                myId: uniqueId,
+                opponents: []
+              });
+           }
+        })
+        .subscribe(async (status) => {
+           if (status === 'SUBSCRIBED') await channel.track({ online: true, role: 'student' });
+        });
+
+       channelRef.current = channel;
+       return () => { supabase.removeChannel(channel); };
+    }
+  }, [gameState, joinedRoom, currentTeacher.id, playerName, uniqueId]);
 
   if (gameState === 'ROOM_SELECTION') {
     return (
