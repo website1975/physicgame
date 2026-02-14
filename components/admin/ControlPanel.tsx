@@ -27,12 +27,14 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
   const [isStarting, setIsStarting] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
   const [matchRunning, setMatchRunning] = useState(false);
+  const [currentProblemIdx, setCurrentProblemIdx] = useState(0);
   const channelRef = useRef<any>(null);
+
+  const allProblemsCount = rounds.flatMap(r => r.problems).length;
 
   useEffect(() => {
     if (!teacherId) return;
     
-    // Sử dụng tên kênh thống nhất: arena_live_ID
     const channelName = `arena_live_${teacherId.trim()}`;
     const channel = supabase.channel(channelName, {
       config: { presence: { key: 'teacher' } }
@@ -45,11 +47,10 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
         
         setStudentRegistry(prev => {
           const next = { ...prev };
-          // Reset trạng thái online trước khi cập nhật
           Object.keys(next).forEach(k => { next[k].isOnline = false; });
           
           onlineKeys.forEach(key => {
-            if (key === 'teacher') return; // Không hiển thị giáo viên vào danh sách học sinh
+            if (key === 'teacher') return;
             
             const [name, uid] = key.split('::');
             if (!next[key]) {
@@ -81,7 +82,6 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
       })
       .subscribe(async (status) => {
         if (status === 'SUBSCRIBED') {
-          // Giáo viên cũng track để kênh luôn hoạt động
           await channel.track({ role: 'teacher' });
         }
       });
@@ -99,6 +99,7 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
     setIsStarting(true);
     setIsPaused(false);
     setMatchRunning(true);
+    setCurrentProblemIdx(0);
     try {
       channelRef.current.send({
         type: 'broadcast',
@@ -145,10 +146,21 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
 
   const handleNextStep = () => {
     if (!channelRef.current) return;
+    const nextIdx = currentProblemIdx + 1;
+    if (nextIdx >= allProblemsCount) {
+       alert("Đã hết câu hỏi!");
+       return;
+    }
+    
+    setCurrentProblemIdx(nextIdx);
     channelRef.current.send({
       type: 'broadcast',
       event: 'teacher_command',
-      payload: { type: 'SYNC_NEXT', code: teacherMaGV }
+      payload: { 
+        type: 'SYNC_NEXT', 
+        code: teacherMaGV,
+        problemIdx: nextIdx 
+      }
     });
   };
 
@@ -163,10 +175,10 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
               <span className="text-[9px] font-black uppercase text-blue-400 block mb-1">MÃ PHÒNG LIVE</span>
               <div className="text-4xl font-black italic tracking-widest text-yellow-400">{teacherMaGV}</div>
            </div>
-           <div>
+           <div className="text-left">
               <h3 className="text-2xl font-black text-slate-800 uppercase italic leading-none mb-2">Điều phối Arena</h3>
               <p className="text-[11px] font-bold italic uppercase text-blue-600">
-                 {isPaused ? '🛑 ĐANG DỪNG GIẢNG BÀI' : (matchRunning ? '🎮 ĐANG TRONG TRẬN ĐẤU' : '⌛ ĐANG ĐỢI HỌC SINH...')}
+                 {isPaused ? '🛑 ĐANG DỪNG GIẢNG BÀI' : (matchRunning ? `🎮 CÂU ${currentProblemIdx + 1} / ${allProblemsCount}` : '⌛ ĐANG ĐỢI HỌC SINH...')}
               </p>
            </div>
         </div>
@@ -202,7 +214,7 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
                      <th className="px-8 py-4 text-[9px] font-black text-slate-400 uppercase italic tracking-widest">Học sinh</th>
                      <th className="px-8 py-4 text-[9px] font-black text-slate-400 uppercase italic tracking-widest">Tiến độ</th>
                      <th className="px-8 py-4 text-[9px] font-black text-slate-400 uppercase italic tracking-widest text-center">Điểm</th>
-                     <th className="px-8 py-4 text-[9px] font-black text-slate-400 uppercase italic tracking-widest text-right">Sẵn sàng</th>
+                     <th className="px-8 py-4 text-[9px] font-black text-slate-400 uppercase italic tracking-widest text-right">Trạng thái</th>
                   </tr>
                </thead>
                <tbody className="divide-y divide-slate-50">
@@ -214,7 +226,7 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
                        <td className="px-8 py-5 text-center"><div className="text-2xl font-black text-slate-900 italic leading-none">{s.score}</div></td>
                        <td className="px-8 py-5 text-right"><span className={`w-3 h-3 rounded-full inline-block ${s.isOnline ? 'bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.5)]' : 'bg-slate-200'}`}></span></td>
                     </tr>
-                  )) : <tr><td colSpan={5} className="py-24 text-center opacity-20 italic font-black uppercase">Đang đợi học sinh kết nối vào kênh arena_live...</td></tr>}
+                  )) : <tr><td colSpan={5} className="py-24 text-center opacity-20 italic font-black uppercase text-center">Đang đợi học sinh kết nối vào kênh arena_live...</td></tr>}
                </tbody>
             </table>
          </div>
