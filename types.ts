@@ -16,9 +16,9 @@ export enum DisplayChallenge {
   MEMORY = 'Ghi nhớ nhanh',
   FOGGY = 'Màn sương mờ',
   SCRAMBLED = 'Sắp xếp từ',
-  // Added missing members for ProblemCard logic
-  FLOODING = 'Nước dâng cao',
-  ANTS = 'Kiến bò'
+  ANTS = 'Kiến bò lung tung',
+  FLOODING = 'Nước dâng ngập chữ',
+  DISTRACTORS = 'Vật thể nhiễu'
 }
 
 export enum InteractiveMechanic {
@@ -37,7 +37,7 @@ export interface Teacher {
   tengv: string;
   monday: string;
   pass: string;
-  role: 'ADMIN' | 'TEACHER'; // Trường mới để phân quyền
+  role: 'ADMIN' | 'TEACHER';
   email?: string;
 }
 
@@ -81,17 +81,16 @@ export interface GameSettings {
   maxPlayers: number;
 }
 
-// Added MatchData interface required by Arena managers and Game engines
+export type AdminTab = 'EDITOR' | 'CLOUD' | 'LAB' | 'MANAGEMENT' | 'CONTROL';
+
+export type GameState = 'LOBBY' | 'ROOM_SELECTION' | 'SET_SELECTION' | 'WAITING_ROOM' | 'ADMIN' | 'ROUND_INTRO' | 'STARTING_ROUND' | 'STARTING_QUESTION' | 'STARTING_ROUND_REVEAL' | 'WAITING_FOR_BUZZER' | 'ANSWERING' | 'FEEDBACK' | 'GAME_OVER' | 'STUDENT_SETUP' | 'TEACHER_LOGIN' | 'WAITING_FOR_PLAYERS' | 'KEYWORD_SELECTION';
+
 export interface MatchData {
   setId: string;
   title: string;
   rounds: Round[];
-  opponents?: { id: string; name: string }[];
+  opponents?: { id: string, name: string }[];
   joinedRoom?: any;
   startIndex?: number;
   myId?: string;
 }
-
-export type AdminTab = 'EDITOR' | 'CONTROL' | 'CLOUD' | 'LAB' | 'MANAGEMENT'; // Thêm MANAGEMENT
-
-export type GameState = 'LOBBY' | 'ROOM_SELECTION' | 'SET_SELECTION' | 'WAITING_ROOM' | 'ADMIN' | 'ROUND_INTRO' | 'STARTING_ROUND' | 'WAITING_FOR_BUZZER' | 'ANSWERING' | 'FEEDBACK' | 'LECTURING' | 'GAME_OVER' | 'ENTER_CODE' | 'STUDENT_SETUP' | 'TEACHER_LOGIN' | 'WAITING_FOR_PLAYERS' | 'KEYWORD_SELECTION';
