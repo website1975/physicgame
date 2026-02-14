@@ -45,8 +45,8 @@ const TeacherEngine: React.FC<TeacherEngineProps> = ({ gameState, setGameState, 
     stateRef.current = { gameState, currentRoundIdx, currentProblemIdx, buzzerWinner, score };
   }, [gameState, currentRoundIdx, currentProblemIdx, buzzerWinner, score]);
 
-  // Báo cáo về Bảng điều khiển của Thầy
-  const reportProgress = (statusStr?: string) => {
+  // Báo cáo về Bảng điều khiển của Thầy thông qua kênh arena_live
+  const reportProgress = () => {
     if (!channelRef.current) return;
     channelRef.current.send({
       type: 'broadcast',
@@ -62,7 +62,7 @@ const TeacherEngine: React.FC<TeacherEngineProps> = ({ gameState, setGameState, 
 
   useEffect(() => {
     if (!tId) return;
-    const channelName = `teacher_control_${tId}`;
+    const channelName = `arena_live_${tId}`;
     const channel = supabase.channel(channelName);
 
     channel
