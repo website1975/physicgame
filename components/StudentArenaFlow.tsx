@@ -1,10 +1,9 @@
 
-import React, { useState, useEffect, useRef } from 'react';
-import { GameState, Teacher } from '../types';
+import React, { useState } from 'react';
+import { GameState, Teacher, MatchData } from '../types';
 import SoloArenaManager from './arena/SoloArenaManager';
 import MultiPlayerArenaManager from './arena/MultiPlayerArenaManager';
 import TeacherArenaManager from './arena/TeacherArenaManager';
-import { supabase } from '../services/supabaseService';
 
 interface StudentArenaFlowProps {
   gameState: GameState;
@@ -12,7 +11,7 @@ interface StudentArenaFlowProps {
   playerName: string;
   studentGrade: string;
   currentTeacher: Teacher;
-  onStartMatch: (data: any) => void;
+  onStartMatch: (data: MatchData) => void;
   joinedRoom: any;
   setJoinedRoom: (room: any) => void;
   availableSets: any[];
@@ -24,54 +23,12 @@ const ARENA_ROOMS = [
   { id: '2', name: 'Phòng đôi', code: 'ARENA_B', emoji: '⚔️', color: 'bg-purple-600', capacity: 2, desc: 'Đấu 1 vs 1' },
   { id: '3', name: 'Phòng 3', code: 'ARENA_C', emoji: '🏹', color: 'bg-emerald-600', capacity: 3, desc: 'Hỗn chiến 3 người' },
   { id: '4', name: 'Phòng 4', code: 'ARENA_D', emoji: '🔱', color: 'bg-amber-500', capacity: 4, desc: 'Tứ hùng tranh tài' },
-  { id: '5', name: 'Phòng GV LIVE', code: 'TEACHER_LIVE', emoji: '👨‍🏫', color: 'bg-rose-600', capacity: 100, desc: 'Kết nối trực tiếp với Thầy' },
+  { id: '5', name: 'Phòng GV LIVE', code: 'TEACHER_LIVE', emoji: '👨‍🏫', color: 'bg-rose-600', capacity: 100, desc: 'Học trực tiếp cùng Thầy' },
 ];
 
 const StudentArenaFlow: React.FC<StudentArenaFlowProps> = (props) => {
-  const { gameState, setGameState, playerName, joinedRoom, setJoinedRoom, currentTeacher, onStartMatch } = props;
+  const { gameState, setGameState, playerName, joinedRoom, setJoinedRoom } = props;
   const [uniqueId] = useState(() => Math.random().toString(36).substring(7));
-  const [presentPlayers, setPresentPlayers] = useState<string[]>([]);
-  const channelRef = useRef<any>(null);
-
-  const handleQuickJoinLive = () => {
-    if (!currentTeacher?.magv) return;
-    setJoinedRoom(ARENA_ROOMS.find(r => r.code === 'TEACHER_LIVE'));
-    setGameState('WAITING_ROOM'); 
-  };
-
-  // Logic sảnh chờ đồng bộ cho Teacher Room
-  useEffect(() => {
-    if (gameState === 'WAITING_FOR_PLAYERS' && joinedRoom?.code === 'TEACHER_ROOM') {
-       const channelName = `arena_live_${currentTeacher.id.trim()}`;
-       const channel = supabase.channel(channelName, {
-         config: { presence: { key: `${playerName}::${uniqueId}` } }
-       });
-
-       channel
-        .on('presence', { event: 'sync' }, () => {
-           const state = channel.presenceState();
-           setPresentPlayers(Object.keys(state).filter(k => k !== 'teacher').map(k => k.split('::')[0]));
-        })
-        .on('broadcast', { event: 'teacher_command' }, (msg) => {
-           if (msg.payload.type === 'START') {
-              onStartMatch({
-                setId: msg.payload.setId,
-                title: msg.payload.title,
-                rounds: msg.payload.rounds,
-                joinedRoom,
-                myId: uniqueId,
-                opponents: []
-              });
-           }
-        })
-        .subscribe(async (status) => {
-           if (status === 'SUBSCRIBED') await channel.track({ online: true, role: 'student' });
-        });
-
-       channelRef.current = channel;
-       return () => { supabase.removeChannel(channel); };
-    }
-  }, [gameState, joinedRoom, currentTeacher.id, playerName, uniqueId]);
 
   if (gameState === 'ROOM_SELECTION') {
     return (
@@ -81,19 +38,21 @@ const StudentArenaFlow: React.FC<StudentArenaFlowProps> = (props) => {
         </div>
         <div className="text-center mb-12">
           <h2 className="text-6xl font-black text-white italic uppercase tracking-tighter">Hệ thống Đấu Trường</h2>
-          <div className="flex items-center justify-center gap-4 mt-4">
-             <p className="text-blue-400 font-black uppercase text-[10px] tracking-widest italic">Học sinh: {playerName}</p>
-             <span className="w-1.5 h-1.5 bg-white/20 rounded-full"></span>
-             <p className="text-rose-400 font-black uppercase text-[10px] tracking-widest italic">GV Phụ trách: {currentTeacher?.tengv}</p>
-          </div>
+          <p className="text-blue-400 font-bold uppercase text-[10px] mt-2 tracking-[0.3em]">Chiến binh: {playerName} <span className="opacity-40">#{uniqueId.slice(-3).toUpperCase()}</span></p>
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-6 w-full max-w-7xl">
           {ARENA_ROOMS.map(room => (
-            <button key={room.code} onClick={() => { 
-                if (room.code === 'TEACHER_LIVE') handleQuickJoinLive();
-                else { setJoinedRoom(room); setGameState('WAITING_FOR_PLAYERS'); }
+            <button 
+              key={room.code} 
+              onClick={() => { 
+                setJoinedRoom(room); 
+                if (room.code === 'TEACHER_LIVE') {
+                  setGameState('WAITING_ROOM'); 
+                } else {
+                  setGameState('WAITING_FOR_PLAYERS');
+                }
               }} 
-              className="bg-white p-8 rounded-[4rem] flex flex-col items-center gap-6 hover:scale-105 transition-all shadow-2xl group border-b-[10px] border-slate-100"
+              className="bg-white p-8 rounded-[4rem] flex flex-col items-center gap-6 hover:scale-105 transition-all shadow-2xl group relative"
             >
               <div className={`text-5xl p-6 rounded-[2rem] ${room.color} text-white shadow-lg`}>{room.emoji}</div>
               <div className="font-black text-slate-800 uppercase italic text-lg">{room.name}</div>
@@ -105,9 +64,19 @@ const StudentArenaFlow: React.FC<StudentArenaFlowProps> = (props) => {
     );
   }
 
-  if (joinedRoom?.code === 'ARENA_A') return <SoloArenaManager {...props} uniqueId={uniqueId} />;
-  if (['ARENA_B', 'ARENA_C', 'ARENA_D'].includes(joinedRoom?.code)) return <MultiPlayerArenaManager {...props} uniqueId={uniqueId} />;
-  if (joinedRoom?.code === 'TEACHER_LIVE') return <TeacherArenaManager {...props} uniqueId={uniqueId} liveCode={currentTeacher.magv.toUpperCase()} />;
+  // Xử lý logic theo loại phòng
+  if (joinedRoom?.code === 'ARENA_A') {
+    return <SoloArenaManager {...props} uniqueId={uniqueId} />;
+  }
+
+  if (['ARENA_B', 'ARENA_C', 'ARENA_D'].includes(joinedRoom?.code)) {
+    return <MultiPlayerArenaManager {...props} uniqueId={uniqueId} />;
+  }
+
+  // Chấp nhận cả trạng thái WAITING_ROOM và WAITING_FOR_PLAYERS cho Phòng GV
+  if (joinedRoom?.code === 'TEACHER_LIVE') {
+    return <TeacherArenaManager {...props} uniqueId={uniqueId} />;
+  }
 
   return null;
 };
