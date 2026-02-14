@@ -27,8 +27,8 @@ const TeacherArenaManager: React.FC<TeacherArenaManagerProps> = ({
   useEffect(() => {
     if (!currentTeacher?.id) return;
     
-    // TÊN KÊNH PHẢI KHỚP TUYỆT ĐỐI VỚI BẢNG ĐIỀU KHIỂN CỦA THẦY
-    const channelName = `arena_live_${currentTeacher.id.trim()}`;
+    // Đảm bảo tên channel KHỚP tuyệt đối với ControlPanel bên Thầy
+    const channelName = `teacher_control_${currentTeacher.id.trim()}`;
     const channel = supabase.channel(channelName, { 
       config: { presence: { key: `${playerName}::${uniqueId}` } } 
     });
@@ -36,9 +36,7 @@ const TeacherArenaManager: React.FC<TeacherArenaManagerProps> = ({
     channel
       .on('presence', { event: 'sync' }, () => {
         const state = channel.presenceState();
-        setPresentStudents(Object.keys(state)
-          .filter(k => k !== 'teacher')
-          .map(k => k.split('::')[0]));
+        setPresentStudents(Object.keys(state).map(k => k.split('::')[0]));
       })
       .on('broadcast', { event: 'teacher_command' }, (msg) => {
         const payload = msg.payload;
@@ -47,7 +45,7 @@ const TeacherArenaManager: React.FC<TeacherArenaManagerProps> = ({
           onStartMatch({ 
             setId: payload.setId, 
             title: payload.title, 
-            rounds: payload.rounds, 
+            rounds: payload.rounds, // Nhận trực tiếp rounds từ broadcast
             joinedRoom, 
             myId: uniqueId,
             opponents: []
@@ -59,9 +57,7 @@ const TeacherArenaManager: React.FC<TeacherArenaManagerProps> = ({
         }
       })
       .subscribe(async (status) => { 
-        if (status === 'SUBSCRIBED') {
-          await channel.track({ online: true, role: 'student' });
-        }
+        if (status === 'SUBSCRIBED') await channel.track({ online: true });
       });
 
     channelRef.current = channel;
@@ -96,7 +92,7 @@ const TeacherArenaManager: React.FC<TeacherArenaManagerProps> = ({
            </header>
            
            <div className="grid grid-cols-1 lg:grid-cols-12 gap-10">
-              <div className="lg:col-span-8 bg-slate-50 rounded-[3rem] p-10 shadow-inner overflow-y-auto max-h-[500px] no-scrollbar text-left">
+              <div className="lg:col-span-8 bg-slate-50 rounded-[3rem] p-10 shadow-inner overflow-y-auto max-h-[500px] no-scrollbar">
                   <h3 className="text-xs font-black text-slate-400 uppercase italic mb-8 tracking-widest flex items-center gap-3">
                     <span className="w-8 h-8 bg-blue-600 rounded-xl flex items-center justify-center text-white">1</span>
                     CHỌN TỪ KHÓA ÔN TẬP:
@@ -105,7 +101,7 @@ const TeacherArenaManager: React.FC<TeacherArenaManagerProps> = ({
               </div>
               <div className="lg:col-span-4 flex flex-col gap-6">
                  <div className="bg-slate-900 rounded-[3rem] p-8 flex flex-col shadow-2xl h-64">
-                    <h3 className="text-[9px] font-black text-blue-400 uppercase italic mb-4 text-center tracking-widest">LỚP ĐANG ONLINE ({presentStudents.length})</h3>
+                    <h3 className="text-[9px] font-black text-blue-400 uppercase italic mb-4 text-center tracking-widest">ĐANG ONLINE ({presentStudents.length})</h3>
                     <div className="flex-1 overflow-y-auto space-y-2 no-scrollbar">
                        {presentStudents.map((s, i) => (
                          <div key={i} className="bg-white/5 p-3 rounded-xl border border-white/10 text-white font-black text-[10px] uppercase italic">{s}</div>
@@ -116,7 +112,7 @@ const TeacherArenaManager: React.FC<TeacherArenaManagerProps> = ({
                     <div className="w-20 h-20 border-8 border-white/20 border-t-white rounded-full animate-spin"></div>
                     <div className="space-y-2">
                        <p className="text-base font-black text-white uppercase italic tracking-widest">ĐANG ĐỢI LỆNH THẦY...</p>
-                       <p className="text-[10px] text-blue-100 font-bold uppercase italic leading-tight text-center">Bảng điều khiển của Thầy đã nhận tín hiệu!<br/>Khi Thầy bấm BẮT ĐẦU, Arena sẽ mở.</p>
+                       <p className="text-[10px] text-blue-100 font-bold uppercase italic leading-tight">Khi Thầy bấm BẮT ĐẦU LIVE tại bảng điều khiển,<br/>trận đấu sẽ tự động khởi chạy!</p>
                     </div>
                  </div>
               </div>
