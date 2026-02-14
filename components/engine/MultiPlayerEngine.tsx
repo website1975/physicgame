@@ -239,7 +239,9 @@ const MultiPlayerEngine: React.FC<MultiPlayerEngineProps> = ({ gameState, setGam
              <div className="w-64 h-2 bg-slate-900 rounded-full overflow-hidden border border-white/10">
                 <div className="h-full bg-purple-600 transition-all duration-1000 ease-linear" style={{ width: `${(introTimer / INTRO_TIME) * 100}%` }} />
              </div>
-             <button onClick={triggerStartAnswering} className="mt-4 px-10 py-4 bg-white text-slate-900 rounded-2xl font-black uppercase italic text-sm hover:scale-105 transition-all shadow-xl">Bắt đầu ngay ⚡</button>
+             <div className="mt-8 text-white/40 font-black uppercase italic text-[10px] tracking-widest animate-pulse">
+                Trận đấu sẽ tự động bắt đầu...
+             </div>
           </div>
         </div>
       </div>
