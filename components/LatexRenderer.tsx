@@ -33,32 +33,73 @@ const LatexRenderer: React.FC<LatexRendererProps> = ({ content, className }) => 
     }
 
     try {
-      let processed = content;
+      // Tách nội dung thành các phần: text, inline math ($...$), block math ($$...$$)
+      // Sử dụng regex để tìm tất cả các công thức toán học
+      const parts: { type: 'text' | 'math', content: string, displayMode?: boolean }[] = [];
+      let lastIndex = 0;
       
-      // 1. Xử lý công thức Block $$...$$
-      processed = processed.replace(/\$\$([\s\S]+?)\$\$/g, (match, formula) => {
-        try {
-          return `<div class="katex-display-wrapper my-2 flex justify-center">${katex.renderToString(formula.trim(), { displayMode: true, throwOnError: false })}</div>`;
-        } catch (e) {
-          return match;
+      // Regex tìm cả $$...$$ và $...$
+      // Chú ý: Tìm $$...$$ trước để tránh bị $...$ bắt nhầm
+      const mathRegex = /(\$\$[\s\S]+?\$\$|\$[\s\S]+?\$)/g;
+      let match;
+      
+      while ((match = mathRegex.exec(content)) !== null) {
+        // Thêm phần văn bản trước công thức
+        if (match.index > lastIndex) {
+          parts.push({ type: 'text', content: content.substring(lastIndex, match.index) });
         }
-      });
-
-      // 2. Xử lý công thức Inline $...$
-      processed = processed.replace(/\$([\s\S]+?)\$/g, (match, formula) => {
-        try {
-          return `<span class="katex-inline-wrapper px-0.5">${katex.renderToString(formula.trim(), { displayMode: false, throwOnError: false })}</span>`;
-        } catch (e) {
-          return match;
+        
+        const rawMath = match[0];
+        if (rawMath.startsWith('$$')) {
+          parts.push({ 
+            type: 'math', 
+            content: rawMath.substring(2, rawMath.length - 2).trim(), 
+            displayMode: true 
+          });
+        } else {
+          parts.push({ 
+            type: 'math', 
+            content: rawMath.substring(1, rawMath.length - 1).trim(), 
+            displayMode: false 
+          });
         }
-      });
+        
+        lastIndex = mathRegex.lastIndex;
+      }
+      
+      // Thêm phần văn bản còn lại sau công thức cuối cùng
+      if (lastIndex < content.length) {
+        parts.push({ type: 'text', content: content.substring(lastIndex) });
+      }
 
-      // 3. Xử lý xuống dòng cho phần văn bản còn lại
-      // Lưu ý: Chỉ replace \n ở những nơi không nằm trong tag HTML vừa tạo
-      // Để đơn giản và an toàn, ta chỉ replace \n bình thường
-      return processed.replace(/\n/g, '<br/>');
+      // Render từng phần
+      return parts.map(part => {
+        if (part.type === 'math') {
+          try {
+            const rendered = katex.renderToString(part.content, {
+              displayMode: part.displayMode,
+              throwOnError: false,
+              trust: true,
+              strict: false
+            });
+            
+            if (part.displayMode) {
+              return `<div class="katex-display-wrapper my-2 flex justify-center overflow-x-auto no-scrollbar">${rendered}</div>`;
+            } else {
+              return `<span class="katex-inline-wrapper px-0.5">${rendered}</span>`;
+            }
+          } catch (e) {
+            console.error("KaTeX render error for:", part.content, e);
+            return part.displayMode ? `$$${part.content}$$` : `$${part.content}$`;
+          }
+        } else {
+          // Chỉ replace \n bằng <br/> cho phần văn bản thuần túy
+          return part.content.replace(/\n/g, '<br/>');
+        }
+      }).join('');
+
     } catch (err) {
-      console.error("Lỗi render LaTeX:", err);
+      console.error("Lỗi render LaTeX tổng quát:", err);
       return content.replace(/\n/g, '<br/>');
     }
   }, [content, isKatexReady]);
