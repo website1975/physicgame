@@ -299,3 +299,21 @@ export const fetchFormulaResources = async (grade?: number) => {
   }
   return data || [];
 };
+
+export const saveFormulaResource = async (resource: any) => {
+  const { data, error } = await supabase.from('formula_resources').insert([resource]).select();
+  if (error) throw error;
+  return data[0];
+};
+
+export const updateFormulaResource = async (id: string, updates: any) => {
+  const { error } = await supabase.from('formula_resources').update(updates).eq('id', id);
+  if (error) throw error;
+  return true;
+};
+
+export const deleteFormulaResource = async (id: string) => {
+  const { error } = await supabase.from('formula_resources').delete().eq('id', id);
+  if (error) throw error;
+  return true;
+};
