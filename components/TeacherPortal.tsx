@@ -5,7 +5,6 @@ import EditorPanel from './admin/EditorPanel';
 import LibraryPanel from './admin/LibraryPanel';
 import GameLabPanel from './admin/GameLabPanel';
 import ManagementPanel from './admin/ManagementPanel';
-import ControlPanel from './admin/ControlPanel';
 
 interface TeacherPortalProps {
   adminTab: AdminTab;
@@ -28,12 +27,10 @@ interface TeacherPortalProps {
   onSaveSet: (title: string, asNew: boolean, topic: string, grade: string) => Promise<void>;
   rounds: Round[];
   setRounds: (r: Round[]) => void;
-  onLive: (setId: string, title: string) => void;
   loadedSetTitle: string | null;
   loadedSetId: string | null;
   loadedSetTopic?: string | null;
   onResetToNew: () => void;
-  liveSessionKey?: number;
 }
 
 const TeacherPortal: React.FC<TeacherPortalProps> = (props) => {
@@ -43,7 +40,7 @@ const TeacherPortal: React.FC<TeacherPortalProps> = (props) => {
     setSearchLibrary, activeCategory, setActiveCategory, onLoadSet, 
     onDeleteSet, onRefreshSets, isLoadingSets, onSaveSet, rounds, 
     setRounds, loadedSetTitle, loadedSetId, loadedSetTopic, 
-    onResetToNew, liveSessionKey 
+    onResetToNew 
   } = props;
 
   return (
@@ -72,7 +69,6 @@ const TeacherPortal: React.FC<TeacherPortalProps> = (props) => {
            <div className="space-y-1">
               <button onClick={() => { onResetToNew(); setAdminTab('EDITOR'); }} className={`w-full text-left p-4 rounded-xl font-black text-[9px] uppercase flex items-center gap-3 ${adminTab === 'EDITOR' ? 'bg-purple-600 text-white shadow-lg' : 'text-slate-400 hover:bg-white/5'}`}><span>📝</span> Soạn thảo đề</button>
               <button onClick={() => setAdminTab('CLOUD')} className={`w-full text-left p-4 rounded-xl font-black text-[9px] uppercase flex items-center gap-3 ${adminTab === 'CLOUD' ? 'bg-sky-600 text-white shadow-lg' : 'text-slate-400 hover:bg-white/5'}`}><span>🌍</span> Kho đề của tôi</button>
-              <button onClick={() => setAdminTab('CONTROL')} className={`w-full text-left p-4 rounded-xl font-black text-[9px] uppercase flex items-center gap-3 ${adminTab === 'CONTROL' ? 'bg-blue-600 text-white shadow-lg animate-pulse' : 'text-slate-400 hover:bg-white/5'}`}><span>⚡</span> Điều phối Live</button>
               <button onClick={() => setAdminTab('LAB')} className={`w-full text-left p-4 rounded-xl font-black text-[9px] uppercase flex items-center gap-3 ${adminTab === 'LAB' ? 'bg-[#FF6D60] text-white shadow-lg' : 'text-slate-400 hover:bg-white/5'}`}><span>🎮</span> Game Arena</button>
               
               {teacherRole === 'ADMIN' && (
@@ -88,7 +84,7 @@ const TeacherPortal: React.FC<TeacherPortalProps> = (props) => {
          <header className="flex justify-between items-center mb-10">
             <div>
               <h3 className="text-5xl font-black italic uppercase text-slate-900 tracking-tighter leading-none">
-                {adminTab === 'EDITOR' ? 'Workshop' : adminTab === 'CLOUD' ? 'Library' : adminTab === 'LAB' ? 'Game Lab' : adminTab === 'CONTROL' ? 'Arena Control' : 'Directory'}
+                {adminTab === 'EDITOR' ? 'Workshop' : adminTab === 'CLOUD' ? 'Library' : adminTab === 'LAB' ? 'Game Lab' : 'Directory'}
               </h3>
             </div>
          </header>
@@ -108,19 +104,7 @@ const TeacherPortal: React.FC<TeacherPortalProps> = (props) => {
              onLoadSet={onLoadSet} onDeleteSet={onDeleteSet} onRefresh={onRefreshSets}
              teacherId={teacherId} teacherSubject={teacherSubject} isLoadingSets={isLoadingSets}
              onEdit={(id, title) => { onLoadSet(id, title); setAdminTab('EDITOR'); }}
-             onLive={() => setAdminTab('CONTROL')}
            />
-         )}
-
-         {adminTab === 'CONTROL' && (
-            <ControlPanel 
-               teacherId={teacherId} 
-               teacherMaGV={teacherMaGV || ''} 
-               loadedSetId={loadedSetId} 
-               loadedSetTitle={loadedSetTitle} 
-               rounds={rounds} 
-               liveSessionKey={liveSessionKey} 
-            />
          )}
 
          {adminTab === 'LAB' && <GameLabPanel />}
