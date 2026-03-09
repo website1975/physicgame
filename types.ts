@@ -81,7 +81,7 @@ export interface GameSettings {
   maxPlayers: number;
 }
 
-export type AdminTab = 'EDITOR' | 'CLOUD' | 'LAB' | 'MANAGEMENT';
+export type AdminTab = 'EDITOR' | 'CLOUD' | 'LAB' | 'MANAGEMENT' | 'FORMULA';
 
 export type GameState = 'LOBBY' | 'ROOM_SELECTION' | 'SET_SELECTION' | 'ADMIN' | 'ROUND_INTRO' | 'STARTING_ROUND' | 'STARTING_QUESTION' | 'STARTING_ROUND_REVEAL' | 'WAITING_FOR_BUZZER' | 'ANSWERING' | 'FEEDBACK' | 'GAME_OVER' | 'STUDENT_SETUP' | 'TEACHER_LOGIN' | 'WAITING_FOR_PLAYERS' | 'KEYWORD_SELECTION' | 'FORMULA_LIBRARY';
 
