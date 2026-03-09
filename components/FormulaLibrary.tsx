@@ -2,7 +2,7 @@
 import React, { useEffect, useState } from 'react';
 import { fetchFormulaResources } from '../services/supabaseService';
 import { FileText, ExternalLink, BookOpen, ArrowLeft, Search } from 'lucide-react';
-import { motion } from 'motion/react';
+import { motion } from 'framer-motion';
 
 interface FormulaLibraryProps {
   onBack: () => void;
