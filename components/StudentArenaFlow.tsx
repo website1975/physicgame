@@ -23,7 +23,6 @@ const ARENA_ROOMS = [
   { id: '2', name: 'Phòng đôi', code: 'ARENA_B', emoji: '⚔️', color: 'bg-purple-600', capacity: 2, desc: 'Đấu 1 vs 1' },
   { id: '3', name: 'Phòng 3', code: 'ARENA_C', emoji: '🏹', color: 'bg-emerald-600', capacity: 3, desc: 'Hỗn chiến 3 người' },
   { id: '4', name: 'Phòng 4', code: 'ARENA_D', emoji: '🔱', color: 'bg-amber-500', capacity: 4, desc: 'Tứ hùng tranh tài' },
-  { id: '5', name: 'Phòng GV LIVE', code: 'TEACHER_LIVE', emoji: '👨‍🏫', color: 'bg-rose-600', capacity: 100, desc: 'Học trực tiếp cùng Thầy' },
 ];
 
 const StudentArenaFlow: React.FC<StudentArenaFlowProps> = (props) => {
@@ -46,11 +45,7 @@ const StudentArenaFlow: React.FC<StudentArenaFlowProps> = (props) => {
               key={room.code} 
               onClick={() => { 
                 setJoinedRoom(room); 
-                if (room.code === 'TEACHER_LIVE') {
-                  setGameState('WAITING_ROOM'); 
-                } else {
-                  setGameState('WAITING_FOR_PLAYERS');
-                }
+                setGameState('WAITING_FOR_PLAYERS');
               }} 
               className="bg-white p-8 rounded-[4rem] flex flex-col items-center gap-6 hover:scale-105 transition-all shadow-2xl group relative"
             >
@@ -71,11 +66,6 @@ const StudentArenaFlow: React.FC<StudentArenaFlowProps> = (props) => {
 
   if (['ARENA_B', 'ARENA_C', 'ARENA_D'].includes(joinedRoom?.code)) {
     return <MultiPlayerArenaManager {...props} uniqueId={uniqueId} />;
-  }
-
-  // Chấp nhận cả trạng thái WAITING_ROOM và WAITING_FOR_PLAYERS cho Phòng GV
-  if (joinedRoom?.code === 'TEACHER_LIVE') {
-    return <TeacherArenaManager {...props} uniqueId={uniqueId} />;
   }
 
   return null;
