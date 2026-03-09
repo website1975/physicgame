@@ -6,6 +6,7 @@ import { loginTeacher, fetchTeacherByMaGV, supabase, fetchAllExamSets, fetchSetD
 import TeacherPortal from './components/TeacherPortal';
 import StudentArenaFlow from './components/StudentArenaFlow';
 import GameEngine from './components/GameEngine';
+import FormulaLibrary from './components/FormulaLibrary';
 
 const getSafeEnv = (key: string): string | undefined => {
   try {
@@ -204,6 +205,10 @@ const App: React.FC = () => {
           gameState={gameState} setGameState={setGameState} playerName={playerName} studentGrade={studentGrade!} currentTeacher={currentTeacher!}
           onStartMatch={(data) => { setMatchData(data); setGameState('ROUND_INTRO'); }} joinedRoom={joinedRoom} setJoinedRoom={setJoinedRoom} availableSets={availableSets} setAvailableSets={setAvailableSets}
         />
+      )}
+
+      {gameState === 'FORMULA_LIBRARY' && (
+        <FormulaLibrary onBack={() => setGameState('ROOM_SELECTION')} initialGrade={studentGrade || '10'} />
       )}
 
       {matchData && ['ROUND_INTRO', 'STARTING_ROUND', 'WAITING_FOR_BUZZER', 'ANSWERING', 'FEEDBACK', 'GAME_OVER'].includes(gameState) && (
