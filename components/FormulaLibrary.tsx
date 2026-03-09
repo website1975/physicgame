@@ -1,301 +1,165 @@
 
-import { createClient } from '@supabase/supabase-js';
-import { PhysicsProblem, QuestionType, Round, Teacher, Difficulty, DisplayChallenge, InteractiveMechanic } from '../types';
+import React, { useEffect, useState } from 'react';
+import { fetchFormulaResources } from '../services/supabaseService';
+import { FileText, ExternalLink, BookOpen, ArrowLeft, Search } from 'lucide-react';
+import { motion } from 'motion/react';
 
-const supabaseUrl = 'https://ktottoplusantmadclpg.supabase.co';
-const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imt0b3R0b3BsdXNhbnRtYWRjbHBnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjgzMDM1MzYsImV4cCI6MjA4Mzg3OTUzNn0.VAPgXcqd24N1Cguv99hq4bVkstxm3jTObQCHC13FgB8';
+interface FormulaLibraryProps {
+  onBack: () => void;
+  initialGrade?: string;
+}
 
-export const supabase = createClient(supabaseUrl, supabaseKey);
+const FormulaLibrary: React.FC<FormulaLibraryProps> = ({ onBack, initialGrade }) => {
+  const [resources, setResources] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [selectedGrade, setSelectedGrade] = useState<string>(initialGrade || '10');
+  const [searchQuery, setSearchQuery] = useState('');
 
-// --- VISITOR TRACKING ---
-export const getVisitorCount = async (): Promise<number> => {
-  try {
-    const { data, error } = await supabase.from('app_stats').select('value').eq('key', 'visitor_count').maybeSingle();
-    if (error) return 0;
-    return data?.value || 0;
-  } catch (e) { return 0; }
-};
-
-export const incrementVisitorCount = async (): Promise<number> => {
-  try {
-    const current = await getVisitorCount();
-    const newValue = current + 1;
-    const { error } = await supabase.from('app_stats').update({ value: newValue }).eq('key', 'visitor_count');
-    if (error) {
-      await supabase.from('app_stats').insert([{ key: 'visitor_count', value: 1 }]);
-      return 1;
-    }
-    return newValue;
-  } catch (e) { return 0; }
-};
-
-export const loginTeacher = async (maGV: string, pass: string): Promise<{ teacher: Teacher | null, error: string | null }> => {
-  const cleanMaGV = maGV.trim();
-  const cleanPass = pass.trim();
-  try {
-    const { data, error } = await supabase.from('giaovien').select('*').ilike('magv', cleanMaGV).maybeSingle();
-    if (error) return { teacher: null, error: `Lỗi CSDL: ${error.message}` };
-    if (!data) return { teacher: null, error: `Không tìm thấy giáo viên mã: ${cleanMaGV}` };
-    
-    const dbPass = data.pass || data.PASS || "";
-    if (String(dbPass).trim() !== cleanPass) return { teacher: null, error: "Mật khẩu không chính xác!" };
-    
-    return { 
-      teacher: { 
-        id: data.id, 
-        magv: data.magv || data.maGV || cleanMaGV, 
-        tengv: data.tengv || data.TenGV, 
-        monday: data.monday || data.MonDay || "Vật lý", 
-        pass: dbPass,
-        role: (data.role || 'TEACHER').toUpperCase() as 'ADMIN' | 'TEACHER'
-      }, 
-      error: null 
+  useEffect(() => {
+    const loadResources = async () => {
+      setLoading(true);
+      const data = await fetchFormulaResources(parseInt(selectedGrade));
+      setResources(data);
+      setLoading(false);
     };
-  } catch (err: any) { return { teacher: null, error: "Lỗi hệ thống: " + err.message }; }
-};
+    loadResources();
+  }, [selectedGrade]);
 
-export const fetchTeacherByMaGV = async (maGV: string): Promise<Teacher | null> => {
-  let { data } = await supabase.from('giaovien').select('*').ilike('magv', maGV.trim()).maybeSingle();
-  if (!data) return null;
-  return { 
-    id: data.id, 
-    magv: data.magv || data.maGV, 
-    tengv: data.tengv || data.TenGV, 
-    monday: data.monday || data.MonDay, 
-    pass: data.pass || data.PASS,
-    role: (data.role || 'TEACHER').toUpperCase() as 'ADMIN' | 'TEACHER'
-  } as Teacher;
-};
+  const filteredResources = resources.filter(r => 
+    r.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    (r.category && r.category.toLowerCase().includes(searchQuery.toLowerCase()))
+  );
 
-const inferMetadata = (set: any) => {
-    if (!set) return null;
-    let grade = set.grade || set.GRADE;
-    let subject = set.subject || set.SUBJECT || set.monday || set.MonDay;
-    let topic = set.topic || set.TOPIC;
-    let title = set.title || set.TITLE;
-    let rCount = set.round_count || set.roundCount;
-    let qCount = set.question_count || set.questionCount;
-    if (set.data && Array.isArray(set.data)) {
-        if (!rCount) rCount = set.data.length;
-        if (!qCount) {
-            let count = 0;
-            set.data.forEach((r: any) => { count += (r.problems?.length || 0); });
-            qCount = count;
-        }
+  const getIcon = (type: string) => {
+    switch (type) {
+      case 'pdf': return <FileText className="w-5 h-5 text-red-500" />;
+      case 'web_link': return <ExternalLink className="w-5 h-5 text-blue-500" />;
+      case 'html_page': return <BookOpen className="w-5 h-5 text-emerald-500" />;
+      default: return <BookOpen className="w-5 h-5 text-slate-400" />;
     }
-    return {
-        ...set,
-        title: title || `Bộ đề mới`,
-        topic: topic || "Chưa phân loại",
-        grade: String(grade || "10"),
-        subject: subject || "Vật lý",
-        round_count: rCount || 0,
-        question_count: qCount || 0
-    };
-};
-
-export const fetchAllExamSets = async (teacherId: string) => {
-  const { data, error } = await supabase.from('exam_sets').select('*').eq('teacher_id', teacherId).order('id', { ascending: false });
-  if (error) throw error;
-  return (data || []).map(set => inferMetadata(set));
-};
-
-export const saveExamSet = async (teacherId: string, title: string, rounds: Round[], topic: string, grade: string, subject: string) => {
-  const payload: any = { teacher_id: teacherId, title: title, topic: topic, data: rounds, grade: grade };
-  if (subject) payload.subject = subject;
-  const { data, error } = await supabase.from('exam_sets').insert([payload]).select();
-  if (error) throw new Error(`LỖI ${error.code}: ${error.message}`);
-  return data[0].id;
-};
-
-export const updateExamSet = async (setId: string, title: string, rounds: Round[], topic: string, grade: string, teacherId: string) => {
-  const payload: any = { title, topic, data: rounds, grade };
-  const { error } = await supabase.from('exam_sets').update(payload).eq('id', setId);
-  if (error) throw error;
-  return setId;
-};
-
-export const deleteExamSet = async (setId: string) => {
-  const { error } = await supabase.from('exam_sets').delete().eq('id', setId);
-  if (error) throw error;
-  return true;
-};
-
-export const fetchSetData = async (setId: string): Promise<{ rounds: Round[], topic: string, grade: string, created_at: string, title: string, subject: string }> => {
-  const { data, error } = await supabase.from('exam_sets').select('*').eq('id', setId).single();
-  if (error) throw error;
-  const processed = inferMetadata(data);
-  return { 
-    rounds: processed.data || [], 
-    topic: processed.topic, 
-    grade: processed.grade,
-    title: processed.title,
-    subject: processed.subject,
-    created_at: processed.created_at || new Date().toISOString()
   };
+
+  return (
+    <div className="min-h-screen bg-[#E4E3E0] text-[#141414] font-sans p-4 md:p-8">
+      {/* Header */}
+      <div className="max-w-6xl mx-auto mb-12 flex flex-col md:flex-row md:items-end justify-between gap-6">
+        <div>
+          <button 
+            onClick={onBack}
+            className="flex items-center gap-2 text-sm font-black uppercase italic mb-4 hover:translate-x-[-4px] transition-transform"
+          >
+            <ArrowLeft className="w-4 h-4" /> Quay lại Arena
+          </button>
+          <h1 className="text-6xl font-black uppercase italic tracking-tighter leading-none">
+            Thư viện <br /> <span className="text-blue-600">Công thức</span>
+          </h1>
+        </div>
+
+        <div className="flex flex-col gap-4">
+          <div className="flex gap-2 bg-white/50 p-1 rounded-2xl border border-[#141414]/10">
+            {['10', '11', '12'].map(grade => (
+              <button
+                key={grade}
+                onClick={() => setSelectedGrade(grade)}
+                className={`px-6 py-2 rounded-xl font-black italic transition-all ${
+                  selectedGrade === grade 
+                    ? 'bg-[#141414] text-white shadow-lg' 
+                    : 'hover:bg-white/80'
+                }`}
+              >
+                K{grade}
+              </button>
+            ))}
+          </div>
+          <div className="relative">
+            <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 opacity-30" />
+            <input 
+              type="text" 
+              placeholder="Tìm kiếm tài liệu..."
+              className="bg-white border-2 border-[#141414] rounded-2xl py-3 pl-12 pr-6 w-full md:w-80 font-bold outline-none focus:shadow-[4px_4px_0px_0px_rgba(20,20,20,1)] transition-all"
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* Content Grid */}
+      <div className="max-w-6xl mx-auto">
+        {loading ? (
+          <div className="flex flex-col items-center justify-center py-20 gap-4">
+            <div className="w-12 h-12 border-4 border-[#141414] border-t-transparent rounded-full animate-spin"></div>
+            <p className="font-black uppercase italic text-sm opacity-40">Đang tải dữ liệu...</p>
+          </div>
+        ) : filteredResources.length > 0 ? (
+          <div className="bg-white border-4 border-[#141414] rounded-[3rem] overflow-hidden shadow-[12px_12px_0px_0px_rgba(20,20,20,1)]">
+            {/* Table Header */}
+            <div className="grid grid-cols-[40px_1.5fr_1fr_1fr] p-6 border-b-2 border-[#141414] bg-slate-50">
+              <div className="font-serif italic text-[11px] uppercase opacity-50">#</div>
+              <div className="font-serif italic text-[11px] uppercase opacity-50">Tên tài liệu</div>
+              <div className="font-serif italic text-[11px] uppercase opacity-50">Phân loại</div>
+              <div className="font-serif italic text-[11px] uppercase opacity-50">Hành động</div>
+            </div>
+
+            {/* Rows */}
+            <div className="divide-y-2 divide-[#141414]/10">
+              {filteredResources.map((res, idx) => (
+                <motion.div 
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: idx * 0.05 }}
+                  key={res.id}
+                  className="grid grid-cols-[40px_1.5fr_1fr_1fr] p-6 hover:bg-[#141414] hover:text-white transition-colors cursor-pointer group"
+                  onClick={() => window.open(res.url, '_blank')}
+                >
+                  <div className="font-mono text-sm opacity-40 group-hover:opacity-100">{String(idx + 1).padStart(2, '0')}</div>
+                  <div className="flex items-center gap-3">
+                    {getIcon(res.resource_type)}
+                    <span className="font-black uppercase italic text-sm">{res.title}</span>
+                  </div>
+                  <div className="flex items-center">
+                    <span className="px-3 py-1 bg-slate-100 text-[#141414] text-[10px] font-black uppercase rounded-full border border-[#141414]/10 group-hover:bg-white/20 group-hover:text-white group-hover:border-white/20">
+                      {res.category || 'Chung'}
+                    </span>
+                  </div>
+                  <div className="flex items-center">
+                    <span className="text-[10px] font-black uppercase italic underline underline-offset-4 opacity-40 group-hover:opacity-100">
+                      Xem ngay
+                    </span>
+                  </div>
+                </motion.div>
+              ))}
+            </div>
+          </div>
+        ) : (
+          <div className="text-center py-20 border-4 border-dashed border-[#141414]/20 rounded-[4rem]">
+            <p className="text-2xl font-black uppercase italic opacity-20">Không tìm thấy tài liệu nào</p>
+          </div>
+        )}
+      </div>
+
+      {/* Footer Info */}
+      <div className="max-w-6xl mx-auto mt-12 pt-8 border-t border-[#141414]/10 flex justify-between items-center">
+        <div className="font-mono text-[10px] uppercase opacity-40">
+          PhysiQuest Formula System v1.0
+        </div>
+        <div className="flex gap-4">
+          <div className="flex items-center gap-2">
+            <div className="w-2 h-2 rounded-full bg-red-500"></div>
+            <span className="font-mono text-[10px] uppercase opacity-40">PDF</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="w-2 h-2 rounded-full bg-blue-500"></div>
+            <span className="font-mono text-[10px] uppercase opacity-40">Web</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="w-2 h-2 rounded-full bg-emerald-500"></div>
+            <span className="font-mono text-[10px] uppercase opacity-40">HTML</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
 };
 
-export const assignSetToRoom = async (teacherId: string, roomCode: string, setId: string) => {
-  const { error } = await supabase.from('room_assignments').upsert({ 
-    teacher_id: teacherId, 
-    room_code: roomCode, 
-    set_id: setId, 
-    assigned_at: new Date().toISOString() 
-  }, { onConflict: 'teacher_id,room_code,set_id' });
-  if (error) throw error;
-  return true;
-};
-
-export const fetchAllAssignmentsForTeacher = async (teacherId: string) => {
-  const { data, error } = await supabase.from('room_assignments').select('set_id, room_code').eq('teacher_id', teacherId);
-  if (error) throw error;
-  return data || [];
-};
-
-export const getSetAssignments = async (teacherId: string, setId: string): Promise<string[]> => {
-  const { data, error } = await supabase.from('room_assignments').select('room_code').eq('teacher_id', teacherId).eq('set_id', setId);
-  if (error || !data) return [];
-  return data.map(row => row.room_code);
-};
-
-export const getRoomAssignmentsWithMeta = async (teacherId: string, roomCode: string): Promise<any[]> => {
-  const { data: assignments, error: assignError } = await supabase.from('room_assignments').select('set_id, assigned_at').eq('teacher_id', teacherId).eq('room_code', roomCode);
-  if (assignError || !assignments || assignments.length === 0) return [];
-  const setIds = assignments.map(a => a.set_id);
-  const { data: sets, error: setsError } = await supabase.from('exam_sets').select('*').eq('teacher_id', teacherId).in('id', setIds);
-  if (setsError || !sets) return [];
-  return assignments.map(assign => {
-      const setRaw = sets.find(s => s.id === assign.set_id);
-      if (!setRaw) return null;
-      return { ...inferMetadata(setRaw), assigned_at: assign.assigned_at };
-  }).filter(Boolean);
-};
-
-export const removeRoomAssignment = async (teacherId: string, roomCode: string, setId: string) => {
-  await supabase.from('room_assignments').delete().match({ teacher_id: teacherId, room_code: roomCode, set_id: setId });
-  return true;
-};
-
-export const updateExamSetTitle = async (setId: string, newTitle: string) => {
-  const { error } = await supabase.from('exam_sets').update({ title: newTitle }).eq('id', setId);
-  if (error) throw error;
-  return true;
-};
-
-export const fetchQuestionsLibrary = async (teacherId: string, grade?: string, type?: QuestionType): Promise<PhysicsProblem[]> => {
-  let query = supabase.from('exam_sets').select('data, topic').eq('teacher_id', teacherId).order('id', { ascending: false }).limit(10);
-  if (grade) query = query.eq('grade', grade);
-  const { data, error } = await query;
-  if (error) throw error;
-  const library: PhysicsProblem[] = [];
-  const seenContent = new Set<string>();
-  data.forEach(set => {
-    const rounds = set.data || [];
-    rounds.forEach((r: any) => {
-      const probs = r.problems || [];
-      probs.forEach((p: any) => {
-        const key = `${p.type}_${p.content}`;
-        if ((!type || p.type === type) && !seenContent.has(key)) {
-          library.push({ ...p, topic: set.topic });
-          seenContent.add(key);
-        }
-      });
-    });
-  });
-  return library;
-};
-
-export const uploadQuestionImage = async (file: File): Promise<string> => {
-  const fileExt = file.name.split('.').pop();
-  const fileName = `${Math.random().toString(36).substring(2)}_${Date.now()}.${fileExt}`;
-  const filePath = `questions/${fileName}`;
-  const { error: uploadError } = await supabase.storage.from('forum_attachments').upload(filePath, file);
-  if (uploadError) throw uploadError;
-  const { data } = supabase.storage.from('forum_attachments').getPublicUrl(filePath);
-  return data.publicUrl;
-};
-
-export const getAllTeachers = async (): Promise<Teacher[]> => {
-  const { data, error } = await supabase.from('giaovien').select('*').order('tengv', { ascending: true });
-  if (error) throw error;
-  return (data || []).map(d => ({
-    id: d.id,
-    magv: d.magv || d.maGV,
-    tengv: d.tengv || d.TenGV,
-    monday: d.monday || d.MonDay,
-    pass: d.pass || d.PASS,
-    role: (d.role || 'TEACHER').toUpperCase() as 'ADMIN' | 'TEACHER'
-  }));
-};
-
-export const createTeacher = async (teacher: Omit<Teacher, 'id'>) => {
-  const { data, error } = await supabase.from('giaovien').insert([{
-    magv: teacher.magv, tengv: teacher.tengv, monday: teacher.monday, pass: teacher.pass, role: teacher.role
-  }]).select().single();
-  if (error) throw error;
-  return data;
-};
-
-export const updateTeacher = async (id: string, updates: Partial<Teacher>) => {
-  const { error } = await supabase.from('giaovien').update(updates).eq('id', id);
-  if (error) throw error;
-  return true;
-};
-
-export const deleteTeacher = async (id: string) => {
-  const { error } = await supabase.from('giaovien').delete().eq('id', id);
-  if (error) throw error;
-  return true;
-};
-
-export const createSampleExamSet = async (teacherId: string) => {
-  const sampleRounds: Round[] = [
-    {
-      number: 1,
-      description: "Vòng khởi động!",
-      problems: [
-        {
-          id: 's1', title: 'Năng lượng', content: 'Tính thế năng của vật khối lượng $m = 2kg$ ở độ cao $h = 5m$. Lấy $g = 10 m/s^2$.',
-          difficulty: Difficulty.EASY, type: QuestionType.SHORT_ANSWER, challenge: DisplayChallenge.NORMAL,
-          correctAnswer: '100', topic: 'Năng lượng', explanation: '$W_t = mgh = 2.10.5 = 100J$', grade: '10'
-        }
-      ]
-    }
-  ];
-  return await saveExamSet(teacherId, "Bộ đề mẫu: Năng lượng", sampleRounds, "Cơ học", "10", "Vật lý");
-};
-
-// --- LEADERBOARD ---
-export const saveHighScore = async (playerName: string, score: number, setId: string, teacherId: string) => {
-  const { error } = await supabase.from('leaderboard').insert([{
-    player_name: playerName,
-    score: score,
-    set_id: setId,
-    teacher_id: teacherId,
-    created_at: new Date().toISOString()
-  }]);
-  if (error) console.error("Lỗi lưu điểm cao:", error);
-  return !error;
-};
-
-export const getLeaderboard = async (setId: string, limit = 10) => {
-  const { data, error } = await supabase
-    .from('leaderboard')
-    .select('*')
-    .eq('set_id', setId)
-    .order('score', { ascending: false })
-    .limit(limit);
-  if (error) return [];
-  return data || [];
-};
-
-export const fetchFormulaResources = async (grade?: number) => {
-  let query = supabase.from('formula_resources').select('*').order('sort_order', { ascending: true });
-  if (grade) query = query.eq('grade', grade);
-  const { data, error } = await query;
-  if (error) {
-    console.error("Lỗi lấy tài liệu:", error);
-    return [];
-  }
-  return data || [];
-};
+export default FormulaLibrary;
