@@ -5,6 +5,7 @@ import EditorPanel from './admin/EditorPanel';
 import LibraryPanel from './admin/LibraryPanel';
 import GameLabPanel from './admin/GameLabPanel';
 import ManagementPanel from './admin/ManagementPanel';
+import FormulaManager from './admin/FormulaManager';
 
 interface TeacherPortalProps {
   adminTab: AdminTab;
@@ -70,6 +71,7 @@ const TeacherPortal: React.FC<TeacherPortalProps> = (props) => {
               <button onClick={() => { onResetToNew(); setAdminTab('EDITOR'); }} className={`w-full text-left p-4 rounded-xl font-black text-[9px] uppercase flex items-center gap-3 ${adminTab === 'EDITOR' ? 'bg-purple-600 text-white shadow-lg' : 'text-slate-400 hover:bg-white/5'}`}><span>📝</span> Soạn thảo đề</button>
               <button onClick={() => setAdminTab('CLOUD')} className={`w-full text-left p-4 rounded-xl font-black text-[9px] uppercase flex items-center gap-3 ${adminTab === 'CLOUD' ? 'bg-sky-600 text-white shadow-lg' : 'text-slate-400 hover:bg-white/5'}`}><span>🌍</span> Kho đề của tôi</button>
               <button onClick={() => setAdminTab('LAB')} className={`w-full text-left p-4 rounded-xl font-black text-[9px] uppercase flex items-center gap-3 ${adminTab === 'LAB' ? 'bg-[#FF6D60] text-white shadow-lg' : 'text-slate-400 hover:bg-white/5'}`}><span>🎮</span> Game Arena</button>
+              <button onClick={() => setAdminTab('FORMULA')} className={`w-full text-left p-4 rounded-xl font-black text-[9px] uppercase flex items-center gap-3 ${adminTab === 'FORMULA' ? 'bg-emerald-600 text-white shadow-lg' : 'text-slate-400 hover:bg-white/5'}`}><span>📚</span> Hệ thống công thức</button>
               
               {teacherRole === 'ADMIN' && (
                 <button onClick={() => setAdminTab('MANAGEMENT')} className={`w-full text-left p-4 rounded-xl font-black text-[9px] uppercase flex items-center gap-3 ${adminTab === 'MANAGEMENT' ? 'bg-amber-600 text-white shadow-lg' : 'text-slate-400 hover:bg-white/5'}`}><span>👥</span> Danh sách GV</button>
@@ -84,7 +86,7 @@ const TeacherPortal: React.FC<TeacherPortalProps> = (props) => {
          <header className="flex justify-between items-center mb-10">
             <div>
               <h3 className="text-5xl font-black italic uppercase text-slate-900 tracking-tighter leading-none">
-                {adminTab === 'EDITOR' ? 'Workshop' : adminTab === 'CLOUD' ? 'Library' : adminTab === 'LAB' ? 'Game Lab' : 'Directory'}
+                {adminTab === 'EDITOR' ? 'Workshop' : adminTab === 'CLOUD' ? 'Library' : adminTab === 'LAB' ? 'Game Lab' : adminTab === 'FORMULA' ? 'Formula Hub' : 'Directory'}
               </h3>
             </div>
          </header>
@@ -109,6 +111,7 @@ const TeacherPortal: React.FC<TeacherPortalProps> = (props) => {
 
          {adminTab === 'LAB' && <GameLabPanel />}
 
+         {adminTab === 'FORMULA' && <FormulaManager />}
          {adminTab === 'MANAGEMENT' && <ManagementPanel />}
       </main>
     </div>
