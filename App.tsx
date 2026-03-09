@@ -194,12 +194,12 @@ const App: React.FC = () => {
           onLogout={() => setGameState('LOBBY')} examSets={examSets} searchLibrary={searchLibrary} setSearchLibrary={setSearchLibrary} activeCategory={activeCategory} setActiveCategory={setActiveCategory} onLoadSet={handleLoadSet}
           onDeleteSet={async (id) => { await deleteExamSet(id); refreshSets(currentTeacher.id); return true; }} rounds={rounds} setRounds={setRounds} onSaveSet={handleSaveSet}
           loadedSetTitle={loadedSetTitle} loadedSetId={loadedSetId} loadedSetTopic={loadedSetTopic} onResetToNew={() => { setRounds([{ number: 1, problems: [], description: '' }]); setLoadedSetId(null); setLoadedSetTitle(null); setLoadedSetTopic(null); }}
-          onRefreshSets={() => refreshSets(currentTeacher.id)} isLoadingSets={isLoading} onLive={() => {}}
+          onRefreshSets={() => refreshSets(currentTeacher.id)} isLoadingSets={isLoading}
         />
       )}
 
       {/* SỬA LỖI Ở ĐÂY: Thêm 'WAITING_ROOM' vào danh sách render */}
-      {(['ROOM_SELECTION', 'SET_SELECTION', 'WAITING_ROOM', 'WAITING_FOR_PLAYERS', 'KEYWORD_SELECTION'].includes(gameState)) && (
+      {(['ROOM_SELECTION', 'SET_SELECTION', 'WAITING_FOR_PLAYERS', 'KEYWORD_SELECTION'].includes(gameState)) && (
         <StudentArenaFlow 
           gameState={gameState} setGameState={setGameState} playerName={playerName} studentGrade={studentGrade!} currentTeacher={currentTeacher!}
           onStartMatch={(data) => { setMatchData(data); setGameState('ROUND_INTRO'); }} joinedRoom={joinedRoom} setJoinedRoom={setJoinedRoom} availableSets={availableSets} setAvailableSets={setAvailableSets}
