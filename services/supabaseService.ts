@@ -146,6 +146,12 @@ export const assignSetToRoom = async (teacherId: string, roomCode: string, setId
   return true;
 };
 
+export const fetchAllAssignmentsForTeacher = async (teacherId: string) => {
+  const { data, error } = await supabase.from('room_assignments').select('set_id, room_code').eq('teacher_id', teacherId);
+  if (error) throw error;
+  return data || [];
+};
+
 export const getSetAssignments = async (teacherId: string, setId: string): Promise<string[]> => {
   const { data, error } = await supabase.from('room_assignments').select('room_code').eq('teacher_id', teacherId).eq('set_id', setId);
   if (error || !data) return [];
@@ -166,13 +172,7 @@ export const getRoomAssignmentsWithMeta = async (teacherId: string, roomCode: st
 };
 
 export const removeRoomAssignment = async (teacherId: string, roomCode: string, setId: string) => {
-  // Logic dọn dẹp triệt để mã phòng GV
-  if (roomCode.includes('TEACHER')) {
-    await supabase.from('room_assignments').delete().match({ teacher_id: teacherId, room_code: 'TEACHER_LIVE', set_id: setId });
-    await supabase.from('room_assignments').delete().match({ teacher_id: teacherId, room_code: 'TEACHER_ROOM', set_id: setId });
-  } else {
-    await supabase.from('room_assignments').delete().match({ teacher_id: teacherId, room_code: roomCode, set_id: setId });
-  }
+  await supabase.from('room_assignments').delete().match({ teacher_id: teacherId, room_code: roomCode, set_id: setId });
   return true;
 };
 
@@ -263,4 +263,28 @@ export const createSampleExamSet = async (teacherId: string) => {
     }
   ];
   return await saveExamSet(teacherId, "Bộ đề mẫu: Năng lượng", sampleRounds, "Cơ học", "10", "Vật lý");
+};
+
+// --- LEADERBOARD ---
+export const saveHighScore = async (playerName: string, score: number, setId: string, teacherId: string) => {
+  const { error } = await supabase.from('leaderboard').insert([{
+    player_name: playerName,
+    score: score,
+    set_id: setId,
+    teacher_id: teacherId,
+    created_at: new Date().toISOString()
+  }]);
+  if (error) console.error("Lỗi lưu điểm cao:", error);
+  return !error;
+};
+
+export const getLeaderboard = async (setId: string, limit = 10) => {
+  const { data, error } = await supabase
+    .from('leaderboard')
+    .select('*')
+    .eq('set_id', setId)
+    .order('score', { ascending: false })
+    .limit(limit);
+  if (error) return [];
+  return data || [];
 };
