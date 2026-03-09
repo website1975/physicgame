@@ -23,10 +23,11 @@ const ARENA_ROOMS = [
   { id: '2', name: 'Phòng đôi', code: 'ARENA_B', emoji: '⚔️', color: 'bg-purple-600', capacity: 2, desc: 'Đấu 1 vs 1' },
   { id: '3', name: 'Phòng 3', code: 'ARENA_C', emoji: '🏹', color: 'bg-emerald-600', capacity: 3, desc: 'Hỗn chiến 3 người' },
   { id: '4', name: 'Phòng 4', code: 'ARENA_D', emoji: '🔱', color: 'bg-amber-500', capacity: 4, desc: 'Tứ hùng tranh tài' },
+  { id: '5', name: 'Hệ thống Công thức', code: 'FORMULA_LIB', emoji: '📚', color: 'bg-slate-800', capacity: 0, desc: 'Thư viện tài liệu' },
 ];
 
 const StudentArenaFlow: React.FC<StudentArenaFlowProps> = (props) => {
-  const { gameState, setGameState, playerName, joinedRoom, setJoinedRoom } = props;
+  const { gameState, setGameState, playerName, joinedRoom, setJoinedRoom, studentGrade } = props;
   const [uniqueId] = useState(() => Math.random().toString(36).substring(7));
 
   if (gameState === 'ROOM_SELECTION') {
@@ -44,8 +45,12 @@ const StudentArenaFlow: React.FC<StudentArenaFlowProps> = (props) => {
             <button 
               key={room.code} 
               onClick={() => { 
-                setJoinedRoom(room); 
-                setGameState('WAITING_FOR_PLAYERS');
+                if (room.code === 'FORMULA_LIB') {
+                  setGameState('FORMULA_LIBRARY');
+                } else {
+                  setJoinedRoom(room); 
+                  setGameState('WAITING_FOR_PLAYERS');
+                }
               }} 
               className="bg-white p-8 rounded-[4rem] flex flex-col items-center gap-6 hover:scale-105 transition-all shadow-2xl group relative"
             >
