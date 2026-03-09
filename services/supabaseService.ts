@@ -288,3 +288,14 @@ export const getLeaderboard = async (setId: string, limit = 10) => {
   if (error) return [];
   return data || [];
 };
+
+export const fetchFormulaResources = async (grade?: number) => {
+  let query = supabase.from('formula_resources').select('*').order('sort_order', { ascending: true });
+  if (grade) query = query.eq('grade', grade);
+  const { data, error } = await query;
+  if (error) {
+    console.error("Lỗi lấy tài liệu:", error);
+    return [];
+  }
+  return data || [];
+};
