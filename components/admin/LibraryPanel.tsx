@@ -15,7 +15,6 @@ interface LibraryPanelProps {
   teacherSubject?: string;
   isLoadingSets?: boolean;
   onEdit: (id: string, title: string) => void;
-  onLive: (id: string, title: string) => void;
 }
 
 const LibraryPanel: React.FC<LibraryPanelProps> = (props) => {
