@@ -26,7 +26,7 @@ const safeParseJSON = (text: string) => {
 export const generateQuestionSet = async (topic: string, count: number): Promise<PhysicsProblem[]> => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   const response = await ai.models.generateContent({
-    model: 'gemini-3-pro-preview', 
+    model: 'gemini-3-flash-preview', 
     contents: `Tạo ${count} câu hỏi chủ đề: ${topic}.`,
     config: {
       systemInstruction: SYSTEM_PROMPT,
@@ -51,7 +51,7 @@ export const generateMatchByKeywords = async (quantities: string[], formulas: st
   Các câu hỏi phải có tính ứng dụng thực tế.`;
 
   const response = await ai.models.generateContent({
-    model: 'gemini-3-pro-preview',
+    model: 'gemini-3-flash-preview',
     contents: prompt,
     config: {
       systemInstruction: SYSTEM_PROMPT,
@@ -70,7 +70,7 @@ export const generateMatchByKeywords = async (quantities: string[], formulas: st
 export const parseQuestionsFromText = async (rawText: string): Promise<PhysicsProblem[]> => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   const response = await ai.models.generateContent({
-    model: 'gemini-3-pro-preview',
+    model: 'gemini-3-flash-preview',
     contents: `Trích xuất các câu hỏi từ văn bản này sang JSON: "${rawText}".`,
     config: {
       systemInstruction: SYSTEM_PROMPT,
