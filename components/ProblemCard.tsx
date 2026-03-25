@@ -2,6 +2,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { PhysicsProblem, Difficulty, QuestionType, DisplayChallenge } from '../types';
 import LatexRenderer from './LatexRenderer';
+import { Maximize2, ZoomIn, ZoomOut, RefreshCw } from 'lucide-react';
 
 interface ProblemCardProps {
   problem: PhysicsProblem;
@@ -16,6 +17,8 @@ const ProblemCard: React.FC<ProblemCardProps> = ({ problem, isPaused, isHelpUsed
   const [isMemoryHidden, setIsMemoryHidden] = useState(false);
   const scrambledCache = useRef<string | null>(null);
   const lastProblemId = useRef<string | null>(null);
+  const gameContainerRef = useRef<HTMLDivElement>(null);
+  const [gameScale, setGameScale] = useState(1);
 
   // Reset khi đổi câu hỏi
   useEffect(() => {
@@ -156,6 +159,24 @@ const ProblemCard: React.FC<ProblemCardProps> = ({ problem, isPaused, isHelpUsed
     return null;
   }, [problem.challenge, elapsed, isHelpUsed]);
 
+  const handleFullScreen = () => {
+    if (gameContainerRef.current) {
+      if (gameContainerRef.current.requestFullscreen) {
+        gameContainerRef.current.requestFullscreen();
+      } else if ((gameContainerRef.current as any).webkitRequestFullscreen) {
+        (gameContainerRef.current as any).webkitRequestFullscreen();
+      } else if ((gameContainerRef.current as any).msRequestFullscreen) {
+        (gameContainerRef.current as any).msRequestFullscreen();
+      }
+    }
+  };
+
+  const handleZoom = (delta: number) => {
+    setGameScale(prev => Math.max(0.2, Math.min(2, prev + delta)));
+  };
+
+  const resetZoom = () => setGameScale(1);
+
   if (!problem) return null;
 
   const difficultyColor = {
@@ -221,15 +242,86 @@ const ProblemCard: React.FC<ProblemCardProps> = ({ problem, isPaused, isHelpUsed
              </div>
            ) : (
              <div className="w-full">
-               {problem.imageUrl && (
-                  <div className="w-full mb-6 flex justify-center">
-                     <img src={problem.imageUrl} className="max-h-56 rounded-2xl shadow-md border-4 border-white object-contain" alt="Problem" />
-                  </div>
+               {problem.type === QuestionType.EXTERNAL_GAME ? (
+                 <div 
+                   ref={gameContainerRef}
+                   className="w-full h-full min-h-[400px] bg-slate-900 rounded-2xl overflow-hidden border-4 border-white shadow-2xl relative group"
+                 >
+                    <iframe 
+                      src={problem.externalGameUrl} 
+                      className="w-full h-full border-none transition-transform duration-300 origin-top-left"
+                      style={{ 
+                        transform: `scale(${gameScale})`,
+                        width: `${100 / gameScale}%`,
+                        height: `${100 / gameScale}%`
+                      }}
+                      title="External Game"
+                      allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                      allowFullScreen
+                    />
+                    <div className="absolute top-4 left-4 bg-slate-900/80 backdrop-blur-md px-4 py-2 rounded-full border border-white/20 flex items-center gap-2 pointer-events-none">
+                       <span className="animate-pulse w-2 h-2 bg-emerald-500 rounded-full"></span>
+                       <span className="text-[10px] font-black text-white uppercase italic tracking-widest">Game đang chạy...</span>
+                    </div>
+                    
+                    <div className="absolute bottom-4 right-4 flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-all">
+                       <div className="bg-slate-900/80 backdrop-blur-md p-1 rounded-xl border border-white/20 flex items-center gap-1">
+                          <button 
+                            onClick={() => {
+                              const iframe = gameContainerRef.current?.querySelector('iframe');
+                              if (iframe) iframe.src = iframe.src;
+                            }}
+                            className="p-2 hover:bg-white/10 text-white rounded-lg transition-colors"
+                            title="Tải lại game"
+                          >
+                             <RefreshCw size={16} />
+                          </button>
+                          <button 
+                            onClick={() => handleZoom(-0.1)}
+                            className="p-2 hover:bg-white/10 text-white rounded-lg transition-colors"
+                            title="Thu nhỏ"
+                          >
+                             <ZoomOut size={16} />
+                          </button>
+                          <button 
+                            onClick={resetZoom}
+                            className="px-2 py-1 hover:bg-white/10 text-white rounded-lg transition-colors text-[10px] font-black"
+                            title="Đặt lại"
+                          >
+                             {Math.round(gameScale * 100)}%
+                          </button>
+                          <button 
+                            onClick={() => handleZoom(0.1)}
+                            className="p-2 hover:bg-white/10 text-white rounded-lg transition-colors"
+                            title="Phóng to"
+                          >
+                             <ZoomIn size={16} />
+                          </button>
+                       </div>
+
+                       <button 
+                         onClick={handleFullScreen}
+                         className="bg-blue-600 hover:bg-blue-500 p-3 rounded-xl text-white shadow-lg flex items-center gap-2 transition-all"
+                         title="Phóng to toàn màn hình"
+                       >
+                          <Maximize2 size={18} />
+                          <span className="text-[10px] font-black uppercase italic">Toàn màn hình</span>
+                       </button>
+                    </div>
+                 </div>
+               ) : (
+                 <>
+                   {problem.imageUrl && (
+                      <div className="w-full mb-6 flex justify-center">
+                         <img src={problem.imageUrl} className="max-h-56 rounded-2xl shadow-md border-4 border-white object-contain" alt="Problem" />
+                      </div>
+                   )}
+                   <LatexRenderer 
+                     content={displayContent} 
+                     className={`text-lg md:text-2xl text-slate-700 leading-relaxed font-bold italic transition-all duration-500`} 
+                   />
+                 </>
                )}
-               <LatexRenderer 
-                 content={displayContent} 
-                 className={`text-lg md:text-2xl text-slate-700 leading-relaxed font-bold italic transition-all duration-500`} 
-               />
              </div>
            )}
         </div>
