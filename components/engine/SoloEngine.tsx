@@ -102,12 +102,25 @@ const SoloEngine: React.FC<SoloEngineProps> = ({ gameState, setGameState, player
     let speedBonus = 0;
     const correct = (currentProblem?.correctAnswer || "").trim().toUpperCase();
 
-    if (currentProblem?.type === QuestionType.EXTERNAL_GAME) {
+    if (currentProblem?.type === QuestionType.EXTERNAL_GAME || (currentProblem?.type as any) === 'EXTERNAL_GAME') {
       const result = verifyPasscode(userAnswer);
       if (result.valid) {
-        isPerfect = true;
-        basePoints = calculatePointsForLevel(result.level);
-        totalPoints = basePoints;
+        // Nếu câu hỏi có correctAnswer dạng "LV5", kiểm tra xem level đạt được có >= 5 không
+        const requiredLevelMatch = (currentProblem.correctAnswer || "").match(/LV(\d+)/i);
+        const requiredLevel = requiredLevelMatch ? parseInt(requiredLevelMatch[1]) : 1;
+
+        if (result.level >= requiredLevel) {
+          isPerfect = true;
+          basePoints = calculatePointsForLevel(result.level);
+          totalPoints = basePoints;
+        } else {
+          isPerfect = false;
+          basePoints = 0;
+          totalPoints = 0;
+          setFeedback({ isCorrect: false, text: `Mã hợp lệ nhưng cấp độ ${result.level} chưa đạt yêu cầu (tối thiểu LV${requiredLevel}).` });
+          setGameState('FEEDBACK');
+          return;
+        }
       } else {
         isPerfect = false;
         basePoints = 0;
@@ -302,45 +315,75 @@ const SoloEngine: React.FC<SoloEngineProps> = ({ gameState, setGameState, player
       </header>
 
       <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-8 min-h-0">
-        <div className={`${currentProblem?.type === QuestionType.EXTERNAL_GAME ? 'lg:col-span-8' : 'lg:col-span-7'} h-full transition-all duration-500`}>
+        <div className={`${(currentProblem?.type === QuestionType.EXTERNAL_GAME || (currentProblem?.type as any) === 'EXTERNAL_GAME') ? 'lg:col-span-8' : 'lg:col-span-7'} h-full transition-all duration-500`}>
            <ProblemCard problem={currentProblem} isHelpUsed={isHelpUsed} isPaused={gameState !== 'ANSWERING'} />
         </div>
         
-        <div className={`${currentProblem?.type === QuestionType.EXTERNAL_GAME ? 'lg:col-span-4' : 'lg:col-span-5'} bg-white rounded-[3.5rem] p-10 shadow-2xl flex flex-col border-4 border-slate-50 relative overflow-hidden transition-all duration-500`}>
+        <div className={`${(currentProblem?.type === QuestionType.EXTERNAL_GAME || (currentProblem?.type as any) === 'EXTERNAL_GAME') ? 'lg:col-span-4' : 'lg:col-span-5'} bg-white rounded-[3.5rem] p-10 shadow-2xl flex flex-col border-4 border-slate-50 relative overflow-hidden transition-all duration-500`}>
            {gameState === 'ANSWERING' ? (
              <div className="flex flex-col h-full animate-in zoom-in duration-300">
-                <div className="flex justify-between items-center mb-8">
-                   <h3 className="text-sm font-black text-slate-400 uppercase italic tracking-widest">Khu vực phản ứng:</h3>
-                   {!isHelpUsed && (
-                     <button 
-                       onClick={() => setShowHelpConfirm(true)} 
-                       className="bg-amber-100 text-amber-600 px-5 py-2.5 rounded-2xl font-black text-[10px] uppercase italic border-b-4 border-amber-200 hover:scale-105 active:translate-y-1 transition-all"
-                     >
-                       Kích hoạt trợ giúp 💡
-                     </button>
-                   )}
-                </div>
-                
-                <div className="flex-1 overflow-y-auto no-scrollbar">
-                   <AnswerInput 
-                     problem={currentProblem} 
-                     value={userAnswer} 
-                     onChange={setUserAnswer} 
-                     onSubmit={submitAnswer} 
-                     disabled={false} 
-                   />
-                </div>
+                {(currentProblem?.type === QuestionType.EXTERNAL_GAME || (currentProblem?.type as any) === 'EXTERNAL_GAME') ? (
+                  <>
+                    <div className="flex justify-between items-center mb-8 bg-emerald-50 p-4 rounded-3xl border-2 border-emerald-100">
+                       <div className="bg-emerald-600 text-white px-6 py-2 rounded-2xl font-black uppercase italic text-[10px] shadow-md">
+                          🎮 TRÒ CHƠI NGOÀI
+                       </div>
+                       <div className="text-emerald-600 font-black italic text-[10px] uppercase">Nhập mã khi hoàn thành</div>
+                    </div>
+                    <div className="flex-1 overflow-y-auto no-scrollbar">
+                       <AnswerInput 
+                         problem={currentProblem} 
+                         value={userAnswer} 
+                         onChange={setUserAnswer} 
+                         onSubmit={submitAnswer} 
+                         disabled={false} 
+                       />
+                    </div>
+                    <button 
+                      onClick={submitAnswer} 
+                      disabled={!userAnswer} 
+                      className={`w-full py-7 rounded-[2rem] font-black italic text-2xl mt-8 shadow-2xl border-b-[10px] transition-all active:translate-y-2 active:border-b-0
+                        ${userAnswer ? 'bg-emerald-600 text-white border-emerald-800' : 'bg-slate-100 text-slate-300 border-slate-200 cursor-not-allowed'}`}
+                    >
+                      XÁC NHẬN KẾT QUẢ ✅
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <div className="flex justify-between items-center mb-8">
+                       <h3 className="text-sm font-black text-slate-400 uppercase italic tracking-widest">Khu vực phản ứng:</h3>
+                       {!isHelpUsed && (
+                         <button 
+                           onClick={() => setShowHelpConfirm(true)} 
+                           className="bg-amber-100 text-amber-600 px-5 py-2.5 rounded-2xl font-black text-[10px] uppercase italic border-b-4 border-amber-200 hover:scale-105 active:translate-y-1 transition-all"
+                         >
+                           Kích hoạt trợ giúp 💡
+                         </button>
+                       )}
+                    </div>
+                    
+                    <div className="flex-1 overflow-y-auto no-scrollbar">
+                       <AnswerInput 
+                         problem={currentProblem} 
+                         value={userAnswer} 
+                         onChange={setUserAnswer} 
+                         onSubmit={submitAnswer} 
+                         disabled={false} 
+                       />
+                    </div>
 
-                <button 
-                  onClick={submitAnswer} 
-                  disabled={!userAnswer} 
-                  className={`w-full py-7 rounded-[2rem] font-black italic text-2xl mt-8 shadow-2xl border-b-[10px] transition-all active:translate-y-2 active:border-b-0
-                    ${userAnswer 
-                      ? 'bg-blue-600 text-white border-blue-800' 
-                      : 'bg-slate-100 text-slate-300 border-slate-200 cursor-not-allowed'}`}
-                >
-                  XÁC NHẬN ĐÁP ÁN ✅
-                </button>
+                    <button 
+                      onClick={submitAnswer} 
+                      disabled={!userAnswer} 
+                      className={`w-full py-7 rounded-[2rem] font-black italic text-2xl mt-8 shadow-2xl border-b-[10px] transition-all active:translate-y-2 active:border-b-0
+                        ${userAnswer 
+                          ? 'bg-blue-600 text-white border-blue-800' 
+                          : 'bg-slate-100 text-slate-300 border-slate-200 cursor-not-allowed'}`}
+                    >
+                      XÁC NHẬN ĐÁP ÁN ✅
+                    </button>
+                  </>
+                )}
              </div>
            ) : (
              <div className="flex flex-col h-full animate-in slide-in-from-right duration-500">
