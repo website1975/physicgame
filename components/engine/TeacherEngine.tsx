@@ -1,11 +1,12 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { GameState, Teacher, MatchData } from '../../types';
+import { GameState, Teacher, MatchData, QuestionType } from '../../types';
 import ProblemCard from '../ProblemCard';
 import AnswerInput from '../AnswerInput';
 import LatexRenderer from '../LatexRenderer';
 import Whiteboard from '../Whiteboard';
 import { supabase } from '../../services/supabaseService';
+import { verifyPasscode, calculatePointsForLevel } from '../../services/passcodeService';
 
 interface TeacherEngineProps {
   gameState: GameState;
@@ -136,14 +137,40 @@ const TeacherEngine: React.FC<TeacherEngineProps> = ({ gameState, setGameState, 
     const currentProblem = rounds[0]?.problems[syncState.index];
     if (!currentProblem) return;
     
+    let isPerfect = false;
+    let totalPoints = 0;
+    let basePoints = 0;
+    let speedBonus = 0;
     const correct = (currentProblem.correctAnswer || "").trim().toUpperCase();
-    const isPerfect = userAnswer.trim().toUpperCase() === correct;
-    const points = isPerfect ? (isHelpUsed ? 60 : 100) : 0;
+
+    if (currentProblem.type === QuestionType.EXTERNAL_GAME) {
+      const result = verifyPasscode(userAnswer);
+      if (result.valid) {
+        isPerfect = true;
+        basePoints = calculatePointsForLevel(result.level);
+        totalPoints = basePoints;
+      } else {
+        isPerfect = false;
+        basePoints = 0;
+        totalPoints = 0;
+      }
+    } else {
+      isPerfect = userAnswer.trim().toUpperCase() === correct;
+      basePoints = isPerfect ? (isHelpUsed ? 60 : 100) : 0;
+      
+      if (isPerfect && !isHelpUsed) {
+        const totalTime = currentProblem.timeLimit || 40;
+        speedBonus = Math.floor((timeLeft / totalTime) * 50);
+      }
+      totalPoints = basePoints + speedBonus;
+    }
     
-    setScore(s => s + points);
+    setScore(s => s + totalPoints);
     setFeedback({ 
       isCorrect: isPerfect, 
-      text: isPerfect ? '✨ CHÍNH XÁC!' : `❌ SAI RỒI! Đáp án đúng: ${correct}` 
+      text: isPerfect 
+        ? `✨ CHÍNH XÁC! (+${basePoints}đ ${speedBonus > 0 ? `+ ${speedBonus}đ tốc độ` : ''})` 
+        : `❌ SAI RỒI! Đáp án đúng: ${correct}` 
     });
     setGameState('FEEDBACK');
     reportProgress(undefined, isPerfect, true);
@@ -185,11 +212,11 @@ const TeacherEngine: React.FC<TeacherEngineProps> = ({ gameState, setGameState, 
           </div>
         )}
         
-        <div className="col-span-7 h-full">
+        <div className={`${currentProblem?.type === QuestionType.EXTERNAL_GAME ? 'col-span-8' : 'col-span-7'} h-full transition-all duration-500`}>
            <ProblemCard problem={currentProblem} isHelpUsed={isHelpUsed} isPaused={gameState !== 'ANSWERING' || isWhiteboardActive} />
         </div>
         
-        <div className="col-span-5 bg-white rounded-[3.5rem] p-10 shadow-2xl flex flex-col border-4 border-slate-50 h-full">
+        <div className={`${currentProblem?.type === QuestionType.EXTERNAL_GAME ? 'col-span-4' : 'col-span-5'} bg-white rounded-[3.5rem] p-10 shadow-2xl flex flex-col border-4 border-slate-50 h-full transition-all duration-500`}>
            {gameState === 'ANSWERING' ? (
              <div className="flex flex-col h-full">
                 <div className="flex justify-between items-center mb-6">
