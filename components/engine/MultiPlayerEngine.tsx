@@ -391,7 +391,27 @@ const MultiPlayerEngine: React.FC<MultiPlayerEngineProps> = ({ gameState, setGam
         </div>
         
         <div className={`${currentProblem?.type === QuestionType.EXTERNAL_GAME ? 'lg:col-span-4' : 'lg:col-span-5'} bg-white rounded-[3.5rem] p-10 shadow-2xl flex flex-col border-4 border-slate-50 relative overflow-hidden items-center justify-center transition-all duration-500`}>
-           {gameState === 'WAITING_FOR_BUZZER' ? (
+           {currentProblem?.type === QuestionType.EXTERNAL_GAME && gameState !== 'ROUND_INTRO' ? (
+             <div className="flex flex-col h-full w-full animate-in zoom-in duration-300">
+                <div className="flex justify-between items-center mb-8 bg-emerald-50 p-4 rounded-3xl border-2 border-emerald-100">
+                   <div className="bg-emerald-600 text-white px-6 py-2 rounded-2xl font-black uppercase italic text-[10px] shadow-md">
+                      🎮 TRÒ CHƠI NGOÀI
+                   </div>
+                   <div className="text-emerald-600 font-black italic text-[10px] uppercase">Nhập mã khi hoàn thành</div>
+                </div>
+                <div className="flex-1 overflow-y-auto no-scrollbar">
+                   <AnswerInput problem={currentProblem} value={userAnswer} onChange={setUserAnswer} onSubmit={submitAnswer} disabled={false} />
+                </div>
+                <button 
+                  onClick={submitAnswer} 
+                  disabled={!userAnswer} 
+                  className={`w-full py-7 rounded-[2rem] font-black italic text-2xl mt-8 shadow-2xl border-b-[10px] transition-all active:translate-y-2 active:border-b-0
+                    ${userAnswer ? 'bg-emerald-600 text-white border-emerald-800' : 'bg-slate-100 text-slate-300 border-slate-200 cursor-not-allowed'}`}
+                >
+                  XÁC NHẬN KẾT QUẢ ✅
+                </button>
+             </div>
+           ) : gameState === 'WAITING_FOR_BUZZER' ? (
              <div className="flex flex-col items-center animate-in zoom-in duration-300 w-full">
                 <div 
                   className="text-[12rem] mb-12 animate-swing cursor-pointer hover:scale-110 transition-transform active:scale-90 drop-shadow-2xl" 
