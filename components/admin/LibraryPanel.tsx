@@ -1,7 +1,5 @@
-
 import React from 'react';
 import ExamLibrary from '../ExamLibrary';
-
 interface LibraryPanelProps {
   examSets: any[];
   searchLibrary: string;
