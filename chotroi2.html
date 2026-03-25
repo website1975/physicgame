@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mô phỏng Vật Lý: Ném Ngang Luyện Tập</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #f0f9ff;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        canvas {
+            display: block;
+            background: linear-gradient(to bottom, #4facfe 0%, #00f2fe 70%, #1e3799 70%, #0c2461 100%);
+        }
+        .ui-panel {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            background: rgba(255, 255, 255, 0.9);
+            padding: 20px;
+            border-radius: 12px;
+            box-shadow: 5px 5px 20px rgba(0,0,0,0.15);
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            width: 320px;
+            border-right: 5px solid #3498db;
+            backdrop-filter: blur(8px);
+            z-index: 10;
+        }
+        .btn-primary {
+            background: linear-gradient(135deg, #2ecc71, #27ae60);
+            color: white;
+            padding: 12px;
+            border-radius: 8px;
+            font-weight: bold;
+            transition: all 0.2s;
+            text-transform: uppercase;
+            box-shadow: 0 4px 6px rgba(46, 204, 113, 0.3);
+        }
+        .btn-primary:hover { transform: translateY(-2px); box-shadow: 0 6px 12px rgba(46, 204, 113, 0.4); }
+        .btn-primary:active { transform: translateY(0); }
+
+        .status-badge {
+            padding: 12px;
+            border-radius: 8px;
+            text-align: center;
+            font-weight: bold;
+            font-size: 16px;
+        }
+        .success { background-color: #d4edda; color: #155724; border: 2px solid #c3e6cb; }
+        .fail { background-color: #f8d7da; color: #721c24; border: 2px solid #f5c6cb; }
+        .neutral { background-color: #e2e3e5; color: #383d41; border: 2px solid #ced4da; }
+
+        #codeModal {
+            display: none;
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: white;
+            padding: 30px;
+            border-radius: 20px;
+            box-shadow: 0 0 60px rgba(0,0,0,0.4);
+            z-index: 200;
+            text-align: center;
+            border: 5px solid #2ecc71;
+            width: 90%;
+            max-width: 380px;
+            animation: popIn 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+        }
+        @keyframes popIn {
+            from { transform: translate(-50%, -50%) scale(0.8); opacity: 0; }
+            to { transform: translate(-50%, -50%) scale(1); opacity: 1; }
+        }
+    </style>
+</head>
+<body>
+
+<!-- Thông báo mã Passcode -->
+<div id="codeModal">
+    <h3 class="text-2xl font-bold text-green-600 mb-2">CHIẾN THẮNG! 🎯</h3>
+    <p class="text-gray-600 text-sm mb-6">Bạn đã tính toán cực kỳ chính xác. Đây là Passcode của bạn:</p>
+    <div id="rewardCode" class="text-3xl font-mono font-black tracking-widest text-blue-700 bg-blue-50 p-5 rounded-xl border-2 border-dashed border-blue-300 mb-6 shadow-inner">
+        ------
+    </div>
+    <button onclick="document.getElementById('codeModal').style.display='none'" class="w-full bg-gray-800 text-white py-3 rounded-lg font-bold hover:bg-black transition">TIẾP TỤC LUYỆN TẬP</button>
+</div>
+
+<canvas id="gameCanvas"></canvas>
+
+<div class="ui-panel">
+    <h2 class="text-xl font-bold text-gray-800 border-b pb-2">Ném Ngang Lý Tưởng</h2>
+    
+    <div id="msg" class="status-badge neutral">Đang chờ lệnh...</div>
+    
+    <div class="space-y-2 text-sm bg-white/60 p-3 rounded-lg border border-white">
+        <div class="flex justify-between"><span>Vận tốc ($v_0$):</span> <b>250 km/h</b></div>
+        <div class="flex justify-between"><span>Độ cao ($h$):</span> <b>500 m</b></div>
+        <div class="flex justify-between"><span>Trọng trường ($g$):</span> <b>9,8 m/s²</b></div>
+        <div class="flex justify-between text-green-600 font-bold">
+            <span>Đích rộng:</span> <span>100 m</span>
+        </div>
+        <div class="flex justify-between text-green-600 text-[10px] italic">
+            <span>(Sai số cho phép:</span> <span>± 50 m)</span>
+        </div>
+        <hr>
+        <div class="flex justify-between text-blue-700">
+            <span>Cách mục tiêu:</span>
+            <span id="distVal" class="font-mono font-bold">---</span>
+        </div>
+    </div>
+
+    <div class="input-group">
+        <label class="text-[10px] font-bold text-gray-500 uppercase mb-1 block">Khoảng cách thả dự kiến (m):</label>
+        <input type="number" id="dropDist" value="700.0" step="0.1" class="w-full p-3 border-2 border-gray-200 rounded-lg font-bold text-xl focus:border-blue-500 focus:outline-none transition">
+    </div>
+    
+    <button id="startBtn" class="btn-primary">THẢ BOM</button>
+
+    <div class="validator-panel border-t pt-4 mt-2">
+        <p class="text-[10px] font-bold text-gray-400 uppercase mb-2">Kiểm tra Passcode thủ công</p>
+        <input type="text" id="checkInput" placeholder="Nhập mã để test..." class="text-xs p-2 uppercase w-full border rounded bg-gray-50">
+        <div id="validResult" class="text-[10px] mt-1 font-bold"></div>
+    </div>
+</div>
+
+<script>
+    // --- LOGIC PASSCODE ĐỘNG ---
+    function generateGamePasscode(level) {
+        const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+        let salt = "";
+        for (let i = 0; i < 4; i++) salt += chars.charAt(Math.floor(Math.random() * chars.length));
+        
+        let checksum = 0;
+        for (let i = 0; i < salt.length; i++) checksum += salt.charCodeAt(i);
+        
+        const checkChar = String.fromCharCode(65 + (checksum % 26)); 
+        return `LV${level}-${salt}${checkChar}`;
+    }
+
+    function validatePasscode(code) {
+        const regex = /^LV(\d+)-([A-Z0-9]{4})([A-Z])$/;
+        const match = code.toUpperCase().match(regex);
+        if (!match) return false;
+        const salt = match[2];
+        const checkChar = match[3];
+        let checksum = 0;
+        for (let i = 0; i < salt.length; i++) checksum += salt.charCodeAt(i);
+        return checkChar === String.fromCharCode(65 + (checksum % 26));
+    }
+
+    // --- LOGIC GAME & VẬT LÝ ---
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    const msgEl = document.getElementById('msg');
+    const startBtn = document.getElementById('startBtn');
+    const dropDistInput = document.getElementById('dropDist');
+    const codeModal = document.getElementById('codeModal');
+    const rewardCodeDisplay = document.getElementById('rewardCode');
+
+    const G = 9.8; 
+    const V0 = 250 / 3.6; 
+    const H = 500; 
+    const L_THEORY = V0 * Math.sqrt((2 * H) / G); 
+    const SCALE = 0.6; 
+    const TARGET_SIZE = 100; // Cập nhật kích thước đảo mục tiêu lên 100m
+
+    let plane = { x: -100, y: 0, moving: false };
+    let bomb = null;
+    let groundY = 0, targetX = 0;
+    let clouds = [], explosions = [], lastTime = 0;
+
+    function resize() {
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+        groundY = canvas.height * 0.85;
+        targetX = canvas.width * 0.8;
+        plane.y = groundY - (H * SCALE);
+        if (clouds.length === 0) {
+            for (let i = 0; i < 10; i++) clouds.push({x: Math.random() * canvas.width, y: Math.random() * 250, s: 0.1 + Math.random() * 0.4, w: 40 + Math.random() * 60});
+        }
+    }
+
+    function startRun() {
+        if (plane.moving) return;
+        bomb = null; 
+        explosions = [];
+        plane.x = -150; 
+        plane.moving = true;
+        msgEl.textContent = "Máy bay đang tới...";
+        msgEl.className = "status-badge neutral";
+        lastTime = performance.now();
+        requestAnimationFrame(gameLoop);
+    }
+
+    function gameLoop(currentTime) {
+        const dt = (currentTime - lastTime) / 1000;
+        lastTime = currentTime;
+        const delta = dt * 3.0; // Tốc độ mô phỏng
+
+        if (plane.moving) {
+            plane.x += V0 * SCALE * delta;
+            const dist = (targetX - plane.x) / SCALE;
+            document.getElementById('distVal').textContent = dist.toFixed(1) + " m";
+            
+            const userD = parseFloat(dropDistInput.value);
+            if (!bomb && dist <= userD) {
+                bomb = { startX: plane.x, userD: userD, x: plane.x, y: plane.y, path: [], active: true, time: 0 };
+            }
+            if (plane.x > canvas.width + 100) plane.moving = false;
+        }
+
+        if (bomb && bomb.active) {
+            bomb.time += delta;
+            let ym = 0.5 * G * Math.pow(bomb.time, 2);
+            if (ym >= H) {
+                bomb.active = false;
+                const error = bomb.userD - L_THEORY;
+                bomb.x = targetX + (error * SCALE);
+                bomb.y = groundY;
+
+                // Cập nhật sai số cho phép lên 50m (tương ứng đích rộng 100m)
+                if (Math.abs(error) <= 50) { 
+                    msgEl.textContent = "TRÚNG ĐÍCH! 🎯";
+                    msgEl.className = "status-badge success";
+                    explosions.push({x: bomb.x, y: bomb.y, r: 12, a: 1, c: "#f1c40f"});
+                    setTimeout(() => {
+                        rewardCodeDisplay.textContent = generateGamePasscode(5);
+                        codeModal.style.display = 'block';
+                    }, 800);
+                } else {
+                    msgEl.textContent = "TRƯỢT RỒI! 💥";
+                    msgEl.className = "status-badge fail";
+                    explosions.push({x: bomb.x, y: bomb.y, r: 6, a: 1, c: "#95a5a6"});
+                }
+            } else {
+                bomb.x = bomb.startX + (V0 * bomb.time * SCALE);
+                bomb.y = (groundY - (H * SCALE)) + (ym * SCALE);
+            }
+            bomb.path.push({x: bomb.x, y: bomb.y});
+        }
+
+        draw();
+        if (plane.moving || (bomb && bomb.active) || explosions.length > 0) requestAnimationFrame(gameLoop);
+    }
+
+    function draw() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        
+        // Mây
+        ctx.fillStyle = "rgba(255, 255, 255, 0.7)";
+        clouds.forEach(c => {
+            ctx.beginPath(); ctx.arc(c.x, c.y, c.w * 0.5, 0, Math.PI * 2); ctx.fill();
+            c.x -= c.s; if (c.x < -100) c.x = canvas.width + 100;
+        });
+
+        // Nước biển
+        ctx.fillStyle = "#1e3799"; 
+        ctx.fillRect(0, groundY, canvas.width, canvas.height - groundY);
+
+        // Đảo mục tiêu (Đã cập nhật kích thước vẽ)
+        ctx.fillStyle = "#e67e22"; 
+        ctx.beginPath(); 
+        ctx.ellipse(targetX, groundY, (TARGET_SIZE/2) * SCALE, 10 * SCALE, 0, 0, Math.PI, true); 
+        ctx.fill();
+        ctx.fillStyle = "rgba(255,255,255,0.3)";
+        ctx.fillRect(targetX - 1, 0, 2, groundY); // Đường chuẩn tâm
+
+        // Máy bay
+        ctx.fillStyle = "#dfe6e9"; 
+        ctx.beginPath(); 
+        ctx.ellipse(plane.x, plane.y, 25, 7, 0, 0, Math.PI * 2); 
+        ctx.fill();
+
+        // Bom và quỹ đạo
+        if (bomb) {
+            ctx.strokeStyle = "rgba(255, 255, 0, 0.4)"; 
+            ctx.beginPath();
+            bomb.path.forEach((p, i) => i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y)); 
+            ctx.stroke();
+            ctx.fillStyle = "#2d3436"; 
+            ctx.beginPath(); ctx.arc(bomb.x, bomb.y, 4, 0, Math.PI * 2); ctx.fill();
+        }
+
+        // Hiệu ứng nổ
+        explosions.forEach((e, i) => {
+            ctx.globalAlpha = e.a; ctx.fillStyle = e.c;
+            ctx.beginPath(); ctx.arc(e.x, e.y, e.r, 0, Math.PI * 2); ctx.fill();
+            e.r += 1.5; e.a -= 0.04; if (e.a <= 0) explosions.splice(i, 1);
+        });
+        ctx.globalAlpha = 1;
+    }
+
+    // Trình kiểm tra passcode cho GV/HS
+    document.getElementById('checkInput').oninput = (e) => {
+        const val = e.target.value.trim().toUpperCase();
+        const out = document.getElementById('validResult');
+        if (!val) { out.textContent = ""; return; }
+        if (validatePasscode(val)) {
+            out.textContent = "✅ MÃ HỢP LỆ"; out.className = "text-[10px] mt-1 font-bold text-green-600";
+        } else {
+            out.textContent = "❌ MÃ SAI"; out.className = "text-[10px] mt-1 font-bold text-red-500";
+        }
+    };
+
+    window.addEventListener('resize', resize);
+    startBtn.addEventListener('click', startRun);
+    resize();
+    draw();
+</script>
+</body>
+</html>

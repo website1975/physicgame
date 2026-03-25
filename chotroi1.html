@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Trò Chơi Vật Lý: Bậc Thang, Ma Sát & Hồ Nước</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #f0f2f5;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            margin: 0;
+            overflow: hidden;
+        }
+        #game-container {
+            position: relative;
+            margin-top: 10px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.2);
+            border-radius: 8px;
+            background: white;
+        }
+        canvas {
+            display: block;
+            border-radius: 8px;
+            background-color: #fff;
+        }
+        .ui-panel {
+            background: rgba(255, 255, 255, 0.95);
+            padding: 12px;
+            border-radius: 8px;
+            margin-top: 10px;
+            display: flex;
+            gap: 15px;
+            align-items: center;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            border: 1px solid #ddd;
+        }
+        .mission-panel {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            background: rgba(255, 255, 255, 0.9);
+            padding: 15px;
+            border-right: 5px solid #007bff;
+            border-radius: 4px;
+            max-width: 280px;
+            pointer-events: none;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .mission-panel h3 { margin: 0 0 8px 0; color: #007bff; font-size: 16px; }
+        .mission-panel p { margin: 5px 0; font-size: 13px; line-height: 1.4; color: #333; }
+        input {
+            padding: 6px;
+            width: 70px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            font-weight: bold;
+        }
+        button {
+            padding: 8px 15px;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: bold;
+        }
+        button:hover { background-color: #0056b3; }
+        #status-message {
+            position: absolute;
+            top: 40%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 32px;
+            font-weight: bold;
+            display: none;
+            text-shadow: 1px 1px 3px rgba(0,0,0,0.2);
+            pointer-events: none;
+            z-index: 10;
+            text-align: center;
+            width: 80%;
+            background: rgba(255,255,255,0.95);
+            padding: 20px;
+            border-radius: 10px;
+            border: 2px solid #007bff;
+        }
+        .password-display {
+            display: block;
+            margin-top: 15px;
+            font-family: 'Courier New', Courier, monospace;
+            background: #2d3436;
+            padding: 15px;
+            border: 2px solid #007bff;
+            color: #00ff00;
+            font-size: 28px;
+            user-select: all;
+            letter-spacing: 2px;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="game-container">
+        <canvas id="gameCanvas" width="1100" height="520"></canvas>
+        
+        <div class="mission-panel">
+            <h3>Yêu cầu & Hướng dẫn</h3>
+            <p><b>Nhiệm vụ:</b> Điều khiển đối tượng vượt qua chướng ngại vật và dừng đúng trong vùng an toàn (1m).</p>
+            <p><b>1. Nhảy:</b> Nhấn phím <b>↑ (Lên)</b> để nhảy lên từng bậc thang.</p>
+            <p><b>2. Trượt:</b> Khi ở đỉnh, nhấn phím <b>→ (Phải)</b> để chạy xuống dốc.</p>
+            <p><b>3. Tính toán:</b> Nhập hệ số ma sát <b>μ</b> bên dưới để đối tượng dừng đúng vạch xanh.</p>
+            <p style="color:#d63031; font-weight:bold; margin-top:10px;">Thành công sẽ nhận mã Passcode động!</p>
+        </div>
+
+        <div id="status-message"></div>
+    </div>
+
+    <div class="ui-panel">
+        <label for="friction-input"><b>Nhập hệ số ma sát (μ):</b></label>
+        <input type="number" id="friction-input" step="0.01" min="0" max="2" value="0.44">
+        <button id="reset-btn">Bắt đầu lại</button>
+    </div>
+
+<script>
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    const frictionInput = document.getElementById('friction-input');
+    const resetBtn = document.getElementById('reset-btn');
+    const statusMsg = document.getElementById('status-message');
+
+    /**
+     * HÀM PHÁT SINH PASSCODE ĐỘNG
+     * Logic: LV{level}-{4 ký tự ngẫu nhiên}{1 ký tự kiểm tra}
+     */
+    function generateGamePasscode(level) {
+        const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+        let salt = "";
+        for (let i = 0; i < 4; i++) salt += chars.charAt(Math.floor(Math.random() * chars.length));
+        
+        let checksum = 0;
+        for (let i = 0; i < salt.length; i++) checksum += salt.charCodeAt(i);
+        
+        const checkChar = String.fromCharCode(65 + (checksum % 26)); 
+        return `LV${level}-${salt}${checkChar}`;
+    }
+
+    const SCALE = 80; 
+    const G_PHYSICS = 9.8; 
+    const GROUND_Y = 380; 
+    const FLOOR_DEPTH = 100; 
+
+    let gameState = 'IDLE'; 
+    let mu = 0.44;
+    
+    const player = {
+        x: 20,
+        y: GROUND_Y - 30,
+        w: 30,
+        h: 30,
+        vx: 0,
+        vy: 0,
+        angle: 0,
+        onStep: 0,
+        color: '#ff4757',
+        targetX: 0,
+        targetY: 0
+    };
+
+    const steps = [
+        {x: 20, y: GROUND_Y, w: 60},
+        {x: 100, y: GROUND_Y - 40, w: 60},
+        {x: 180, y: GROUND_Y - 80, w: 60},
+        {x: 260, y: GROUND_Y - 120, w: 60},
+        {x: 340, y: GROUND_Y - 160, w: 100} 
+    ];
+
+    const ramp = { xStart: 440, xEnd: 440 + 2 * SCALE, yTop: GROUND_Y - 160, yBottom: GROUND_Y };
+    const dangerZone = { xStart: ramp.xEnd, width: 4 * SCALE };
+    const safeZone = { xStart: dangerZone.xStart + dangerZone.width, width: 1 * SCALE };
+    const waterZone = { xStart: safeZone.xStart + safeZone.width };
+
+    function init() {
+        player.x = 20;
+        player.y = GROUND_Y - player.h;
+        player.vx = 0;
+        player.vy = 0;
+        player.angle = 0;
+        player.onStep = 0;
+        gameState = 'IDLE';
+        statusMsg.style.display = 'none';
+        mu = parseFloat(frictionInput.value) || 0.44;
+    }
+
+    resetBtn.addEventListener('click', init);
+
+    window.addEventListener('keydown', (e) => {
+        if (gameState !== 'IDLE') return;
+
+        if (e.key === 'ArrowUp') {
+            if (player.onStep < steps.length - 1) {
+                player.onStep++;
+                const nextStep = steps[player.onStep];
+                player.targetX = nextStep.x + 10;
+                player.targetY = nextStep.y - player.h;
+                const t = 0.5;
+                player.vx = (player.targetX - player.x) / (t * 60);
+                const gravityPerFrame = 0.4;
+                player.vy = (player.targetY - player.y - 0.5 * gravityPerFrame * Math.pow(t * 60, 2)) / (t * 60);
+                gameState = 'JUMPING';
+            }
+        }
+
+        if (e.key === 'ArrowRight') {
+            if (player.onStep === steps.length - 1) {
+                player.vx = 3; 
+                gameState = 'CLIMBING';
+            }
+        }
+    });
+
+    function update() {
+        if (gameState === 'JUMPING') {
+            player.x += player.vx;
+            player.vy += 0.4; 
+            player.y += player.vy;
+            if (player.vy > 0 && player.y >= player.targetY) {
+                player.y = player.targetY;
+                player.x = player.targetX;
+                player.vx = 0;
+                player.vy = 0;
+                gameState = 'IDLE';
+            }
+        }
+
+        if (gameState === 'CLIMBING') {
+            player.x += player.vx;
+            if (player.x >= ramp.xStart) {
+                player.x = ramp.xStart;
+                gameState = 'SLIDING';
+                const h = 2;
+                player.finalV = Math.sqrt(2 * G_PHYSICS * h) * SCALE; 
+                player.angle = Math.atan2(ramp.yBottom - ramp.yTop, ramp.xEnd - ramp.xStart);
+            }
+        }
+
+        if (gameState === 'SLIDING') {
+            player.x += 4; 
+            let progress = (player.x - ramp.xStart) / (ramp.xEnd - ramp.xStart);
+            player.y = ramp.yTop + progress * (ramp.yBottom - ramp.yTop) - player.h;
+            
+            if (player.x >= ramp.xEnd) {
+                player.x = ramp.xEnd;
+                player.y = GROUND_Y - player.h;
+                player.vx = player.finalV / 60; 
+                player.angle = 0; 
+                gameState = 'BRAKING';
+            }
+        }
+
+        if (gameState === 'BRAKING') {
+            let accel = -mu * G_PHYSICS * SCALE / 3600; 
+            player.vx += accel;
+            if (player.vx < 0) player.vx = 0;
+            player.x += player.vx;
+            if (player.x > waterZone.xStart) {
+                gameState = 'FALLING';
+            } else if (player.vx === 0) {
+                checkEndGame();
+            }
+        }
+
+        if (gameState === 'FALLING') {
+            player.vy += 0.5; 
+            player.x += player.vx; 
+            player.y += player.vy;
+            player.angle += 0.05;
+            if (player.y > canvas.height) checkEndGame();
+        }
+    }
+
+    function checkEndGame() {
+        if (gameState === 'FINISHED') return;
+        const finalState = gameState;
+        gameState = 'FINISHED';
+        statusMsg.style.display = 'block';
+        const stopX = player.x + player.w/2;
+        
+        if (finalState === 'FALLING' || stopX > waterZone.xStart) {
+            statusMsg.innerHTML = "<span style='color:#0984e3'>THẤT BẠI!</span><br><small>Bạn rơi xuống nước rồi.</small>";
+        } else if (stopX > safeZone.xStart && stopX <= safeZone.xStart + safeZone.width) {
+            // Sử dụng hàm phát sinh mã động của bạn (Level 5)
+            const dynamicPass = generateGamePasscode(5);
+            statusMsg.innerHTML = `
+                <span style='color:#2ed573'>THÀNH CÔNG!</span><br>
+                <small>Chúc mừng! Mã đi tiếp của bạn là:</small>
+                <span class="password-display">${dynamicPass}</span>
+                <small style="font-size:12px; color:#555;">(Lưu mã này để kích hoạt vòng thi tiếp theo)</small>
+            `;
+        } else if (stopX > dangerZone.xStart) {
+            statusMsg.innerHTML = "<span style='color:#ff4757'>THẤT BẠI!</span><br><small>Bạn dừng ở vùng nguy hiểm.</small>";
+        } else {
+             statusMsg.innerHTML = "CHƯA ĐẾN ĐÍCH";
+        }
+    }
+
+    function draw() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        // Sky
+        ctx.fillStyle = "#f8fafc";
+        ctx.fillRect(0,0, canvas.width, canvas.height);
+
+        ctx.strokeStyle = "#475569";
+        ctx.lineWidth = 1.5;
+
+        // Ground/Steps drawing...
+        ctx.fillStyle = "#94a3b8";
+        steps.forEach((s) => {
+            ctx.fillRect(s.x, s.y, s.w, GROUND_Y + FLOOR_DEPTH - s.y);
+            ctx.strokeRect(s.x, s.y, s.w, GROUND_Y + FLOOR_DEPTH - s.y);
+        });
+
+        // Ramp
+        ctx.beginPath();
+        ctx.moveTo(ramp.xStart, ramp.yTop);
+        ctx.lineTo(ramp.xEnd, ramp.yBottom);
+        ctx.lineTo(ramp.xEnd, GROUND_Y + FLOOR_DEPTH);
+        ctx.lineTo(ramp.xStart, GROUND_Y + FLOOR_DEPTH);
+        ctx.closePath();
+        ctx.fillStyle = "#cbd5e1";
+        ctx.fill();
+        ctx.stroke();
+
+        // Zones
+        ctx.fillStyle = "#fecaca";
+        ctx.fillRect(dangerZone.xStart, GROUND_Y, dangerZone.width, FLOOR_DEPTH);
+        ctx.strokeRect(dangerZone.xStart, GROUND_Y, dangerZone.width, FLOOR_DEPTH);
+        ctx.fillStyle = "#bbf7d0";
+        ctx.fillRect(safeZone.xStart, GROUND_Y, safeZone.width, FLOOR_DEPTH);
+        ctx.strokeRect(safeZone.xStart, GROUND_Y, safeZone.width, FLOOR_DEPTH);
+
+        // Water
+        ctx.fillStyle = "rgba(147, 197, 253, 0.6)";
+        ctx.fillRect(waterZone.xStart, GROUND_Y + 30, canvas.width - waterZone.xStart, canvas.height - GROUND_Y);
+        ctx.beginPath();
+        ctx.moveTo(waterZone.xStart, GROUND_Y + 30);
+        ctx.lineTo(canvas.width, GROUND_Y + 30);
+        ctx.strokeStyle = "#3b82f6"; ctx.lineWidth = 2; ctx.stroke();
+
+        // Labels
+        ctx.font = "bold 12px Arial"; ctx.textAlign = "center";
+        ctx.fillStyle = "#b91c1c"; ctx.fillText("NGUY HIỂM (4m)", dangerZone.xStart + dangerZone.width/2, GROUND_Y + 20);
+        ctx.fillStyle = "#15803d"; ctx.fillText("AN TOÀN (1m)", safeZone.xStart + safeZone.width/2, GROUND_Y + 20);
+        ctx.fillStyle = "#1d4ed8"; ctx.fillText("HỒ NƯỚC", waterZone.xStart + 60, GROUND_Y + 60);
+
+        // Player
+        ctx.save();
+        ctx.translate(player.x + player.w / 2, player.y + player.h / 2);
+        ctx.rotate(player.angle);
+        ctx.fillStyle = player.color;
+        ctx.fillRect(-player.w / 2, -player.h / 2, player.w, player.h);
+        ctx.strokeStyle = "#333"; ctx.lineWidth = 2; ctx.strokeRect(-player.w / 2, -player.h / 2, player.w, player.h);
+        ctx.fillStyle = "white"; ctx.fillRect(-player.w / 2 + 18, -player.h / 2 + 5, 8, 8);
+        ctx.fillStyle = "black"; ctx.fillRect(-player.w / 2 + 22, -player.h / 2 + 7, 4, 4);
+        ctx.restore();
+
+        update();
+        requestAnimationFrame(draw);
+    }
+
+    init();
+    draw();
+</script>
+</body>
+</html>

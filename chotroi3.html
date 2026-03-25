@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Thử thách Stickman - Hệ thống Passcode</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #f3f4f6;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            font-family: sans-serif;
+            touch-action: manipulation;
+        }
+        canvas {
+            background-color: white;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+            border-radius: 8px;
+            max-width: 100%;
+            touch-action: none;
+            display: none;
+        }
+        .ui-layer {
+            position: absolute;
+            top: 10px;
+            text-align: center;
+            pointer-events: none;
+            width: 100%;
+            z-index: 10;
+        }
+        #menuLayer {
+            background: white;
+            padding: 20px;
+            border-radius: 12px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+            text-align: center;
+            max-width: 90%;
+        }
+        .level-grid {
+            display: grid;
+            grid-template-columns: repeat(5, 1fr);
+            gap: 10px;
+            margin-top: 15px;
+        }
+        .level-btn {
+            padding: 12px;
+            background: #e2e8f0;
+            border-radius: 8px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .level-btn:hover { background: #3b82f6; color: white; }
+        
+        #passcodeOverlay {
+            position: absolute;
+            background: rgba(255,255,255,0.95);
+            padding: 25px;
+            border-radius: 15px;
+            border: 3px solid #10b981;
+            text-align: center;
+            display: none;
+            z-index: 20;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+        }
+
+        .btn-ui {
+            pointer-events: auto;
+            margin-top: 10px;
+            padding: 10px 25px;
+            background: #3b82f6;
+            color: white;
+            border-radius: 8px;
+            font-weight: bold;
+            cursor: pointer;
+        }
+
+        #mobileControls {
+            position: absolute;
+            bottom: 20px;
+            width: 100%;
+            display: none;
+            justify-content: space-between;
+            padding: 0 30px;
+            pointer-events: none;
+        }
+        .control-group { display: flex; gap: 15px; pointer-events: auto; }
+        .touch-btn {
+            width: 65px; height: 65px;
+            background: rgba(0, 0, 0, 0.1);
+            border-radius: 50%;
+            display: flex; align-items: center; justify-content: center;
+            backdrop-filter: blur(4px);
+            border: 2px solid rgba(255,255,255,0.5);
+        }
+        .touch-btn svg { width: 30px; height: 30px; fill: #1e293b; }
+    </style>
+</head>
+<body>
+
+    <div id="menuLayer">
+        <h2 class="text-xl font-bold text-gray-800">CHỌN VÒNG THỬ THÁCH</h2>
+        <p class="text-sm text-gray-500 mb-4">Chọn số để quy định độ dài dãy mục tiêu</p>
+        <div class="level-grid">
+            <div class="level-btn" onclick="startGame(1)">1</div>
+            <div class="level-btn" onclick="startGame(2)">2</div>
+            <div class="level-btn" onclick="startGame(3)">3</div>
+            <div class="level-btn" onclick="startGame(4)">4</div>
+            <div class="level-btn" onclick="startGame(5)">5</div>
+            <div class="level-btn" onclick="startGame(6)">6</div>
+            <div class="level-btn" onclick="startGame(7)">7</div>
+            <div class="level-btn" onclick="startGame(8)">8</div>
+            <div class="level-btn" onclick="startGame(9)">9</div>
+            <div class="level-btn" onclick="startGame(10)">10</div>
+        </div>
+    </div>
+
+    <div id="passcodeOverlay">
+        <h2 class="text-2xl font-bold text-green-600 mb-2">XÁC NHẬN VƯỢT CẤP!</h2>
+        <p class="text-gray-600">Mã passcode định danh vòng của bạn:</p>
+        <div id="codeText" class="bg-gray-100 p-4 my-3 font-mono text-xl font-bold tracking-widest border-dashed border-2 border-green-500">CODE-XXXX</div>
+        <p class="text-[10px] text-gray-400 mt-1 italic">Cấu trúc: LV[Vòng]-[Mã Bảo Mật]</p>
+        <button class="btn-ui" onclick="backToMenu()">Về Menu</button>
+    </div>
+
+    <div class="ui-layer" id="gameUI" style="display: none;">
+        <div id="levelBadge" class="bg-amber-100 text-amber-800 px-3 py-1 rounded-full text-xs font-bold inline-block mb-1">VÒNG X</div>
+        <div id="targetSequenceDisplay" class="text-3xl font-bold tracking-widest text-slate-800">---</div>
+        <h1 id="gameStatus" class="text-lg font-bold text-blue-600">Ghi nhớ dãy số!</h1>
+        <p id="gameInstructions" class="text-gray-500 text-xs">Biến mất sau 5 giây...</p>
+        <button id="restartBtn" class="btn-ui hidden" onclick="backToMenu()">Thử lại</button>
+    </div>
+
+    <canvas id="gameCanvas"></canvas>
+
+    <div id="mobileControls" class="controls">
+        <div class="control-group">
+            <div class="touch-btn" id="btnLeft"><svg viewBox="0 0 24 24"><path d="M15.41 7.41L14 6l-6 6 6 6 1.41-1.41L10.83 12z"/></svg></div>
+            <div class="touch-btn" id="btnRight"><svg viewBox="0 0 24 24"><path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/></svg></div>
+        </div>
+        <div class="control-group">
+            <div class="touch-btn" id="btnJump"><svg viewBox="0 0 24 24"><path d="M7.41 15.41L12 10.83l4.59 4.58L18 14l-6-6-6 6z"/></svg></div>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const menuLayer = document.getElementById('menuLayer');
+        const passcodeOverlay = document.getElementById('passcodeOverlay');
+        const gameUI = document.getElementById('gameUI');
+        const mobileControls = document.getElementById('mobileControls');
+        const statusText = document.getElementById('gameStatus');
+        const instructionText = document.getElementById('gameInstructions');
+        const sequenceDisplay = document.getElementById('targetSequenceDisplay');
+        const levelBadge = document.getElementById('levelBadge');
+
+        function resize() {
+            canvas.width = Math.min(window.innerWidth * 0.95, 800);
+            canvas.height = window.innerHeight * 0.5;
+        }
+        window.addEventListener('resize', resize);
+        resize();
+
+        const keys = {};
+        const touch = { left: false, right: false, jump: false };
+        window.addEventListener('keydown', e => keys[e.code] = true);
+        window.addEventListener('keyup', e => keys[e.code] = false);
+
+        const setupBtn = (id, key) => {
+            const btn = document.getElementById(id);
+            const start = (e) => { e.preventDefault(); touch[key] = true; };
+            const end = (e) => { e.preventDefault(); touch[key] = false; };
+            btn.addEventListener('touchstart', start); btn.addEventListener('touchend', end);
+            btn.addEventListener('mousedown', start); btn.addEventListener('mouseup', end);
+        };
+        setupBtn('btnLeft', 'left'); setupBtn('btnRight', 'right'); setupBtn('btnJump', 'jump');
+
+        const GAME_STATES = { MEMORIZE: 0, PLAY: 1, GAMEOVER: 2, WIN: 3 };
+        let currentState = GAME_STATES.MEMORIZE;
+        let selectedLevel = 1;
+        let memorizeTimer = 5000;
+        let targetSequence = [];
+        let currentSequenceIndex = 0;
+        let standingTimer = 0;
+        let currentOverTile = null;
+        const tiles = [];
+
+        // HÀM TẠO PASSCODE CÓ CHỨA THÔNG TIN VÒNG
+        function generatePasscode(lv) {
+            // Tạo chuỗi ngẫu nhiên 4 ký tự
+            const salt = Math.random().toString(36).substring(2, 6).toUpperCase();
+            // Một logic checksum đơn giản (ví dụ: lấy mã ASCII của salt cộng với lv)
+            // Điều này giúp chương trình kiểm tra mã có bị chỉnh sửa thủ công hay không
+            let checksum = 0;
+            for(let i=0; i<salt.length; i++) checksum += salt.charCodeAt(i);
+            const checkChar = String.fromCharCode(65 + (checksum % 26)); 
+            
+            // Định dạng: LV[Level]-[Salt][CheckChar]
+            // Ví dụ: LV3-A7B2X -> Vòng 3
+            return `LV${lv}-${salt}${checkChar}`;
+        }
+
+        function startGame(level) {
+            selectedLevel = level;
+            menuLayer.style.display = 'none';
+            canvas.style.display = 'block';
+            gameUI.style.display = 'block';
+            mobileControls.style.display = 'flex';
+            passcodeOverlay.style.display = 'none';
+            document.getElementById('restartBtn').classList.add('hidden');
+            initLevel();
+            player.reset();
+        }
+
+        function backToMenu() {
+            menuLayer.style.display = 'block';
+            canvas.style.display = 'none';
+            gameUI.style.display = 'none';
+            mobileControls.style.display = 'none';
+            passcodeOverlay.style.display = 'none';
+        }
+
+        function initLevel() {
+            tiles.length = 0;
+            const nums = Array.from({length: 10}, (_, i) => i);
+            for (let i = nums.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [nums[i], nums[j]] = [nums[j], nums[i]];
+            }
+
+            targetSequence = [];
+            for(let i=0; i < selectedLevel; i++) {
+                targetSequence.push(Math.floor(Math.random() * 10));
+            }
+
+            levelBadge.innerText = `VÒNG ${selectedLevel} (${selectedLevel} SỐ)`;
+            sequenceDisplay.innerText = targetSequence.join(' ');
+            sequenceDisplay.style.opacity = "1";
+            statusText.innerText = "Ghi nhớ dãy số!";
+            
+            const tileWidth = canvas.width / 11;
+            const startX = (canvas.width - (tileWidth * 10)) / 2;
+
+            for (let i = 0; i < 10; i++) {
+                tiles.push({
+                    number: nums[i],
+                    x: startX + i * tileWidth + tileWidth/2,
+                    y: canvas.height - 40,
+                    width: tileWidth - 4,
+                    isRevealed: false
+                });
+            }
+            memorizeTimer = 5000;
+            currentSequenceIndex = 0;
+            currentState = GAME_STATES.MEMORIZE;
+        }
+
+        class Stickman {
+            constructor() { this.reset(); }
+            reset() {
+                this.x = 50; this.y = canvas.height - 50;
+                this.velX = 0; this.velY = 0;
+                this.speed = 4.2; this.jumpForce = -13; this.gravity = 0.7;
+                this.grounded = false; this.facing = 1; this.animFrame = 0;
+            }
+            update() {
+                if (currentState !== GAME_STATES.MEMORIZE && currentState !== GAME_STATES.PLAY) return;
+                let moved = false;
+                if (keys['ArrowLeft'] || touch.left) { this.velX = -this.speed; this.facing = -1; moved = true; }
+                else if (keys['ArrowRight'] || touch.right) { this.velX = this.speed; this.facing = 1; moved = true; }
+                else { this.velX *= 0.8; }
+                if ((keys['Space'] || keys['ArrowUp'] || touch.jump) && this.grounded) { this.velY = this.jumpForce; this.grounded = false; moved = true; }
+                this.velY += this.gravity; this.y += this.velY; this.x += this.velX;
+                const floorY = canvas.height - 50;
+                if (this.y > floorY) { this.y = floorY; this.velY = 0; this.grounded = true; }
+                if (this.x < 20) this.x = 20; if (this.x > canvas.width - 20) this.x = canvas.width - 20;
+                this.animFrame += (Math.abs(this.velX) > 0.1 ? 0.15 : 0.05);
+                this.checkTileSelection(moved);
+            }
+            checkTileSelection(isMoving) {
+                if (currentState !== GAME_STATES.PLAY) return;
+                let onTile = null;
+                tiles.forEach(tile => { if (Math.abs(this.x - tile.x) < 25 && this.grounded) onTile = tile; });
+                if (onTile && !isMoving && Math.abs(this.velX) < 0.2) {
+                    if (currentOverTile === onTile) {
+                        standingTimer += 16.6;
+                        if (standingTimer >= 3000) this.validate(onTile);
+                    } else { currentOverTile = onTile; standingTimer = 0; }
+                } else { currentOverTile = null; standingTimer = 0; }
+            }
+            validate(tile) {
+                if (tile.number === targetSequence[currentSequenceIndex]) {
+                    currentSequenceIndex++; tile.isRevealed = true; standingTimer = 0;
+                    if (currentSequenceIndex >= targetSequence.length) {
+                        currentState = GAME_STATES.WIN;
+                        document.getElementById('codeText').innerText = generatePasscode(selectedLevel);
+                        passcodeOverlay.style.display = 'block';
+                        mobileControls.style.display = 'none';
+                    }
+                } else {
+                    currentState = GAME_STATES.GAMEOVER;
+                    tile.isRevealed = true;
+                    statusText.innerText = "SAI RỒI! THUA CUỘC";
+                    sequenceDisplay.style.opacity = "1";
+                    document.getElementById('restartBtn').classList.remove('hidden');
+                }
+            }
+            draw() {
+                ctx.save(); ctx.translate(this.x, this.y); ctx.scale(this.facing * 0.8, 0.8);
+                ctx.strokeStyle = (currentState === GAME_STATES.GAMEOVER) ? '#ef4444' : '#000';
+                ctx.lineWidth = 4; ctx.lineCap = 'round';
+                const cycle = Math.sin(this.animFrame * 2);
+                ctx.beginPath(); ctx.arc(0, -95, 13, 0, Math.PI * 2); ctx.stroke();
+                ctx.beginPath(); ctx.moveTo(0, -82); ctx.lineTo(0, -15); ctx.stroke();
+                const armL = 35; let armA = (Math.abs(this.velX) > 0.5) ? cycle * 0.7 : 0.2;
+                ctx.beginPath(); ctx.moveTo(0, -65); ctx.lineTo(Math.sin(armA) * armL, -40);
+                ctx.beginPath(); ctx.moveTo(0, -65); ctx.lineTo(Math.sin(-armA) * armL, -40); ctx.stroke();
+                ctx.beginPath();
+                if (Math.abs(this.velX) > 0.5 && this.grounded) {
+                    ctx.moveTo(0, -15); ctx.lineTo(Math.sin(this.animFrame*2)*25, 0);
+                    ctx.moveTo(0, -15); ctx.lineTo(Math.sin(this.animFrame*2 + Math.PI)*25, 0);
+                } else { ctx.moveTo(0, -15); ctx.lineTo(-12, 0); ctx.moveTo(0, -15); ctx.lineTo(12, 0); }
+                ctx.stroke(); ctx.restore();
+            }
+        }
+
+        const player = new Stickman();
+
+        function draw() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.strokeStyle = '#e2e8f0'; ctx.lineWidth = 2;
+            ctx.beginPath(); ctx.moveTo(0, canvas.height - 10); ctx.lineTo(canvas.width, canvas.height - 10); ctx.stroke();
+
+            tiles.forEach(tile => {
+                const showNum = (currentState === GAME_STATES.MEMORIZE) || tile.isRevealed;
+                ctx.fillStyle = tile.isRevealed ? '#bbf7d0' : '#f8fafc';
+                ctx.fillRect(tile.x - tile.width/2, tile.y, tile.width, 10);
+                ctx.strokeStyle = '#cbd5e1'; ctx.strokeRect(tile.x - tile.width/2, tile.y, tile.width, 10);
+                if (showNum) {
+                    ctx.fillStyle = tile.isRevealed ? '#16a34a' : '#334155';
+                    ctx.font = 'bold 18px Arial'; ctx.textAlign = 'center';
+                    ctx.fillText(tile.number, tile.x, tile.y - 12);
+                }
+                if (currentOverTile === tile && currentState === GAME_STATES.PLAY) {
+                    ctx.fillStyle = '#3b82f6';
+                    ctx.fillRect(tile.x - tile.width/2, tile.y + 12, tile.width * (standingTimer/3000), 4);
+                }
+            });
+
+            player.update();
+            player.draw();
+
+            if (currentState === GAME_STATES.MEMORIZE) {
+                memorizeTimer -= 16.6;
+                instructionText.innerText = `Ẩn sau: ${Math.ceil(memorizeTimer/1000)}s`;
+                if (memorizeTimer <= 0) {
+                    currentState = GAME_STATES.PLAY;
+                    sequenceDisplay.style.opacity = "0";
+                    instructionText.innerText = "HÃY ĐI THEO DÃY SỐ!";
+                }
+            } else if (currentState === GAME_STATES.PLAY) {
+                statusText.innerText = `Tìm số thứ ${currentSequenceIndex + 1}/${targetSequence.length}`;
+            }
+            requestAnimationFrame(draw);
+        }
+        draw();
+    </script>
+</body>
+</html>
