@@ -8,7 +8,8 @@ export enum Difficulty {
 export enum QuestionType {
   MULTIPLE_CHOICE = 'TN',
   TRUE_FALSE = 'DS',
-  SHORT_ANSWER = 'TL'
+  SHORT_ANSWER = 'TL',
+  EXTERNAL_GAME = 'GAME'
 }
 
 export enum DisplayChallenge {
@@ -58,6 +59,7 @@ export interface PhysicsProblem {
   grade?: string;
   subject?: string;
   imageUrl?: string; 
+  externalGameUrl?: string;
 }
 
 export interface Player {
