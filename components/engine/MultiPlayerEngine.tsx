@@ -1,11 +1,14 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { GameState, Teacher, MatchData } from '../../types';
+import { GameState, Teacher, MatchData, QuestionType } from '../../types';
 import ProblemCard from '../ProblemCard';
 import AnswerInput from '../AnswerInput';
 import LatexRenderer from '../LatexRenderer';
 import ConfirmModal from '../ConfirmModal';
 import { supabase } from '../../services/supabaseService';
+
+import { saveHighScore, getLeaderboard } from '../../services/supabaseService';
+import { verifyPasscode, calculatePointsForLevel } from '../../services/passcodeService';
 
 const INTRO_TIME = 10;
 const FEEDBACK_TIME = 15;
@@ -33,6 +36,8 @@ const MultiPlayerEngine: React.FC<MultiPlayerEngineProps> = ({ gameState, setGam
   const [isHelpUsed, setIsHelpUsed] = useState(false);
   const [showExitConfirm, setShowExitConfirm] = useState(false);
   const [showHelpConfirm, setShowHelpConfirm] = useState(false);
+  const [leaderboard, setLeaderboard] = useState<any[]>([]);
+  const [isSavingScore, setIsSavingScore] = useState(false);
   
   const rounds = matchData.rounds;
   const currentRound = rounds[currentRoundIdx];
@@ -162,24 +167,48 @@ const MultiPlayerEngine: React.FC<MultiPlayerEngineProps> = ({ gameState, setGam
   };
 
   const submitAnswer = () => {
+    let isPerfect = false;
+    let totalPoints = 0;
+    let basePoints = 0;
+    let speedBonus = 0;
     const correct = (currentProblem?.correctAnswer || "").trim().toUpperCase();
-    const isPerfect = userAnswer.trim().toUpperCase() === correct;
-    
-    // Logic tính điểm theo yêu cầu trợ giúp
-    const points = isPerfect 
-      ? (isHelpUsed ? 60 : 100) 
-      : (isHelpUsed ? -40 : -50);
-    
-    setScore(s => s + points);
+
+    if (currentProblem?.type === QuestionType.EXTERNAL_GAME) {
+      const result = verifyPasscode(userAnswer);
+      if (result.valid) {
+        isPerfect = true;
+        basePoints = calculatePointsForLevel(result.level);
+        totalPoints = basePoints;
+      } else {
+        isPerfect = false;
+        basePoints = 0;
+        totalPoints = 0;
+      }
+    } else {
+      isPerfect = userAnswer.trim().toUpperCase() === correct;
+      
+      // Logic tính điểm theo yêu cầu trợ giúp
+      basePoints = isPerfect 
+        ? (isHelpUsed ? 60 : 100) 
+        : (isHelpUsed ? -40 : -50);
+      
+      if (isPerfect && !isHelpUsed) {
+        const totalTime = currentProblem?.timeLimit || 40;
+        speedBonus = Math.floor((timeLeft / totalTime) * 50);
+      }
+      totalPoints = basePoints + speedBonus;
+    }
+
+    setScore(s => s + totalPoints);
     setFeedback({ 
       isCorrect: isPerfect, 
       text: isPerfect 
-        ? `CHÍNH XÁC! (+${points}đ)` 
-        : `SAI RỒI! (${points}đ). Đáp án là: ${correct}` 
+        ? `CHÍNH XÁC! (+${basePoints}đ ${speedBonus > 0 ? `+ ${speedBonus}đ tốc độ` : ''})` 
+        : `SAI RỒI! (${totalPoints}đ). Đáp án là: ${correct}` 
     });
     setGameState('FEEDBACK');
     
-    channelRef.current?.send({ type: 'broadcast', event: 'match_result', payload: { playerId: myId, points, isCorrect: isPerfect } });
+    channelRef.current?.send({ type: 'broadcast', event: 'match_result', payload: { playerId: myId, points: totalPoints, isCorrect: isPerfect } });
   };
 
   const handleNextSync = () => {
@@ -212,7 +241,21 @@ const MultiPlayerEngine: React.FC<MultiPlayerEngineProps> = ({ gameState, setGam
       setTimeLeft(nextProb.timeLimit || 40);
       setGameState(nextState);
     } else {
-      setGameState('GAME_OVER');
+      handleGameOver();
+    }
+  };
+
+  const handleGameOver = async () => {
+    setGameState('GAME_OVER');
+    setIsSavingScore(true);
+    try {
+      await saveHighScore(playerName, score, matchData.setId, currentTeacher.id);
+      const lb = await getLeaderboard(matchData.setId);
+      setLeaderboard(lb);
+    } catch (e) {
+      console.error("Lỗi xử lý kết thúc game:", e);
+    } finally {
+      setIsSavingScore(false);
     }
   };
 
@@ -250,24 +293,55 @@ const MultiPlayerEngine: React.FC<MultiPlayerEngineProps> = ({ gameState, setGam
 
   if (gameState === 'GAME_OVER') {
     return (
-      <div className="min-h-screen bg-slate-950 flex items-center justify-center p-6">
-        <div className="bg-white rounded-[4rem] p-12 shadow-2xl max-w-md w-full text-center border-b-[15px] border-purple-600 animate-in zoom-in">
+      <div className="min-h-screen bg-slate-950 flex items-center justify-center p-6 overflow-y-auto no-scrollbar">
+        <div className="bg-white rounded-[4rem] p-12 shadow-2xl max-w-2xl w-full text-center border-b-[15px] border-purple-600 animate-in zoom-in my-10">
           <div className="text-8xl mb-6">🏆</div>
           <h2 className="text-3xl font-black uppercase italic mb-4">KẾT THÚC!</h2>
-          <div className="space-y-4 mb-10">
-             <div className="flex justify-between items-center p-4 bg-blue-50 rounded-2xl">
-                <span className="font-black italic text-slate-400 text-[10px] uppercase">BẠN:</span>
-                <span className="text-3xl font-black text-blue-600">{score}đ</span>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-8 mb-10">
+             <div className="space-y-4">
+                <h3 className="text-[10px] font-black text-slate-400 uppercase italic mb-2 text-left">KẾT QUẢ TRẬN ĐẤU:</h3>
+                <div className="flex justify-between items-center p-4 bg-blue-600 text-white rounded-2xl shadow-lg">
+                   <span className="font-black italic text-[10px] uppercase">BẠN:</span>
+                   <span className="text-3xl font-black">{score}đ</span>
+                </div>
+                {Object.entries(opponentScores).map(([id, s]) => {
+                  const oppName = matchData.opponents?.find(o => o.id === id)?.name || "ĐỐI THỦ";
+                  return (
+                    <div key={id} className="flex justify-between items-center p-4 bg-slate-50 rounded-2xl border-2 border-slate-100">
+                       <span className="font-black italic text-slate-400 text-[10px] uppercase">{oppName}:</span>
+                       <span className="text-3xl font-black text-slate-700">{s}đ</span>
+                    </div>
+                  );
+                })}
              </div>
-             {Object.entries(opponentScores).map(([id, s]) => {
-               const oppName = matchData.opponents?.find(o => o.id === id)?.name || "ĐỐI THỦ";
-               return (
-                 <div key={id} className="flex justify-between items-center p-4 bg-slate-50 rounded-2xl">
-                    <span className="font-black italic text-slate-400 text-[10px] uppercase">{oppName}:</span>
-                    <span className="text-3xl font-black text-slate-700">{s}đ</span>
-                 </div>
-               );
-             })}
+
+             <div className="text-left">
+                <h3 className="text-[10px] font-black text-slate-400 uppercase italic mb-2">BẢNG XẾP HẠNG ARENA:</h3>
+                <div className="bg-slate-50 rounded-[2.5rem] p-6 border-2 border-slate-100 shadow-inner h-full max-h-[300px] overflow-y-auto no-scrollbar">
+                   {isSavingScore ? (
+                     <div className="py-10 flex flex-col items-center gap-4">
+                       <div className="w-8 h-8 border-4 border-purple-600 border-t-transparent rounded-full animate-spin"></div>
+                       <span className="text-[10px] font-black text-slate-400 uppercase italic">Đang cập nhật...</span>
+                     </div>
+                   ) : leaderboard.length > 0 ? (
+                     <div className="space-y-2">
+                       {leaderboard.map((entry, idx) => (
+                         <div key={entry.id} className={`flex justify-between items-center p-3 rounded-xl border ${entry.player_name === playerName ? 'bg-purple-600 text-white border-purple-400 shadow-md' : 'bg-white border-slate-100 text-slate-700'}`}>
+                           <div className="flex items-center gap-3">
+                             <span className={`w-6 h-6 rounded-full flex items-center justify-center font-black italic text-[10px] ${idx === 0 ? 'bg-amber-400 text-white' : idx === 1 ? 'bg-slate-300 text-white' : idx === 2 ? 'bg-amber-600 text-white' : 'bg-slate-100 text-slate-400'}`}>
+                               {idx + 1}
+                             </span>
+                             <span className="font-black uppercase italic text-[10px] truncate max-w-[80px]">{entry.player_name}</span>
+                           </div>
+                           <span className="font-black italic text-xs">{entry.score}đ</span>
+                         </div>
+                       ))}
+                     </div>
+                   ) : (
+                     <div className="py-10 text-center text-slate-300 font-black uppercase italic text-[10px]">Chưa có dữ liệu</div>
+                   )}
+                </div>
+             </div>
           </div>
           <button onClick={onExit} className="w-full py-6 bg-slate-900 text-white rounded-3xl font-black uppercase italic shadow-xl hover:scale-105 transition-all">Quay về sảnh</button>
         </div>
@@ -312,11 +386,11 @@ const MultiPlayerEngine: React.FC<MultiPlayerEngineProps> = ({ gameState, setGam
       </header>
 
       <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-8 min-h-0">
-        <div className="lg:col-span-7 h-full">
+        <div className={`${currentProblem?.type === QuestionType.EXTERNAL_GAME ? 'lg:col-span-8' : 'lg:col-span-7'} h-full transition-all duration-500`}>
            <ProblemCard problem={currentProblem} isHelpUsed={isHelpUsed} isPaused={gameState !== 'WAITING_FOR_BUZZER' && gameState !== 'ANSWERING'} />
         </div>
         
-        <div className="lg:col-span-5 bg-white rounded-[3.5rem] p-10 shadow-2xl flex flex-col border-4 border-slate-50 relative overflow-hidden items-center justify-center">
+        <div className={`${currentProblem?.type === QuestionType.EXTERNAL_GAME ? 'lg:col-span-4' : 'lg:col-span-5'} bg-white rounded-[3.5rem] p-10 shadow-2xl flex flex-col border-4 border-slate-50 relative overflow-hidden items-center justify-center transition-all duration-500`}>
            {gameState === 'WAITING_FOR_BUZZER' ? (
              <div className="flex flex-col items-center animate-in zoom-in duration-300 w-full">
                 <div 
