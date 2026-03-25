@@ -163,12 +163,12 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
     channelRef.current?.send({ type: 'broadcast', event: 'teacher_ping' });
   };
 
-  const studentsList = Object.values(studentRegistry).sort(function(a, b) {
+  const studentsList = Object.values(studentRegistry).sort(function(a: StudentSessionInfo, b: StudentSessionInfo) {
     if (a.isOnline !== b.isOnline) return a.isOnline ? -1 : 1;
     return b.score - a.score;
   });
 
-  const onlineCount = studentsList.filter(function(s) { return s.isOnline; }).length;
+  const onlineCount = studentsList.filter(function(s: StudentSessionInfo) { return s.isOnline; }).length;
   const isGameRunning = currentQuestionIdx !== -1;
   const onlineCountLabel = "LỚP HỌC TRỰC TUYẾN (" + onlineCount + ")";
   const teachingLabel = assignedSet ? "Đang dạy: " + assignedSet.title : '⚠️ VUI LÒNG GÁN ĐỀ VÀO PHÒNG LIVE';
@@ -257,7 +257,7 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
                <button onClick={handlePing} className="text-[9px] font-bold text-blue-400 uppercase hover:underline">Làm mới 🔄</button>
             </div>
             <div className="flex-1 overflow-y-auto no-scrollbar">
-               {studentsList.length !== 0 ? studentsList.map(function(s, i) {
+               {studentsList.length !== 0 ? studentsList.map(function(s: StudentSessionInfo, i: number) {
                  return (
                    <div key={i} className={!s.isOnline ? "flex items-center gap-4 p-5 border-b border-slate-50 transition-all opacity-30 grayscale" : "flex items-center gap-4 p-5 border-b border-slate-50 transition-all hover:bg-slate-50"}>
                       <div className="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 font-black shadow-inner">👤</div>
