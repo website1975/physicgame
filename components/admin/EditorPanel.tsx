@@ -253,10 +253,12 @@ const EditorPanel: React.FC<EditorPanelProps> = ({
       </div>
 
       <div className="bg-white px-8 py-4 rounded-[2.5rem] shadow-md border-4 border-slate-100 flex items-center justify-around shrink-0">
-         {[QuestionType.MULTIPLE_CHOICE, QuestionType.TRUE_FALSE, QuestionType.SHORT_ANSWER].map(type => (
+         {[QuestionType.MULTIPLE_CHOICE, QuestionType.TRUE_FALSE, QuestionType.SHORT_ANSWER, QuestionType.EXTERNAL_GAME].map(type => (
            <div key={type} className="flex gap-2">
               <button onClick={() => addNewProblem(type)} className="px-6 py-2 bg-slate-900 text-white rounded-xl font-black text-[10px] uppercase">Thêm {type}</button>
-              <button onClick={() => handleOpenLibrary(type)} className="px-6 py-2 bg-blue-50 text-blue-600 rounded-xl font-black text-[10px] uppercase">CSDL</button>
+              {type !== QuestionType.EXTERNAL_GAME && (
+                <button onClick={() => handleOpenLibrary(type)} className="px-6 py-2 bg-blue-50 text-blue-600 rounded-xl font-black text-[10px] uppercase">CSDL</button>
+              )}
            </div>
          ))}
       </div>
@@ -376,6 +378,31 @@ const EditorPanel: React.FC<EditorPanelProps> = ({
                          value={activeProblem.correctAnswer}
                          onChange={e => updateProblem(editingIdx!, { correctAnswer: e.target.value })}
                        />
+                    </div>
+                  )}
+
+                  {activeProblem.type === QuestionType.EXTERNAL_GAME && (
+                    <div className="space-y-4">
+                       <div className="bg-white p-4 rounded-2xl border-2 border-slate-100">
+                          <label className="text-[10px] font-black text-slate-400 uppercase block mb-2">Đường dẫn Game (URL)</label>
+                          <input 
+                            type="text" 
+                            className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 font-bold text-sm outline-none focus:border-blue-300"
+                            placeholder="Ví dụ: /chotroi1.html"
+                            value={activeProblem.externalGameUrl || ''}
+                            onChange={e => updateProblem(editingIdx!, { externalGameUrl: e.target.value })}
+                          />
+                       </div>
+                       <div className="bg-white p-4 rounded-2xl border-2 border-slate-100">
+                          <label className="text-[10px] font-black text-slate-400 uppercase block mb-2">Mật khẩu vượt vòng (Passcode)</label>
+                          <input 
+                            type="text" 
+                            className="w-full bg-slate-50 border border-slate-200 rounded-xl px-6 py-4 font-black text-2xl text-emerald-600 text-center outline-none focus:border-blue-300"
+                            placeholder="Nhập mã code thành công..."
+                            value={activeProblem.correctAnswer}
+                            onChange={e => updateProblem(editingIdx!, { correctAnswer: e.target.value })}
+                          />
+                       </div>
                     </div>
                   )}
                </div>
