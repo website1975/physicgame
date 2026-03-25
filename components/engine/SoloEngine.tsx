@@ -1,10 +1,12 @@
 
 import React, { useState, useEffect } from 'react';
-import { GameState, Round, MatchData } from '../../types';
+import { GameState, Round, MatchData, Teacher, QuestionType } from '../../types';
 import ProblemCard from '../ProblemCard';
 import AnswerInput from '../AnswerInput';
 import LatexRenderer from '../LatexRenderer';
 import ConfirmModal from '../ConfirmModal';
+import { saveHighScore, getLeaderboard } from '../../services/supabaseService';
+import { verifyPasscode, calculatePointsForLevel } from '../../services/passcodeService';
 
 const FEEDBACK_TIME = 15;
 const INTRO_TIME = 10; 
@@ -12,11 +14,13 @@ const INTRO_TIME = 10;
 interface SoloEngineProps {
   gameState: GameState;
   setGameState: (s: GameState) => void;
+  playerName: string;
+  currentTeacher: Teacher;
   matchData: MatchData;
   onExit: () => void;
 }
 
-const SoloEngine: React.FC<SoloEngineProps> = ({ gameState, setGameState, matchData, onExit }) => {
+const SoloEngine: React.FC<SoloEngineProps> = ({ gameState, setGameState, playerName, currentTeacher, matchData, onExit }) => {
   const [currentRoundIdx, setCurrentRoundIdx] = useState(0);
   const [currentProblemIdx, setCurrentProblemIdx] = useState(0);
   const [score, setScore] = useState(0);
@@ -28,6 +32,8 @@ const SoloEngine: React.FC<SoloEngineProps> = ({ gameState, setGameState, matchD
   const [isHelpUsed, setIsHelpUsed] = useState(false);
   const [showExitConfirm, setShowExitConfirm] = useState(false);
   const [showHelpConfirm, setShowHelpConfirm] = useState(false);
+  const [leaderboard, setLeaderboard] = useState<any[]>([]);
+  const [isSavingScore, setIsSavingScore] = useState(false);
 
   const rounds = matchData.rounds;
   const currentRound = rounds[currentRoundIdx];
@@ -90,17 +96,42 @@ const SoloEngine: React.FC<SoloEngineProps> = ({ gameState, setGameState, matchD
   }, [gameState]);
 
   const submitAnswer = () => {
+    let isPerfect = false;
+    let totalPoints = 0;
+    let basePoints = 0;
+    let speedBonus = 0;
     const correct = (currentProblem?.correctAnswer || "").trim().toUpperCase();
-    const isPerfect = userAnswer.trim().toUpperCase() === correct;
+
+    if (currentProblem?.type === QuestionType.EXTERNAL_GAME) {
+      const result = verifyPasscode(userAnswer);
+      if (result.valid) {
+        isPerfect = true;
+        basePoints = calculatePointsForLevel(result.level);
+        totalPoints = basePoints;
+      } else {
+        isPerfect = false;
+        basePoints = 0;
+        totalPoints = 0;
+      }
+    } else {
+      isPerfect = userAnswer.trim().toUpperCase() === correct;
+      basePoints = isPerfect 
+        ? (isHelpUsed ? 60 : 100) 
+        : (isHelpUsed ? -40 : 0);
+      
+      if (isPerfect && !isHelpUsed) {
+        const totalTime = currentProblem?.timeLimit || 40;
+        speedBonus = Math.floor((timeLeft / totalTime) * 50);
+      }
+      totalPoints = basePoints + speedBonus;
+    }
     
-    let points = isPerfect 
-      ? (isHelpUsed ? 60 : 100) 
-      : (isHelpUsed ? -40 : 0);
-    
-    setScore(s => s + points);
+    setScore(s => s + totalPoints);
     setFeedback({ 
       isCorrect: isPerfect, 
-      text: isPerfect ? `CHÍNH XÁC! (+${points}đ)` : `SAI RỒI! (${points}đ). Đáp án là: ${correct}` 
+      text: isPerfect 
+        ? `CHÍNH XÁC! (+${basePoints}đ ${speedBonus > 0 ? `+ ${speedBonus}đ tốc độ` : ''})` 
+        : `SAI RỒI! (${totalPoints}đ). Đáp án là: ${correct}` 
     });
     setGameState('FEEDBACK');
   };
@@ -117,7 +148,7 @@ const SoloEngine: React.FC<SoloEngineProps> = ({ gameState, setGameState, matchD
       nextRoundIdx = currentRoundIdx + 1;
       nextGameState = 'ROUND_INTRO';
     } else {
-      setGameState('GAME_OVER');
+      handleGameOver();
       return;
     }
 
@@ -130,6 +161,20 @@ const SoloEngine: React.FC<SoloEngineProps> = ({ gameState, setGameState, matchD
     setFeedback(null);
     setIsHelpUsed(false);
     setGameState(nextGameState);
+  };
+
+  const handleGameOver = async () => {
+    setGameState('GAME_OVER');
+    setIsSavingScore(true);
+    try {
+      await saveHighScore(playerName, score, matchData.setId, currentTeacher.id);
+      const lb = await getLeaderboard(matchData.setId);
+      setLeaderboard(lb);
+    } catch (e) {
+      console.error("Lỗi xử lý kết thúc game:", e);
+    } finally {
+      setIsSavingScore(false);
+    }
   };
 
   if (gameState === 'ROUND_INTRO') {
@@ -179,12 +224,43 @@ const SoloEngine: React.FC<SoloEngineProps> = ({ gameState, setGameState, matchD
 
   if (gameState === 'GAME_OVER') {
     return (
-      <div className="min-h-screen bg-slate-950 flex items-center justify-center p-6">
-        <div className="bg-white rounded-[4rem] p-12 shadow-2xl max-w-md w-full text-center border-b-[15px] border-blue-600 animate-in zoom-in">
+      <div className="min-h-screen bg-slate-950 flex items-center justify-center p-6 overflow-y-auto no-scrollbar">
+        <div className="bg-white rounded-[4rem] p-12 shadow-2xl max-w-2xl w-full text-center border-b-[15px] border-blue-600 animate-in zoom-in my-10">
           <div className="text-8xl mb-6">🏆</div>
           <h2 className="text-3xl font-black uppercase italic mb-4">HOÀN THÀNH!</h2>
-          <p className="text-slate-400 font-bold uppercase text-[10px] tracking-widest mb-10 italic">Tổng điểm Arena của bạn</p>
-          <div className="text-7xl font-black text-blue-600 mb-12 drop-shadow-lg">{score}đ</div>
+          <p className="text-slate-400 font-bold uppercase text-[10px] tracking-widest mb-6 italic">Tổng điểm Arena của bạn</p>
+          <div className="text-7xl font-black text-blue-600 mb-10 drop-shadow-lg">{score}đ</div>
+          
+          <div className="mb-10 text-left">
+             <h3 className="text-sm font-black text-slate-400 uppercase italic mb-4 flex items-center gap-2">
+                <span>📊</span> BẢNG XẾP HẠNG ARENA
+             </h3>
+             <div className="bg-slate-50 rounded-[2.5rem] p-6 border-2 border-slate-100 shadow-inner">
+                {isSavingScore ? (
+                  <div className="py-10 flex flex-col items-center gap-4">
+                    <div className="w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+                    <span className="text-[10px] font-black text-slate-400 uppercase italic">Đang cập nhật thứ hạng...</span>
+                  </div>
+                ) : leaderboard.length > 0 ? (
+                  <div className="space-y-3">
+                    {leaderboard.map((entry, idx) => (
+                      <div key={entry.id} className={`flex justify-between items-center p-4 rounded-2xl border-2 ${entry.player_name === playerName ? 'bg-blue-600 border-blue-400 text-white shadow-lg' : 'bg-white border-slate-100 text-slate-700'}`}>
+                        <div className="flex items-center gap-4">
+                          <span className={`w-8 h-8 rounded-full flex items-center justify-center font-black italic text-xs ${idx === 0 ? 'bg-amber-400 text-white' : idx === 1 ? 'bg-slate-300 text-white' : idx === 2 ? 'bg-amber-600 text-white' : 'bg-slate-100 text-slate-400'}`}>
+                            {idx + 1}
+                          </span>
+                          <span className="font-black uppercase italic text-xs">{entry.player_name}</span>
+                        </div>
+                        <span className="font-black italic">{entry.score}đ</span>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="py-10 text-center text-slate-300 font-black uppercase italic text-xs">Chưa có dữ liệu xếp hạng</div>
+                )}
+             </div>
+          </div>
+
           <button onClick={onExit} className="w-full py-6 bg-slate-900 text-white rounded-3xl font-black uppercase italic shadow-xl hover:scale-105 active:scale-95 transition-all">Quay về sảnh</button>
         </div>
       </div>
@@ -226,11 +302,11 @@ const SoloEngine: React.FC<SoloEngineProps> = ({ gameState, setGameState, matchD
       </header>
 
       <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-8 min-h-0">
-        <div className="lg:col-span-7 h-full">
+        <div className={`${currentProblem?.type === QuestionType.EXTERNAL_GAME ? 'lg:col-span-8' : 'lg:col-span-7'} h-full transition-all duration-500`}>
            <ProblemCard problem={currentProblem} isHelpUsed={isHelpUsed} isPaused={gameState !== 'ANSWERING'} />
         </div>
         
-        <div className="lg:col-span-5 bg-white rounded-[3.5rem] p-10 shadow-2xl flex flex-col border-4 border-slate-50 relative overflow-hidden">
+        <div className={`${currentProblem?.type === QuestionType.EXTERNAL_GAME ? 'lg:col-span-4' : 'lg:col-span-5'} bg-white rounded-[3.5rem] p-10 shadow-2xl flex flex-col border-4 border-slate-50 relative overflow-hidden transition-all duration-500`}>
            {gameState === 'ANSWERING' ? (
              <div className="flex flex-col h-full animate-in zoom-in duration-300">
                 <div className="flex justify-between items-center mb-8">
