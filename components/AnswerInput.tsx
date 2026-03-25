@@ -187,6 +187,37 @@ const AnswerInput: React.FC<AnswerInputProps> = ({ problem, value, onChange, onS
     }
   };
 
+  if (problem.type === QuestionType.EXTERNAL_GAME || (problem.type as any) === 'EXTERNAL_GAME') {
+    return (
+      <div className="flex flex-col gap-4 py-4 text-left w-full h-full animate-in zoom-in">
+        <div className="bg-emerald-50 p-6 rounded-[2.5rem] border-2 border-emerald-100 shadow-inner">
+           <div className="flex items-center gap-3 mb-4">
+              <span className="text-2xl">🔑</span>
+              <h4 className="text-emerald-600 font-black uppercase text-xs tracking-widest italic">Nhập mã vượt vòng:</h4>
+           </div>
+           <input 
+             type="text"
+             disabled={disabled}
+             value={value}
+             onChange={(e) => onChange(e.target.value.toUpperCase())}
+             onKeyDown={(e) => e.key === 'Enter' && onSubmit()}
+             placeholder="NHẬP PASSCODE..."
+             className="w-full bg-white border-4 border-emerald-200 rounded-[2rem] px-8 py-6 font-black text-4xl text-emerald-600 text-center outline-none focus:border-emerald-400 shadow-xl placeholder:text-emerald-100 transition-all"
+             autoFocus
+           />
+           <p className="mt-4 text-[10px] font-bold text-emerald-400 text-center uppercase italic tracking-widest">
+              Mã này được cấp sau khi bạn hoàn thành trò chơi bên trái
+           </p>
+        </div>
+        
+        <div className="flex-1 flex flex-col items-center justify-center opacity-20 grayscale">
+           <span className="text-8xl mb-4">🎮</span>
+           <span className="font-black uppercase italic text-xs tracking-widest text-slate-400">Hệ thống đang chờ mã xác thực</span>
+        </div>
+      </div>
+    );
+  }
+
   if (problem.type === QuestionType.MULTIPLE_CHOICE) {
     return (
       <div className="flex flex-col gap-3 py-2 text-left w-full h-auto">
