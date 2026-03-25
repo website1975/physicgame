@@ -219,14 +219,38 @@ const TeacherEngine: React.FC<TeacherEngineProps> = ({ gameState, setGameState, 
         <div className={`${currentProblem?.type === QuestionType.EXTERNAL_GAME ? 'col-span-4' : 'col-span-5'} bg-white rounded-[3.5rem] p-10 shadow-2xl flex flex-col border-4 border-slate-50 h-full transition-all duration-500`}>
            {gameState === 'ANSWERING' ? (
              <div className="flex flex-col h-full">
-                <div className="flex justify-between items-center mb-6">
-                  <h3 className="text-[10px] font-black text-slate-400 uppercase italic">Làm bài:</h3>
-                  <button onClick={() => { setHasBuzzed(true); reportProgress("🛎️ GIÀNH QUYỀN!"); }} disabled={hasBuzzed} className={`px-6 py-2 rounded-xl font-black text-[10px] uppercase italic transition-all ${hasBuzzed ? 'bg-amber-100 text-amber-600 border border-amber-200' : 'bg-red-600 text-white shadow-lg border-b-4 border-red-800'}`}>{hasBuzzed ? '🔔 ĐÃ GIÀNH QUYỀN' : 'GIÀNH QUYỀN 🛎️'}</button>
-                </div>
-                <div className="flex-1 overflow-y-auto no-scrollbar">
-                  <AnswerInput problem={currentProblem} value={userAnswer} onChange={setUserAnswer} onSubmit={submitAnswer} disabled={false} />
-                </div>
-                {hasBuzzed && <button onClick={submitAnswer} disabled={!userAnswer} className="w-full py-6 bg-blue-600 text-white rounded-3xl font-black italic text-xl mt-8 shadow-xl border-b-8 border-blue-800 active:translate-y-1 active:border-b-0">XÁC NHẬN ✅</button>}
+                {currentProblem?.type === QuestionType.EXTERNAL_GAME ? (
+                  <div className="flex flex-col h-full animate-in zoom-in duration-300">
+                    <div className="flex justify-between items-center mb-8 bg-emerald-50 p-4 rounded-3xl border-2 border-emerald-100">
+                       <div className="bg-emerald-600 text-white px-6 py-2 rounded-2xl font-black uppercase italic text-[10px] shadow-md">
+                          🎮 TRÒ CHƠI NGOÀI
+                       </div>
+                       <div className="text-emerald-600 font-black italic text-[10px] uppercase">Nhập mã khi hoàn thành</div>
+                    </div>
+                    <div className="flex-1 overflow-y-auto no-scrollbar">
+                       <AnswerInput problem={currentProblem} value={userAnswer} onChange={setUserAnswer} onSubmit={submitAnswer} disabled={false} />
+                    </div>
+                    <button 
+                      onClick={submitAnswer} 
+                      disabled={!userAnswer} 
+                      className={`w-full py-7 rounded-[2rem] font-black italic text-2xl mt-8 shadow-2xl border-b-[10px] transition-all active:translate-y-2 active:border-b-0
+                        ${userAnswer ? 'bg-emerald-600 text-white border-emerald-800' : 'bg-slate-100 text-slate-300 border-slate-200 cursor-not-allowed'}`}
+                    >
+                      XÁC NHẬN KẾT QUẢ ✅
+                    </button>
+                  </div>
+                ) : (
+                  <>
+                    <div className="flex justify-between items-center mb-6">
+                      <h3 className="text-[10px] font-black text-slate-400 uppercase italic">Làm bài:</h3>
+                      <button onClick={() => { setHasBuzzed(true); reportProgress("🛎️ GIÀNH QUYỀN!"); }} disabled={hasBuzzed} className={`px-6 py-2 rounded-xl font-black text-[10px] uppercase italic transition-all ${hasBuzzed ? 'bg-amber-100 text-amber-600 border border-amber-200' : 'bg-red-600 text-white shadow-lg border-b-4 border-red-800'}`}>{hasBuzzed ? '🔔 ĐÃ GIÀNH QUYỀN' : 'GIÀNH QUYỀN 🛎️'}</button>
+                    </div>
+                    <div className="flex-1 overflow-y-auto no-scrollbar">
+                      <AnswerInput problem={currentProblem} value={userAnswer} onChange={setUserAnswer} onSubmit={submitAnswer} disabled={false} />
+                    </div>
+                    {hasBuzzed && <button onClick={submitAnswer} disabled={!userAnswer} className="w-full py-6 bg-blue-600 text-white rounded-3xl font-black italic text-xl mt-8 shadow-xl border-b-8 border-blue-800 active:translate-y-1 active:border-b-0">XÁC NHẬN ✅</button>}
+                  </>
+                )}
              </div>
            ) : (
              <div className="flex flex-col h-full animate-in slide-in-from-right">
