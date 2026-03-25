@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Mô phỏng Vật Lý: Ném Ngang Luyện Tập</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script src="/passcode-logic.js"></script>
     <style>
         body {
             margin: 0;
@@ -132,6 +133,9 @@
 <script>
     // --- LOGIC PASSCODE ĐỘNG ---
     function generateGamePasscode(level) {
+        if (window.PasscodeLogic) {
+            return window.PasscodeLogic.generate(level);
+        }
         const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
         let salt = "";
         for (let i = 0; i < 4; i++) salt += chars.charAt(Math.floor(Math.random() * chars.length));
@@ -144,6 +148,9 @@
     }
 
     function validatePasscode(code) {
+        if (window.PasscodeLogic) {
+            return window.PasscodeLogic.verify(code).valid;
+        }
         const regex = /^LV(\d+)-([A-Z0-9]{4})([A-Z])$/;
         const match = code.toUpperCase().match(regex);
         if (!match) return false;
