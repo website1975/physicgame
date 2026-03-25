@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kiểm tra Passcode Stickman</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            background-color: #f0f2f5;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        .card {
+            background: white;
+            padding: 2rem;
+            border-radius: 1rem;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.05);
+            width: 100%;
+            max-width: 450px;
+        }
+        .status-box {
+            display: none;
+            margin-top: 1.5rem;
+            padding: 1rem;
+            border-radius: 0.5rem;
+            text-align: center;
+            animation: fadeIn 0.3s ease-out;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(-10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+    </style>
+</head>
+<body>
+
+    <div class="card">
+        <h1 class="text-2xl font-bold text-gray-800 mb-2 text-center">Hệ thống Xác thực</h1>
+        <p class="text-gray-500 text-sm text-center mb-6">Nhập Passcode nhận được từ game để kiểm tra</p>
+
+        <div class="space-y-4">
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">Passcode (VD: LV1-UIV8O)</label>
+                <input type="text" id="passcodeInput" 
+                       placeholder="Nhập mã tại đây..." 
+                       class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all uppercase font-mono tracking-wider">
+            </div>
+
+            <button onclick="checkCode()" 
+                    class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-lg transition-colors shadow-lg active:transform active:scale-95">
+                KIỂM TRA NGAY
+            </button>
+        </div>
+
+        <!-- Thông báo kết quả -->
+        <div id="resultBox" class="status-box">
+            <div id="resultIcon" class="mb-2"></div>
+            <div id="resultTitle" class="font-bold text-lg"></div>
+            <div id="resultDesc" class="text-sm opacity-90"></div>
+        </div>
+    </div>
+
+    <script>
+        function verifyPasscode(inputCode) {
+            try {
+                // Chuẩn hóa input: bỏ khoảng trắng và chuyển sang in hoa
+                const code = inputCode.trim().toUpperCase();
+                const parts = code.split('-');
+                
+                if (parts.length !== 2) return { valid: false };
+
+                const levelPart = parts[0]; // "LV1"
+                const securePart = parts[1]; // "UIV8O" (hoặc UIV80)
+
+                if (!levelPart.startsWith('LV') || securePart.length < 2) return { valid: false };
+
+                const level = levelPart.replace('LV', '');
+                const salt = securePart.slice(0, -1);
+                const providedCheckChar = securePart.slice(-1);
+
+                // Thuật toán Checksum giống hệt trong Game
+                let checksum = 0;
+                for (let i = 0; i < salt.length; i++) {
+                    checksum += salt.charCodeAt(i);
+                }
+                
+                const correctCheckChar = String.fromCharCode(65 + (checksum % 26));
+
+                // Lưu ý: Trong game ta dùng A-Z. Nếu người chơi nhập số 0 thay vì chữ O, 
+                // ta có thể linh động xử lý nếu cần, nhưng ở đây tuân thủ đúng CheckChar.
+                if (providedCheckChar === correctCheckChar) {
+                    return { valid: true, level: level };
+                }
+                
+                return { valid: false };
+            } catch (e) {
+                return { valid: false };
+            }
+        }
+
+        function checkCode() {
+            const input = document.getElementById('passcodeInput').value;
+            const resultBox = document.getElementById('resultBox');
+            const resultTitle = document.getElementById('resultTitle');
+            const resultDesc = document.getElementById('resultDesc');
+            const resultIcon = document.getElementById('resultIcon');
+
+            if (!input) return;
+
+            const res = verifyPasscode(input);
+
+            resultBox.style.display = 'block';
+
+            if (res.valid) {
+                // Trường hợp mã đúng
+                resultBox.className = 'status-box bg-green-100 text-green-800 border border-green-200';
+                resultTitle.innerText = "MÃ HỢP LỆ!";
+                resultDesc.innerText = `Xác nhận vượt cấp thành công: VÒNG ${res.level}`;
+                resultIcon.innerHTML = `
+                    <svg class="w-12 h-12 mx-auto text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                    </svg>
+                `;
+            } else {
+                // Trường hợp mã sai
+                resultBox.className = 'status-box bg-red-100 text-red-800 border border-red-200';
+                resultTitle.innerText = "MÃ KHÔNG ĐÚNG!";
+                resultDesc.innerText = "Passcode này không tồn tại hoặc đã bị chỉnh sửa.";
+                resultIcon.innerHTML = `
+                    <svg class="w-12 h-12 mx-auto text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                    </svg>
+                `;
+            }
+        }
+
+        // Hỗ trợ nhấn Enter để kiểm tra
+        document.getElementById('passcodeInput').addEventListener('keypress', function (e) {
+            if (e.key === 'Enter') {
+                checkCode();
+            }
+        });
+    </script>
+</body>
+</html>
