@@ -116,15 +116,94 @@
         </div>
 
         <div id="status-message"></div>
+
+        <!-- Touch Controls Overlay -->
+        <div class="touch-controls">
+            <div class="zoom-controls">
+                <button onclick="changeZoom(0.1)" title="Phóng to">➕</button>
+                <button onclick="changeZoom(-0.1)" title="Thu nhỏ">➖</button>
+                <button onclick="resetZoom()" title="Vừa màn hình">🔄</button>
+            </div>
+            <div class="action-controls">
+                <button id="touch-jump" class="action-btn">▲<br>NHẢY</button>
+                <button id="touch-slide" class="action-btn">▶<br>TRƯỢT</button>
+            </div>
+        </div>
     </div>
 
     <div class="ui-panel">
         <label for="friction-input"><b>Nhập hệ số ma sát (μ):</b></label>
-        <input type="number" id="friction-input" step="0.01" min="0" max="2" value="0.0">
+        <input type="number" id="friction-input" step="0.01" min="0" max="2" value="0">
         <button id="reset-btn">Bắt đầu lại</button>
     </div>
 
+    <style>
+        .touch-controls {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            right: 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-end;
+            pointer-events: none;
+            z-index: 100;
+        }
+        .zoom-controls, .action-controls {
+            display: flex;
+            gap: 10px;
+            pointer-events: auto;
+        }
+        .zoom-controls button {
+            width: 50px;
+            height: 50px;
+            padding: 0;
+            font-size: 20px;
+            background: rgba(255, 255, 255, 0.8);
+            color: #333;
+            border: 2px solid #007bff;
+            border-radius: 50%;
+        }
+        .action-btn {
+            width: 80px;
+            height: 80px;
+            padding: 0;
+            font-size: 14px;
+            background: rgba(0, 123, 255, 0.8);
+            color: white;
+            border: 3px solid white;
+            border-radius: 50%;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+        }
+        .action-btn:active {
+            transform: scale(0.9);
+            background: #0056b3;
+        }
+        #gameCanvas {
+            transition: transform 0.2s ease-out;
+            transform-origin: top left;
+        }
+    </style>
+
 <script>
+    let currentZoom = 1;
+    function changeZoom(delta) {
+        currentZoom = Math.max(0.5, Math.min(2, currentZoom + delta));
+        const canvas = document.getElementById('gameCanvas');
+        canvas.style.transform = `scale(${currentZoom})`;
+        canvas.style.transformOrigin = 'top left';
+    }
+    function resetZoom() {
+        currentZoom = 1;
+        const canvas = document.getElementById('gameCanvas');
+        canvas.style.transform = `scale(${currentZoom})`;
+        canvas.style.transformOrigin = 'top left';
+    }
+
     const canvas = document.getElementById('gameCanvas');
     const ctx = canvas.getContext('2d');
     const frictionInput = document.getElementById('friction-input');
@@ -156,7 +235,7 @@
     const FLOOR_DEPTH = 100; 
 
     let gameState = 'IDLE'; 
-    let mu = 0.44;
+    let mu = 0;
     
     const player = {
         x: 20,
@@ -194,15 +273,17 @@
         player.onStep = 0;
         gameState = 'IDLE';
         statusMsg.style.display = 'none';
-        mu = parseFloat(frictionInput.value) || 0.44;
+        mu = parseFloat(frictionInput.value) || 0;
     }
 
     resetBtn.addEventListener('click', init);
+    document.getElementById('touch-jump').addEventListener('click', () => handleAction('ArrowUp'));
+    document.getElementById('touch-slide').addEventListener('click', () => handleAction('ArrowRight'));
 
-    window.addEventListener('keydown', (e) => {
+    function handleAction(key) {
         if (gameState !== 'IDLE') return;
 
-        if (e.key === 'ArrowUp') {
+        if (key === 'ArrowUp') {
             if (player.onStep < steps.length - 1) {
                 player.onStep++;
                 const nextStep = steps[player.onStep];
@@ -216,12 +297,16 @@
             }
         }
 
-        if (e.key === 'ArrowRight') {
+        if (key === 'ArrowRight') {
             if (player.onStep === steps.length - 1) {
                 player.vx = 3; 
                 gameState = 'CLIMBING';
             }
         }
+    }
+
+    window.addEventListener('keydown', (e) => {
+        handleAction(e.key);
     });
 
     function update() {
