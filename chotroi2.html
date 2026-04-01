@@ -118,10 +118,21 @@
 
     <div class="input-group">
         <label class="text-[10px] font-bold text-gray-500 uppercase mb-1 block">Khoảng cách thả dự kiến (m):</label>
-        <input type="number" id="dropDist" value="0.0" step="0.1" class="w-full p-3 border-2 border-gray-200 rounded-lg font-bold text-xl focus:border-blue-500 focus:outline-none transition">
+        <div class="flex gap-2 mb-2">
+            <button onclick="adjustDist(-10)" class="flex-1 bg-slate-200 py-1 rounded font-bold text-xs">-10</button>
+            <button onclick="adjustDist(-1)" class="flex-1 bg-slate-200 py-1 rounded font-bold text-xs">-1</button>
+            <button onclick="adjustDist(1)" class="flex-1 bg-slate-200 py-1 rounded font-bold text-xs">+1</button>
+            <button onclick="adjustDist(10)" class="flex-1 bg-slate-200 py-1 rounded font-bold text-xs">+10</button>
+        </div>
+        <input type="number" id="dropDist" value="0" step="0.1" class="w-full p-3 border-2 border-gray-200 rounded-lg font-bold text-xl focus:border-blue-500 focus:outline-none transition">
     </div>
     
     <button id="startBtn" class="btn-primary">THẢ BOM</button>
+
+    <div class="flex gap-2 mt-4">
+        <button onclick="changeZoom(0.1)" class="flex-1 bg-blue-100 text-blue-600 py-2 rounded-lg font-bold text-sm">➕ Phóng to</button>
+        <button onclick="changeZoom(-0.1)" class="flex-1 bg-blue-100 text-blue-600 py-2 rounded-lg font-bold text-sm">➖ Thu nhỏ</button>
+    </div>
 
     <div class="validator-panel border-t pt-4 mt-2">
         <p class="text-[10px] font-bold text-gray-400 uppercase mb-2">Kiểm tra Passcode thủ công</p>
@@ -169,6 +180,21 @@
     const dropDistInput = document.getElementById('dropDist');
     const codeModal = document.getElementById('codeModal');
     const rewardCodeDisplay = document.getElementById('rewardCode');
+    
+    let currentZoom = 1;
+    window.changeZoom = (delta) => {
+        currentZoom = Math.max(0.5, Math.min(2, currentZoom + delta));
+        canvas.style.transform = `scale(${currentZoom})`;
+        canvas.style.transformOrigin = 'top left';
+        canvas.style.transition = 'transform 0.2s ease-out';
+    };
+
+    window.adjustDist = (delta) => {
+        const input = document.getElementById('dropDist');
+        let val = parseFloat(input.value) || 0;
+        val += delta;
+        input.value = val.toFixed(1);
+    };
 
     const G = 9.8; 
     const V0 = 250 / 3.6; 
