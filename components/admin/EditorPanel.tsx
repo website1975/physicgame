@@ -25,6 +25,7 @@ const EditorPanel: React.FC<EditorPanelProps> = ({
   const [isParsing, setIsParsing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [rawText, setRawText] = useState('');
+  const [geminiKey, setGeminiKey] = useState(() => localStorage.getItem('gemini_api_key') || '');
   const [showAIInput, setShowAIInput] = useState(false);
   
   // State địa phương cho các ô nhập liệu
@@ -36,6 +37,7 @@ const EditorPanel: React.FC<EditorPanelProps> = ({
   const [showLibModal, setShowLibModal] = useState(false);
   const [libQuestions, setLibQuestions] = useState<PhysicsProblem[]>([]);
   const [libLoading, setLibLoading] = useState(false);
+  const [libVisibleCount, setLibVisibleCount] = useState(20);
   const [showSaveOptions, setShowSaveOptions] = useState(false);
   const [validationError, setValidationError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -83,13 +85,19 @@ const EditorPanel: React.FC<EditorPanelProps> = ({
     if (!rawText.trim()) return;
     setIsParsing(true);
     try {
-      const newQuestions = await parseQuestionsFromText(rawText);
+      // Lưu key vào localStorage để tiện dùng lần sau
+      if (geminiKey) localStorage.setItem('gemini_api_key', geminiKey);
+      
+      const newQuestions = await parseQuestionsFromText(rawText, geminiKey);
       const updated = [...rounds];
       updated[activeRoundIdx].problems = [...updated[activeRoundIdx].problems, ...newQuestions];
       setRounds(updated);
       setRawText('');
       setShowAIInput(false);
-    } catch (e) { console.error(e); } finally { setIsParsing(false); }
+    } catch (e: any) { 
+      console.error(e);
+      setValidationError(e.message || "Lỗi khi xử lý AI");
+    } finally { setIsParsing(false); }
   };
 
   const addNewRound = () => {
@@ -125,8 +133,31 @@ const EditorPanel: React.FC<EditorPanelProps> = ({
     setEditingIdx(updated[activeRoundIdx].problems.length - 1);
   };
 
+  const moveProblem = (idx: number, direction: 'up' | 'down') => {
+    const updated = [...rounds];
+    const problems = [...updated[activeRoundIdx].problems];
+    const targetIdx = direction === 'up' ? idx - 1 : idx + 1;
+    
+    if (targetIdx < 0 || targetIdx >= problems.length) return;
+    
+    const [movedItem] = problems.splice(idx, 1);
+    problems.splice(targetIdx, 0, movedItem);
+    
+    updated[activeRoundIdx].problems = problems;
+    setRounds(updated);
+    
+    // Cập nhật vị trí đang sửa nếu cần
+    if (editingIdx === idx) {
+      setEditingIdx(targetIdx);
+    } else if (editingIdx === targetIdx) {
+      setEditingIdx(idx);
+    }
+  };
+
   const handleOpenLibrary = async (type: QuestionType) => {
-    setLibLoading(true); setShowLibModal(true);
+    setLibLoading(true); 
+    setShowLibModal(true);
+    setLibVisibleCount(20);
     try {
       const questions = await fetchQuestionsLibrary(teacherId, currentGrade, type);
       setLibQuestions(questions);
@@ -245,9 +276,27 @@ const EditorPanel: React.FC<EditorPanelProps> = ({
           </div>
         </div>
         {showAIInput && (
-          <div className="bg-slate-900 p-6 rounded-[2rem] border-4 border-slate-800 animate-in slide-in-from-top-2">
-             <textarea className="w-full bg-slate-800 border-2 border-slate-700 rounded-2xl p-4 text-white min-h-[100px]" value={rawText} onChange={e => setRawText(e.target.value)} placeholder="Dán đề thô vào đây..." />
-             <button onClick={handleAIParse} disabled={isParsing} className="mt-4 px-8 py-3 bg-emerald-500 text-white rounded-xl font-black uppercase italic text-xs">{isParsing ? 'ĐANG XỬ LÝ...' : 'TRÍCH XUẤT'}</button>
+          <div className="bg-slate-900 p-6 rounded-[2rem] border-4 border-slate-800 animate-in slide-in-from-top-2 space-y-4">
+             <div>
+                <label className="text-[10px] font-black text-emerald-400 uppercase italic block mb-2">Gemini API Key (Cá nhân)</label>
+                <input 
+                  type="password" 
+                  className="w-full bg-slate-800 border-2 border-slate-700 rounded-xl px-4 py-2 text-white text-xs font-mono outline-none focus:border-emerald-500" 
+                  value={geminiKey} 
+                  onChange={e => setGeminiKey(e.target.value)} 
+                  placeholder="Dán API Key của bạn vào đây..." 
+                />
+                <p className="text-[9px] text-slate-500 mt-1 italic">* Key này chỉ dùng trong phiên làm việc hiện tại, không được lưu trữ vĩnh viễn.</p>
+             </div>
+             <div>
+                <label className="text-[10px] font-black text-slate-400 uppercase italic block mb-2">Nội dung đề thô</label>
+                <textarea className="w-full bg-slate-800 border-2 border-slate-700 rounded-2xl p-4 text-white min-h-[120px] text-sm" value={rawText} onChange={e => setRawText(e.target.value)} placeholder="Dán văn bản đề thi vào đây (AI sẽ tự bóc tách)..." />
+             </div>
+             <div className="flex justify-end">
+                <button onClick={handleAIParse} disabled={isParsing} className="px-10 py-4 bg-emerald-500 text-white rounded-2xl font-black uppercase italic text-sm shadow-lg active:translate-y-1 transition-all">
+                  {isParsing ? 'ĐANG XỬ LÝ...' : 'TRÍCH XUẤT ĐỀ ✨'}
+                </button>
+             </div>
           </div>
         )}
       </div>
@@ -291,11 +340,35 @@ const EditorPanel: React.FC<EditorPanelProps> = ({
 
           <div className="bg-white rounded-[2rem] p-4 shadow-md flex-1 overflow-y-auto no-scrollbar flex flex-col gap-2">
              {rounds[activeRoundIdx]?.problems.map((p, i) => (
-                <button key={p.id} onClick={() => setEditingIdx(i)} className={`w-full p-4 rounded-2xl text-left border-4 ${editingIdx === i ? 'bg-blue-600 border-blue-400 text-white shadow-lg' : 'bg-slate-50 border-white text-slate-500'}`}>
-                  <div className="text-[10px] font-black uppercase italic">Câu {i+1} - {p.type}</div>
-                  <div className="text-[11px] font-bold truncate">{p.title || 'Không có tiêu đề'}</div>
-                  <div className="text-[9px] font-bold opacity-60 truncate">{p.content || '...'}</div>
-                </button>
+                <div key={p.id} className="relative group">
+                  <button 
+                    onClick={() => setEditingIdx(i)} 
+                    className={`w-full p-4 rounded-2xl text-left border-4 transition-all ${editingIdx === i ? 'bg-blue-600 border-blue-400 text-white shadow-lg' : 'bg-slate-50 border-white text-slate-500'}`}
+                  >
+                    <div className="text-[10px] font-black uppercase italic">Câu {i+1} - {p.type}</div>
+                    <div className="text-[11px] font-bold truncate pr-8">{p.title || 'Không có tiêu đề'}</div>
+                    <div className="text-[9px] font-bold opacity-60 truncate">{p.content || '...'}</div>
+                  </button>
+                  
+                  <div className="absolute right-2 top-1/2 -translate-y-1/2 flex flex-col gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <button 
+                      disabled={i === 0}
+                      onClick={(e) => { e.stopPropagation(); moveProblem(i, 'up'); }}
+                      className={`w-6 h-6 rounded-lg flex items-center justify-center text-[10px] shadow-sm ${i === 0 ? 'bg-slate-200 text-slate-400 cursor-not-allowed' : 'bg-white text-slate-600 hover:bg-blue-50'}`}
+                      title="Di chuyển lên"
+                    >
+                      ▲
+                    </button>
+                    <button 
+                      disabled={i === rounds[activeRoundIdx].problems.length - 1}
+                      onClick={(e) => { e.stopPropagation(); moveProblem(i, 'down'); }}
+                      className={`w-6 h-6 rounded-lg flex items-center justify-center text-[10px] shadow-sm ${i === rounds[activeRoundIdx].problems.length - 1 ? 'bg-slate-200 text-slate-400 cursor-not-allowed' : 'bg-white text-slate-600 hover:bg-blue-50'}`}
+                      title="Di chuyển xuống"
+                    >
+                      ▼
+                    </button>
+                  </div>
+                </div>
              ))}
           </div>
         </div>
@@ -445,23 +518,49 @@ const EditorPanel: React.FC<EditorPanelProps> = ({
                  <div><h3 className="text-3xl font-black text-slate-800 uppercase italic">THƯ VIỆN CÂU HỎI</h3><p className="text-[10px] font-black text-blue-500 uppercase mt-2">Dữ liệu từ Khối {currentGrade}</p></div>
                  <button onClick={() => setShowLibModal(false)} className="w-12 h-12 bg-white text-slate-400 rounded-xl flex items-center justify-center font-black">✕</button>
               </header>
-              <div className="flex-1 overflow-y-auto p-8 space-y-4 no-scrollbar">
-                 {libLoading ? <div className="h-full flex flex-col items-center justify-center"><div className="w-12 h-12 border-4 border-blue-600 border-t-transparent rounded-full animate-spin"></div></div> : libQuestions.length > 0 ? libQuestions.map((q, i) => (
-                    <div key={i} className="bg-slate-50 p-6 rounded-3xl border-2 border-slate-100 flex items-center gap-6 hover:border-blue-200 transition-all group">
-                       <div className="flex-1">
-                          <div className="flex items-center gap-2 mb-2"><span className="px-2 py-0.5 bg-blue-100 text-blue-600 text-[9px] font-black uppercase rounded">{q.type}</span><span className="text-[10px] font-black text-slate-400 uppercase italic">{q.topic}</span></div>
-                          <h5 className="font-bold text-slate-700">{q.title}</h5>
-                          <p className="font-medium text-slate-500 line-clamp-1">{q.content}</p>
+              <div className="flex-1 overflow-y-auto p-8 space-y-4">
+                 {libLoading ? (
+                   <div className="h-full flex flex-col items-center justify-center">
+                     <div className="w-12 h-12 border-4 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+                   </div>
+                 ) : libQuestions.length > 0 ? (
+                   <>
+                     {libQuestions.slice(0, libVisibleCount).map((q, i) => (
+                       <div key={i} className="bg-slate-50 p-6 rounded-3xl border-2 border-slate-100 flex items-center gap-6 hover:border-blue-200 transition-all group">
+                          <div className="flex-1">
+                             <div className="flex items-center gap-2 mb-2">
+                               <span className="px-2 py-0.5 bg-blue-100 text-blue-600 text-[9px] font-black uppercase rounded">{q.type}</span>
+                               <span className="text-[10px] font-black text-slate-400 uppercase italic">{q.topic}</span>
+                             </div>
+                             <h5 className="font-bold text-slate-700">{q.title}</h5>
+                             <p className="font-medium text-slate-500 line-clamp-1">{q.content}</p>
+                          </div>
+                          <button onClick={() => {
+                            const newProb = { ...q, id: Math.random().toString(36).slice(2, 9) };
+                            const updated = [...rounds];
+                            updated[activeRoundIdx].problems.push(newProb);
+                            setRounds(updated);
+                            setShowLibModal(false);
+                          }} className="px-6 py-3 bg-blue-600 text-white font-black rounded-xl uppercase italic text-[10px] opacity-0 group-hover:opacity-100 transition-all shadow-lg">+ Thêm</button>
                        </div>
-                       <button onClick={() => {
-                         const newProb = { ...q, id: Math.random().toString(36).slice(2, 9) };
-                         const updated = [...rounds];
-                         updated[activeRoundIdx].problems.push(newProb);
-                         setRounds(updated);
-                         setShowLibModal(false);
-                       }} className="px-6 py-3 bg-blue-600 text-white font-black rounded-xl uppercase italic text-[10px] opacity-0 group-hover:opacity-100 transition-all shadow-lg">+ Thêm</button>
-                    </div>
-                 )) : <div className="h-full flex flex-col items-center justify-center text-slate-300 italic">Chưa có dữ liệu.</div>}
+                     ))}
+                     
+                     {libVisibleCount < libQuestions.length && (
+                       <div className="pt-4 flex justify-center pb-8">
+                         <button 
+                           onClick={() => setLibVisibleCount(prev => prev + 20)}
+                           className="px-10 py-4 bg-slate-100 text-slate-600 font-black uppercase italic text-xs rounded-2xl hover:bg-blue-600 hover:text-white transition-all border-2 border-slate-200"
+                         >
+                           Xem thêm câu hỏi ({libQuestions.length - libVisibleCount} câu còn lại)
+                         </button>
+                       </div>
+                     )}
+                   </>
+                 ) : (
+                   <div className="h-full flex flex-col items-center justify-center text-slate-300 italic">
+                     Chưa có dữ liệu.
+                   </div>
+                 )}
               </div>
            </div>
         </div>
