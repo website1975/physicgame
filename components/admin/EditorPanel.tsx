@@ -1,9 +1,11 @@
 
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { PhysicsProblem, Round, Difficulty, QuestionType, DisplayChallenge, InteractiveMechanic } from '../../types';
 import LatexRenderer from '../LatexRenderer';
 import { uploadQuestionImage, fetchQuestionsLibrary } from '../../services/supabaseService';
 import { parseQuestionsFromText } from '../../services/geminiService';
+import { parseExamJSON, ParsedExamResult } from '../../services/jsonExamImporter';
+import { getChaptersForGrade, joinTopic } from '../../services/curriculumData';
 import ConfirmModal from '../ConfirmModal';
 
 interface EditorPanelProps {
@@ -15,10 +17,13 @@ interface EditorPanelProps {
   loadedSetTopic?: string | null;
   onSaveSet: (title: string, asNew: boolean, topic: string, grade: string) => Promise<void>;
   onResetToNew: () => void;
+  initialTopicData?: { grade: string; chapter: string; week: string } | null;
+  onClearInitialTopicData?: () => void;
 }
 
 const EditorPanel: React.FC<EditorPanelProps> = ({ 
-  rounds, setRounds, teacherId, loadedSetId, loadedSetTitle, loadedSetTopic, onSaveSet, onResetToNew 
+  rounds, setRounds, teacherId, loadedSetId, loadedSetTitle, loadedSetTopic, onSaveSet, onResetToNew,
+  initialTopicData, onClearInitialTopicData 
 }) => {
   const [activeRoundIdx, setActiveRoundIdx] = useState(0);
   const [editingIdx, setEditingIdx] = useState<number | null>(null);
@@ -30,8 +35,9 @@ const EditorPanel: React.FC<EditorPanelProps> = ({
   
   // State địa phương cho các ô nhập liệu
   const [currentTitle, setCurrentTitle] = useState(loadedSetTitle || '');
-  const [currentTopic, setCurrentTopic] = useState(loadedSetTopic || 'Khác');
+  const [currentTopic, setCurrentTopic] = useState(loadedSetTopic || '');
   const [currentGrade, setCurrentGrade] = useState('10');
+  const [isCustomTopicMode, setIsCustomTopicMode] = useState(false);
   
   const [roundToDeleteIdx, setRoundToDeleteIdx] = useState<number | null>(null);
   const [showLibModal, setShowLibModal] = useState(false);
@@ -40,16 +46,58 @@ const EditorPanel: React.FC<EditorPanelProps> = ({
   const [libVisibleCount, setLibVisibleCount] = useState(20);
   const [showSaveOptions, setShowSaveOptions] = useState(false);
   const [validationError, setValidationError] = useState<string | null>(null);
+  const [importSuccessMsg, setImportSuccessMsg] = useState<string | null>(null);
+  
+  // State nhập từ JSON
+  const [showJSONModal, setShowJSONModal] = useState(false);
+  const [rawJSONText, setRawJSONText] = useState('');
+  const [isImportingJSON, setIsImportingJSON] = useState(false);
+  
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const jsonFileInputRef = useRef<HTMLInputElement>(null);
 
-  // QUAN TRỌNG: Đồng bộ state khi chọn đề từ thư viện
+  // Version counter to force re-computation when curriculum is edited
+  const [curriculumVersion, setCurriculumVersion] = useState(0);
+
   useEffect(() => {
-    setCurrentTitle(loadedSetTitle || '');
-    setCurrentTopic(loadedSetTopic || 'Khác');
-    // Tìm grade từ rounds nếu có
-    const firstProb = rounds[0]?.problems?.[0];
-    if (firstProb?.grade) setCurrentGrade(firstProb.grade);
-  }, [loadedSetId, loadedSetTitle, loadedSetTopic]);
+    const handleCurriculumUpdate = () => {
+      setCurriculumVersion(v => v + 1);
+    };
+    window.addEventListener('physiquest_curriculum_updated', handleCurriculumUpdate);
+    window.addEventListener('storage', handleCurriculumUpdate);
+    return () => {
+      window.removeEventListener('physiquest_curriculum_updated', handleCurriculumUpdate);
+      window.removeEventListener('storage', handleCurriculumUpdate);
+    };
+  }, []);
+
+  // Danh sách các chương và tuần tương ứng với khối đang chọn
+  const chaptersForCurrentGrade = useMemo(() => {
+    return getChaptersForGrade(currentGrade, teacherId);
+  }, [currentGrade, teacherId, curriculumVersion]);
+
+  // QUAN TRỌNG: Đồng bộ state khi chọn đề từ thư viện hoặc từ cây chương trình
+  useEffect(() => {
+    if (initialTopicData) {
+      setCurrentGrade(initialTopicData.grade || '10');
+      const fullTopic = initialTopicData.week 
+        ? `${initialTopicData.chapter} - ${initialTopicData.week}` 
+        : initialTopicData.chapter;
+      setCurrentTopic(fullTopic);
+      setIsCustomTopicMode(false);
+      if (!currentTitle) {
+        setCurrentTitle(initialTopicData.week || initialTopicData.chapter);
+      }
+      if (onClearInitialTopicData) onClearInitialTopicData();
+    } else {
+      setCurrentTitle(loadedSetTitle || '');
+      const t = loadedSetTopic || '';
+      setCurrentTopic(t);
+      setIsCustomTopicMode(false);
+      const firstProb = rounds[0]?.problems?.[0];
+      if (firstProb?.grade) setCurrentGrade(firstProb.grade);
+    }
+  }, [loadedSetId, loadedSetTitle, loadedSetTopic, initialTopicData]);
 
   const updateProblem = (idx: number, data: Partial<PhysicsProblem>) => {
     const updated = [...rounds];
@@ -98,6 +146,70 @@ const EditorPanel: React.FC<EditorPanelProps> = ({
       console.error(e);
       setValidationError(e.message || "Lỗi khi xử lý AI");
     } finally { setIsParsing(false); }
+  };
+
+  const handleApplyParsedExam = (result: ParsedExamResult) => {
+    if (result.title) setCurrentTitle(result.title);
+    if (result.grade) setCurrentGrade(result.grade);
+    // If JSON has no chapter/week, result.topic is empty ''
+    setCurrentTopic(result.topic || '');
+    setIsCustomTopicMode(false);
+
+    setRounds(result.rounds);
+    setActiveRoundIdx(0);
+    setEditingIdx(result.rounds[0]?.problems?.length > 0 ? 0 : null);
+    
+    const weekNotice = !result.topic ? ' 👉 Xin hãy chọn Tuần cho đề thi.' : '';
+    setImportSuccessMsg(
+      `Đã nạp ${result.totalQuestions} câu hỏi (${result.mcqCount} câu TN Vòng 1, ${result.tfCount} câu Đ/S Vòng 2, ${result.shortCount} câu Trả lời ngắn Vòng 3)!${weekNotice}`
+    );
+    setShowJSONModal(false);
+    setRawJSONText('');
+  };
+
+  const handleJSONFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setIsImportingJSON(true);
+    setValidationError(null);
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const text = event.target?.result as string;
+        const result = parseExamJSON(text);
+        handleApplyParsedExam(result);
+      } catch (err: any) {
+        console.error(err);
+        setValidationError(err.message || 'Lỗi khi đọc file JSON. Vui lòng kiểm tra lại cấu trúc file!');
+      } finally {
+        setIsImportingJSON(false);
+        if (e.target) e.target.value = '';
+      }
+    };
+    reader.onerror = () => {
+      setValidationError('Không thể đọc file đã chọn.');
+      setIsImportingJSON(false);
+      if (e.target) e.target.value = '';
+    };
+    reader.readAsText(file, 'utf-8');
+  };
+
+  const handleJSONTextSubmit = () => {
+    if (!rawJSONText.trim()) {
+      setValidationError('Vui lòng dán nội dung JSON vào ô nhập!');
+      return;
+    }
+    setIsImportingJSON(true);
+    setValidationError(null);
+    try {
+      const result = parseExamJSON(rawJSONText);
+      handleApplyParsedExam(result);
+    } catch (err: any) {
+      console.error(err);
+      setValidationError(err.message || 'Dữ liệu JSON không hợp lệ hoặc thiếu câu hỏi!');
+    } finally {
+      setIsImportingJSON(false);
+    }
   };
 
   const addNewRound = () => {
@@ -168,9 +280,15 @@ const EditorPanel: React.FC<EditorPanelProps> = ({
     const file = e.target.files?.[0];
     if (!file || editingIdx === null) return;
     try {
+      setValidationError(null);
       const url = await uploadQuestionImage(file);
       updateProblem(editingIdx, { imageUrl: url });
-    } catch (e) { console.error(e); }
+    } catch (err: any) { 
+      console.error(err); 
+      setValidationError(err.message || "Không thể tải ảnh lên. Có thể dịch vụ đang bị giới hạn.");
+    } finally {
+      if (e.target) e.target.value = ''; // Reset input
+    }
   };
 
   const validateAndSave = (asNew: boolean = false) => {
@@ -243,33 +361,120 @@ const EditorPanel: React.FC<EditorPanelProps> = ({
         </div>
       )}
 
+      {importSuccessMsg && (
+        <div className="fixed top-24 left-1/2 -translate-x-1/2 z-[12000] bg-emerald-600 text-white px-8 py-3.5 rounded-full font-black text-xs uppercase shadow-2xl animate-in slide-in-from-top-4 flex items-center gap-4">
+           <span>🎉 {importSuccessMsg}</span>
+           <button onClick={() => setImportSuccessMsg(null)} className="font-black opacity-50 hover:opacity-100">✕</button>
+        </div>
+      )}
+
+      <input 
+        type="file" 
+        ref={jsonFileInputRef} 
+        accept=".json,application/json" 
+        className="hidden" 
+        onChange={handleJSONFileSelect} 
+      />
+
       <div className="bg-white p-6 rounded-[2.5rem] shadow-xl border-4 border-slate-100 flex flex-col gap-6 shrink-0">
         <div className="flex items-center gap-6">
-          <div className="flex-1 grid grid-cols-12 gap-4">
-            <div className="col-span-6">
-              <label className="text-[10px] font-black text-slate-400 uppercase italic">Tên bộ đề</label>
-              <input type="text" className={`w-full bg-slate-50 border-2 rounded-2xl px-6 py-3 font-black text-sm outline-none ${!currentTitle.trim() && validationError ? 'border-red-500 bg-red-50' : 'border-slate-100'}`} value={currentTitle} onChange={e => { setCurrentTitle(e.target.value); if(validationError) setValidationError(null); }} placeholder="Ví dụ: Kiểm tra 15 phút Chương 1" />
-            </div>
+          <div className="flex-1 grid grid-cols-12 gap-3 items-end">
             <div className="col-span-4">
-              <label className="text-[10px] font-black text-blue-400 uppercase italic">Chủ đề</label>
-              <input type="text" className={`w-full bg-slate-50 border-2 rounded-2xl px-6 py-3 font-black text-sm outline-none ${!currentTopic.trim() && validationError ? 'border-red-500 bg-red-50' : 'border-slate-100'}`} value={currentTopic} onChange={e => { setCurrentTopic(e.target.value); if(validationError) setValidationError(null); }} placeholder="Ví dụ: Động học" />
+              <label className="text-[10px] font-black text-slate-400 uppercase italic block mb-1">Tên bộ đề</label>
+              <input 
+                type="text" 
+                className={`w-full bg-slate-50 border-2 rounded-2xl px-4 py-3 font-black text-sm outline-none transition-all ${!currentTitle.trim() && validationError ? 'border-red-500 bg-red-50' : 'border-slate-100 focus:border-blue-400'}`} 
+                value={currentTitle} 
+                onChange={e => { setCurrentTitle(e.target.value); if(validationError) setValidationError(null); }} 
+                placeholder="Ví dụ: Đề ôn thi Giữa kỳ 1" 
+              />
             </div>
+            
             <div className="col-span-2">
-              <label className="text-[10px] font-black text-slate-400 uppercase italic">Khối</label>
-              <select className="w-full bg-slate-50 border-2 border-slate-100 rounded-2xl px-4 py-3 font-black text-sm outline-none" value={currentGrade} onChange={e => setCurrentGrade(e.target.value)}>
+              <label className="text-[10px] font-black text-slate-400 uppercase italic block mb-1">Khối</label>
+              <select 
+                className="w-full bg-slate-50 border-2 border-slate-100 rounded-2xl px-3 py-3 font-black text-sm outline-none focus:border-blue-400 cursor-pointer" 
+                value={currentGrade} 
+                onChange={e => {
+                  const newGrade = e.target.value;
+                  setCurrentGrade(newGrade);
+                  // Khi đổi khối, reset tuần để giáo viên chọn tuần tương ứng của khối mới
+                  setCurrentTopic('');
+                  setIsCustomTopicMode(false);
+                }}
+              >
                 {['10', '11', '12'].map(g => <option key={g} value={g}>Khối {g}</option>)}
               </select>
             </div>
+
+            <div className="col-span-6">
+              <div className="flex items-center justify-between mb-1">
+                <label className="text-[10px] font-black text-blue-500 uppercase italic flex items-center gap-1.5">
+                  <span>📅 Tuần / Chuyên đề</span>
+                  <span className="bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded text-[9px] font-black">Khối {currentGrade}</span>
+                </label>
+                <button
+                  type="button"
+                  onClick={() => setIsCustomTopicMode(!isCustomTopicMode)}
+                  className="text-[9px] font-black text-slate-400 hover:text-blue-600 uppercase underline"
+                >
+                  {isCustomTopicMode ? '📋 Chọn theo danh mục' : '✏️ Nhập tự do'}
+                </button>
+              </div>
+              
+              {isCustomTopicMode ? (
+                <input 
+                  type="text" 
+                  className="w-full bg-slate-50 border-2 border-slate-100 rounded-2xl px-4 py-3 font-black text-sm outline-none focus:border-blue-400" 
+                  value={currentTopic} 
+                  onChange={e => setCurrentTopic(e.target.value)} 
+                  placeholder="Nhập tên chương / tuần / chủ đề tự do..." 
+                />
+              ) : (
+                <select 
+                  className={`w-full bg-slate-50 border-2 rounded-2xl px-3 py-3 font-black text-sm outline-none transition-all cursor-pointer truncate ${!currentTopic ? 'border-amber-300 text-slate-400 bg-amber-50/30' : 'border-slate-100 text-slate-800 focus:border-blue-400'}`} 
+                  value={currentTopic} 
+                  onChange={e => {
+                    if (e.target.value === '__CUSTOM__') {
+                      setIsCustomTopicMode(true);
+                    } else {
+                      setCurrentTopic(e.target.value);
+                    }
+                  }}
+                >
+                  <option value="">-- Chưa chọn Tuần (Để trống) --</option>
+                  {chaptersForCurrentGrade.map(chap => (
+                    <optgroup key={chap.id} label={chap.name}>
+                      <option value={chap.name}>📂 {chap.name} (Cả chương)</option>
+                      {chap.weeks.map(w => (
+                        <option key={w.id} value={joinTopic(chap.name, w.name)}>
+                          &nbsp;&nbsp;🔹 {w.name}
+                        </option>
+                      ))}
+                    </optgroup>
+                  ))}
+                  <option value="__CUSTOM__">✏️ Nhập chuyên đề tự do khác...</option>
+                </select>
+              )}
+            </div>
           </div>
           <div className="flex gap-2">
-            <button onClick={() => setShowAIInput(!showAIInput)} className="px-8 py-5 bg-emerald-500 text-white rounded-2xl font-black italic text-sm shadow-lg">AI ✨</button>
+            <button 
+              onClick={() => setShowJSONModal(true)} 
+              className="px-6 py-5 bg-amber-500 hover:bg-amber-600 text-white rounded-2xl font-black italic text-sm shadow-lg flex items-center gap-2 border-b-4 border-amber-700 active:border-b-0 active:translate-y-1 transition-all"
+              title="Nhập đề từ file JSON (Vòng 1: TN 4 lựa chọn, Vòng 2: Đúng/Sai, Vòng 3: Trả lời ngắn)"
+            >
+              <span>📥</span>
+              <span>NHẬP JSON</span>
+            </button>
+            <button onClick={() => setShowAIInput(!showAIInput)} className="px-6 py-5 bg-emerald-500 hover:bg-emerald-600 text-white rounded-2xl font-black italic text-sm shadow-lg border-b-4 border-emerald-700 active:border-b-0 active:translate-y-1 transition-all">AI ✨</button>
             <button 
               disabled={isSaving}
               onClick={() => {
                 if (loadedSetId) setShowSaveOptions(true);
                 else validateAndSave(true);
               }} 
-              className="px-10 py-5 bg-blue-600 text-white rounded-2xl font-black italic text-sm shadow-lg border-b-4 border-blue-800 active:border-b-0 active:translate-y-1 transition-all disabled:opacity-50"
+              className="px-10 py-5 bg-blue-600 hover:bg-blue-700 text-white rounded-2xl font-black italic text-sm shadow-lg border-b-4 border-blue-800 active:border-b-0 active:translate-y-1 transition-all disabled:opacity-50"
             >
               {isSaving ? 'ĐANG LƯU...' : 'LƯU ĐỀ'}
             </button>
@@ -509,6 +714,105 @@ const EditorPanel: React.FC<EditorPanelProps> = ({
           )}
         </div>
       </div>
+
+      {showJSONModal && (
+        <div className="fixed inset-0 z-[11000] flex items-center justify-center p-6">
+          <div className="absolute inset-0 bg-slate-950/90 backdrop-blur-md" onClick={() => !isImportingJSON && setShowJSONModal(false)}></div>
+          <div className="bg-white rounded-[3rem] w-full max-w-3xl flex flex-col relative z-10 border-4 border-slate-100 shadow-2xl overflow-hidden animate-in zoom-in max-h-[90vh]">
+            <header className="p-6 md:p-8 border-b-2 border-slate-100 flex justify-between items-center bg-gradient-to-r from-amber-500/10 via-amber-50 to-orange-50">
+              <div>
+                <h3 className="text-2xl md:text-3xl font-black text-slate-800 uppercase italic flex items-center gap-3">
+                  <span className="text-3xl">📥</span>
+                  <span>NHẬP ĐỀ TỪ FILE JSON</span>
+                </h3>
+                <p className="text-[11px] font-black text-amber-600 uppercase mt-1">
+                  Tự động phân bổ vào 3 vòng thi chuẩn GDPT 2018
+                </p>
+              </div>
+              <button 
+                onClick={() => setShowJSONModal(false)} 
+                className="w-12 h-12 bg-white text-slate-400 hover:text-slate-700 rounded-2xl flex items-center justify-center font-black shadow-md border border-slate-100 transition-all"
+              >
+                ✕
+              </button>
+            </header>
+
+            <div className="p-6 md:p-8 overflow-y-auto space-y-6 flex-1 text-slate-700">
+              {/* Structure guide badges */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3 bg-slate-50 p-4 rounded-2xl border-2 border-slate-100">
+                <div className="bg-white p-3 rounded-xl border border-blue-100 shadow-sm">
+                  <div className="text-[10px] font-black text-blue-600 uppercase tracking-wider mb-1">Vòng 1 (TN 4 lựa chọn)</div>
+                  <div className="text-xs font-bold text-slate-600">Loại câu <code className="text-blue-600 font-mono">"mcq"</code> với 4 phương án và đáp án A, B, C, D</div>
+                </div>
+                <div className="bg-white p-3 rounded-xl border border-emerald-100 shadow-sm">
+                  <div className="text-[10px] font-black text-emerald-600 uppercase tracking-wider mb-1">Vòng 2 (Đúng / Sai)</div>
+                  <div className="text-xs font-bold text-slate-600">Loại câu <code className="text-emerald-600 font-mono">"group-tf"</code> với 4 ý phụ (True/False)</div>
+                </div>
+                <div className="bg-white p-3 rounded-xl border border-purple-100 shadow-sm">
+                  <div className="text-[10px] font-black text-purple-600 uppercase tracking-wider mb-1">Vòng 3 (Trả lời ngắn)</div>
+                  <div className="text-xs font-bold text-slate-600">Loại câu <code className="text-purple-600 font-mono">"short"</code> / nhập số kết quả chính xác</div>
+                </div>
+              </div>
+
+              {/* Upload file section */}
+              <div 
+                onClick={() => jsonFileInputRef.current?.click()}
+                className="border-3 border-dashed border-amber-300 hover:border-amber-500 bg-amber-50/50 hover:bg-amber-50 rounded-2xl p-6 text-center cursor-pointer transition-all group shadow-inner"
+              >
+                <div className="text-4xl mb-2 group-hover:scale-110 transition-transform">📁</div>
+                <h4 className="font-black text-sm uppercase text-slate-800 mb-1">Chọn hoặc Kéo thả tệp JSON từ máy tính</h4>
+                <p className="text-xs font-medium text-slate-500">Chấp nhận tệp định dạng .json (như đề thi xuất từ hệ thống ngân hàng đề)</p>
+                <button 
+                  type="button" 
+                  onClick={(e) => { e.stopPropagation(); jsonFileInputRef.current?.click(); }}
+                  className="mt-3 px-6 py-2.5 bg-amber-500 hover:bg-amber-600 text-white rounded-xl font-black text-xs uppercase shadow-md active:translate-y-0.5 transition-all"
+                >
+                  Duyệt tệp .JSON...
+                </button>
+              </div>
+
+              {/* Paste JSON raw text */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="text-[11px] font-black text-slate-500 uppercase tracking-wider">
+                    Hoặc Dán trực tiếp nội dung JSON vào đây:
+                  </label>
+                  {rawJSONText && (
+                    <button 
+                      onClick={() => setRawJSONText('')} 
+                      className="text-[10px] font-black text-red-500 uppercase hover:underline"
+                    >
+                      Xóa nội dung
+                    </button>
+                  )}
+                </div>
+                <textarea 
+                  value={rawJSONText}
+                  onChange={(e) => setRawJSONText(e.target.value)}
+                  placeholder='Dán nội dung JSON vào đây, ví dụ: { "title": "Đề ôn tập", "grade": "10", "questions": [ ... ] }'
+                  className="w-full h-44 p-4 bg-slate-900 text-emerald-400 font-mono text-xs rounded-2xl border-2 border-slate-800 outline-none focus:border-amber-400 resize-none shadow-inner"
+                />
+              </div>
+            </div>
+
+            <footer className="p-6 md:p-8 bg-slate-50 border-t-2 border-slate-100 flex items-center justify-between gap-4">
+              <button 
+                onClick={() => setShowJSONModal(false)}
+                className="px-6 py-4 bg-slate-200 text-slate-600 font-black rounded-2xl text-xs uppercase hover:bg-slate-300 transition-all"
+              >
+                Đóng
+              </button>
+              <button 
+                disabled={isImportingJSON || !rawJSONText.trim()}
+                onClick={handleJSONTextSubmit}
+                className="flex-1 py-4 bg-amber-500 hover:bg-amber-600 disabled:opacity-50 text-white font-black rounded-2xl text-xs uppercase italic shadow-lg shadow-amber-200 border-b-4 border-amber-700 active:border-b-0 active:translate-y-1 transition-all"
+              >
+                {isImportingJSON ? 'Đang phân tích dữ liệu JSON...' : 'Xử lý & Nạp vào 3 Vòng thi 🚀'}
+              </button>
+            </footer>
+          </div>
+        </div>
+      )}
 
       {showLibModal && (
         <div className="fixed inset-0 z-[11000] flex items-center justify-center p-6">
