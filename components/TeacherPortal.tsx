@@ -1,8 +1,9 @@
 
-import React from 'react';
+import React, { useState } from 'react';
 import { Round, AdminTab } from '../types';
 import EditorPanel from './admin/EditorPanel';
 import LibraryPanel from './admin/LibraryPanel';
+import CurriculumPanel from './admin/CurriculumPanel';
 import GameLabPanel from './admin/GameLabPanel';
 import ManagementPanel from './admin/ManagementPanel';
 import FormulaManager from './admin/FormulaManager';
@@ -44,6 +45,14 @@ const TeacherPortal: React.FC<TeacherPortalProps> = (props) => {
     onResetToNew 
   } = props;
 
+  const [initialTopicData, setInitialTopicData] = useState<{ grade: string; chapter: string; week: string } | null>(null);
+
+  const handleAddNewSetForTopic = (grade: string, chapter: string, week: string) => {
+    onResetToNew();
+    setInitialTopicData({ grade, chapter, week });
+    setAdminTab('EDITOR');
+  };
+
   return (
     <div className="min-h-screen bg-slate-50 flex relative">
       <aside className="w-72 bg-slate-900 text-white p-8 flex flex-col shrink-0">
@@ -68,6 +77,7 @@ const TeacherPortal: React.FC<TeacherPortalProps> = (props) => {
            </div>
 
            <div className="space-y-1">
+              <button onClick={() => setAdminTab('CURRICULUM')} className={`w-full text-left p-4 rounded-xl font-black text-[9px] uppercase flex items-center gap-3 ${adminTab === 'CURRICULUM' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-400 hover:bg-white/5'}`}><span>📂</span> Phân phối Chương trình</button>
               <button onClick={() => { onResetToNew(); setAdminTab('EDITOR'); }} className={`w-full text-left p-4 rounded-xl font-black text-[9px] uppercase flex items-center gap-3 ${adminTab === 'EDITOR' ? 'bg-purple-600 text-white shadow-lg' : 'text-slate-400 hover:bg-white/5'}`}><span>📝</span> Soạn thảo đề</button>
               <button onClick={() => setAdminTab('CLOUD')} className={`w-full text-left p-4 rounded-xl font-black text-[9px] uppercase flex items-center gap-3 ${adminTab === 'CLOUD' ? 'bg-sky-600 text-white shadow-lg' : 'text-slate-400 hover:bg-white/5'}`}><span>🌍</span> Kho đề của tôi</button>
               <button onClick={() => setAdminTab('LAB')} className={`w-full text-left p-4 rounded-xl font-black text-[9px] uppercase flex items-center gap-3 ${adminTab === 'LAB' ? 'bg-[#FF6D60] text-white shadow-lg' : 'text-slate-400 hover:bg-white/5'}`}><span>🎮</span> Game Arena</button>
@@ -86,16 +96,32 @@ const TeacherPortal: React.FC<TeacherPortalProps> = (props) => {
          <header className="flex justify-between items-center mb-10">
             <div>
               <h3 className="text-5xl font-black italic uppercase text-slate-900 tracking-tighter leading-none">
-                {adminTab === 'EDITOR' ? 'Workshop' : adminTab === 'CLOUD' ? 'Library' : adminTab === 'LAB' ? 'Game Lab' : adminTab === 'FORMULA' ? 'Formula Hub' : 'Directory'}
+                {adminTab === 'CURRICULUM' ? 'Curriculum' : adminTab === 'EDITOR' ? 'Workshop' : adminTab === 'CLOUD' ? 'Library' : adminTab === 'LAB' ? 'Game Lab' : adminTab === 'FORMULA' ? 'Formula Hub' : 'Directory'}
               </h3>
             </div>
          </header>
+
+         {adminTab === 'CURRICULUM' && (
+           <CurriculumPanel
+             examSets={examSets}
+             teacherId={teacherId}
+             teacherSubject={teacherSubject}
+             onLoadSet={onLoadSet}
+             onDeleteSet={onDeleteSet}
+             onRefresh={onRefreshSets}
+             isLoadingSets={isLoadingSets}
+             onEdit={(id, title) => { onLoadSet(id, title); setAdminTab('EDITOR'); }}
+             onAddNewSetForTopic={handleAddNewSetForTopic}
+           />
+         )}
 
          {adminTab === 'EDITOR' && (
            <EditorPanel 
              rounds={rounds} setRounds={setRounds} teacherId={teacherId} 
              loadedSetId={loadedSetId} loadedSetTitle={loadedSetTitle || ''} 
              loadedSetTopic={loadedSetTopic} onSaveSet={onSaveSet} onResetToNew={onResetToNew}
+             initialTopicData={initialTopicData}
+             onClearInitialTopicData={() => setInitialTopicData(null)}
            />
          )}
 
