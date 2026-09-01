@@ -32,15 +32,15 @@ const StudentArenaFlow: React.FC<StudentArenaFlowProps> = (props) => {
 
   if (gameState === 'ROOM_SELECTION') {
     return (
-      <div className="min-h-screen p-8 flex flex-col items-center justify-center bg-slate-950">
-        <div className="absolute top-8 right-8">
-          <button onClick={() => setGameState('LOBBY')} className="bg-red-500/10 hover:bg-red-500 text-red-500 hover:text-white px-8 py-4 rounded-2xl border-2 border-red-500/20 transition-all font-black uppercase italic text-sm">🚪 Thoát</button>
+      <div className="min-h-screen p-4 sm:p-6 md:p-8 flex flex-col items-center justify-center bg-slate-950">
+        <div className="absolute top-4 right-4 sm:top-6 sm:right-6">
+          <button onClick={() => setGameState('LOBBY')} className="bg-red-500/10 hover:bg-red-500 text-red-500 hover:text-white px-4 py-2 rounded-xl border border-red-500/20 transition-all font-black uppercase italic text-xs">🚪 Thoát</button>
         </div>
-        <div className="text-center mb-12">
-          <h2 className="text-6xl font-black text-white italic uppercase tracking-tighter">Hệ thống Đấu Trường</h2>
-          <p className="text-blue-400 font-bold uppercase text-[10px] mt-2 tracking-[0.3em]">Chiến binh: {playerName} <span className="opacity-40">#{uniqueId.slice(-3).toUpperCase()}</span></p>
+        <div className="text-center mb-8">
+          <h2 className="text-3xl sm:text-4xl md:text-5xl font-black text-white italic uppercase tracking-tighter">HỆ THỐNG ĐẤU TRƯỜNG</h2>
+          <p className="text-blue-400 font-bold uppercase text-[9px] mt-1.5 tracking-[0.25em]">Chiến binh: {playerName} <span className="opacity-40">#{uniqueId.slice(-3).toUpperCase()}</span> • Khối {studentGrade}</p>
         </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-6 w-full max-w-7xl">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4 w-full max-w-6xl">
           {ARENA_ROOMS.map(room => (
             <button 
               key={room.code} 
@@ -52,11 +52,11 @@ const StudentArenaFlow: React.FC<StudentArenaFlowProps> = (props) => {
                   setGameState('WAITING_FOR_PLAYERS');
                 }
               }} 
-              className="bg-white p-8 rounded-[4rem] flex flex-col items-center gap-6 hover:scale-105 transition-all shadow-2xl group relative"
+              className="bg-white p-5 rounded-2xl flex flex-col items-center gap-3 hover:scale-102 hover:shadow-xl transition-all shadow-md group relative text-center border border-slate-100"
             >
-              <div className={`text-5xl p-6 rounded-[2rem] ${room.color} text-white shadow-lg`}>{room.emoji}</div>
-              <div className="font-black text-slate-800 uppercase italic text-lg">{room.name}</div>
-              <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">{room.desc}</div>
+              <div className={`text-3xl p-4 rounded-xl ${room.color} text-white shadow-xs`}>{room.emoji}</div>
+              <div className="font-black text-slate-800 uppercase italic text-sm">{room.name}</div>
+              <div className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">{room.desc}</div>
             </button>
           ))}
         </div>
